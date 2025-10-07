@@ -1,41 +1,28 @@
-// Update product weight in Shopify (called from weight warning popup)
-router.patch('/items/:id/update-weight', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { weight } = req.body;
-
-    const item = db.prepare('SELECT * FROM line_items WHERE id = ?').get(id);
-    
-    if (!item) {
-      return res.status(404).json({ error: 'Item not found' });
-    }
-
-    // Update local database
-    db.prepare(`
-      UPDATE line_items 
-      SET weight = ?, weight_unit = 'g', updated_at = datetime('now')
-      WHERE id = ?
-    `).run(weight, id);
-
-    // Update Shopify product variant weight via API
-    try {
-      const shopifyClient = require('../shopify/client');
-      // Extract variant ID from shopify_line_item_id
-      const variantId = item.shopify_line_item_id.split('_')[0];
-      await shopifyClient.updateVariantWeight(variantId, weight);
-    } catch (shopifyError) {
-      console.error('Error updating Shopify weight:', shopifyError);
-      // Continue even if Shopify update fails
-    }
-
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Error updating weight:', error);
-    res.status(500).json({ error: error.message });
-  }
-});const express = require('express');
+const express = require('express');
 const router = express.Router();
 const db = require('../database/init');
+
+// Unified function to calculate order status
+function calculateOrderStatus(order, lineItems, transferItems) {
+  if (order.status === 'holding') {
+    return 'holding';
+  }
+
+  // 如果有 transferring 或 waiting 状态的 transfer item，订单状态为 waiting
+  const waitingOrTransferringItems = transferItems.filter(ti => 
+    ti.status === 'waiting' || ti.status === 'transferring'
+  );
+  if (waitingOrTransferringItems.length > 0) {
+    return 'waiting';
+  }
+
+  const allReady = lineItems.length > 0 && lineItems.every(item => item.packer_status === 'ready');
+  if (allReady) {
+    return 'ready';
+  }
+
+  return 'packing';
+}
 
 // Get all orders for packer
 router.get('/orders', (req, res) => {
@@ -46,7 +33,6 @@ router.get('/orders', (req, res) => {
       ORDER BY created_at DESC
     `).all();
 
-    // Get line items and transfer info for each order
     const ordersWithDetails = orders.map(order => {
       const lineItems = db.prepare(`
         SELECT * FROM line_items 
@@ -54,7 +40,6 @@ router.get('/orders', (req, res) => {
         ORDER BY id
       `).all(order.shopify_order_id);
 
-      // Get transfer items for this order
       const transferItems = db.prepare(`
         SELECT ti.*, li.id as line_item_id
         FROM transfer_items ti
@@ -62,30 +47,22 @@ router.get('/orders', (req, res) => {
         WHERE ti.shopify_order_id = ?
       `).all(order.shopify_order_id);
 
-      // Check for weight warnings
-      const hasWeightWarning = lineItems.some(item => 
-        item.weight === 0 || item.weight_unit !== 'g'
-      );
+      // 使用永久标记检查 weight warning
+      const hasWeightWarning = lineItems.some(item => item.has_weight_warning === 1);
 
-      // Calculate order status
-      let orderStatus = order.status || 'packing';
+      const orderStatus = calculateOrderStatus(order, lineItems, transferItems);
+
+      let transferInfo = null;
+      // 获取所有 waiting 状态的 item
       const waitingItems = transferItems.filter(ti => ti.status === 'waiting');
-      const transferringItems = transferItems.filter(ti => ti.status === 'transferring');
       
       if (waitingItems.length > 0) {
-        orderStatus = 'waiting';
-      } else {
-        const allPacked = lineItems.every(item => item.packer_status === 'ready');
-        if (allPacked && lineItems.length > 0) {
-          orderStatus = 'ready';
-        }
-      }
-
-      // Calculate transfer info for waiting orders
-      let transferInfo = null;
-      if (orderStatus === 'waiting') {
         const totalQuantity = waitingItems.reduce((sum, item) => sum + item.quantity, 0);
+        
+        // 获取所有不同的 transfer_from，去重并过滤空值
         const transferFroms = [...new Set(waitingItems.map(item => item.transfer_from))].filter(Boolean);
+        
+        // 找到最晚的日期
         const latestDate = waitingItems.reduce((latest, item) => {
           if (!item.estimate_month || !item.estimate_day) return latest;
           const itemDate = item.estimate_month * 100 + item.estimate_day;
@@ -94,11 +71,13 @@ router.get('/orders', (req, res) => {
 
         transferInfo = {
           quantity: totalQuantity,
-          transferFroms,
+          transferFroms: transferFroms, // 所有的 transfer_from
           estimateMonth: Math.floor(latestDate / 100),
           estimateDay: latestDate % 100
         };
       }
+
+      const transferringItems = transferItems.filter(ti => ti.status === 'transferring');
 
       return {
         ...order,
@@ -114,7 +93,7 @@ router.get('/orders', (req, res) => {
     res.json(ordersWithDetails);
   } catch (error) {
     console.error('Error fetching packer orders:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Failed to fetch orders: ' + error.message });
   }
 });
 
@@ -135,11 +114,12 @@ router.get('/orders/:shopifyOrderId', (req, res) => {
       ORDER BY id
     `).all(shopifyOrderId);
 
-    // Get transfer status for each line item
     const lineItemsWithTransfer = lineItems.map(item => {
       const transferItem = db.prepare(`
         SELECT * FROM transfer_items 
         WHERE line_item_id = ?
+        ORDER BY created_at DESC
+        LIMIT 1
       `).get(item.id);
 
       return {
@@ -160,15 +140,18 @@ router.get('/orders/:shopifyOrderId', (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching order details:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Failed to fetch order details: ' + error.message });
   }
 });
 
-// Update order status
-router.patch('/orders/:shopifyOrderId/status', (req, res) => {
+router.patch('/orders/:shopifyOrderId', (req, res) => {
   try {
     const { shopifyOrderId } = req.params;
     const { status } = req.body;
+
+    if (!status) {
+      return res.status(400).json({ error: 'Status is required' });
+    }
 
     db.prepare(`
       UPDATE orders 
@@ -179,15 +162,40 @@ router.patch('/orders/:shopifyOrderId/status', (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error('Error updating order status:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Failed to update order status: ' + error.message });
   }
 });
 
-// Update line item packer status
+router.patch('/orders/:shopifyOrderId/status', (req, res) => {
+  try {
+    const { shopifyOrderId } = req.params;
+    const { status } = req.body;
+
+    if (!status) {
+      return res.status(400).json({ error: 'Status is required' });
+    }
+
+    db.prepare(`
+      UPDATE orders 
+      SET status = ?, updated_at = datetime('now')
+      WHERE shopify_order_id = ?
+    `).run(status, shopifyOrderId);
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error updating order status:', error);
+    res.status(500).json({ error: 'Failed to update order status: ' + error.message });
+  }
+});
+
 router.patch('/items/:id/packer-status', (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
+
+    if (!status) {
+      return res.status(400).json({ error: 'Status is required' });
+    }
 
     db.prepare(`
       UPDATE line_items 
@@ -198,15 +206,18 @@ router.patch('/items/:id/packer-status', (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error('Error updating item packer status:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Failed to update item status: ' + error.message });
   }
 });
 
-// Complete order (set box and weight)
 router.post('/orders/:shopifyOrderId/complete', (req, res) => {
   try {
     const { shopifyOrderId } = req.params;
     const { boxType, weight } = req.body;
+
+    if (!boxType) {
+      return res.status(400).json({ error: 'Box type is required' });
+    }
 
     db.prepare(`
       UPDATE orders 
@@ -217,30 +228,84 @@ router.post('/orders/:shopifyOrderId/complete', (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error('Error completing order:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Failed to complete order: ' + error.message });
   }
 });
 
-// Update product weight in Shopify (called from weight warning popup)
-router.patch('/items/:id/update-weight', (req, res) => {
+router.patch('/items/:id/update-weight', async (req, res) => {
   try {
     const { id } = req.params;
     const { weight } = req.body;
 
-    // Update local database
+    console.log('\n========== WEIGHT UPDATE REQUEST ==========');
+    console.log(`Item ID: ${id}`);
+    console.log(`New weight: ${weight}g`);
+
+    if (!weight || weight <= 0) {
+      console.log('✗ Invalid weight value');
+      return res.status(400).json({ error: 'Valid weight is required' });
+    }
+
+    const item = db.prepare('SELECT * FROM line_items WHERE id = ?').get(id);
+    
+    if (!item) {
+      console.log('✗ Item not found in database');
+      return res.status(404).json({ error: 'Item not found' });
+    }
+
+    console.log('Item details:');
+    console.log(`  SKU: ${item.sku || 'N/A'}`);
+    console.log(`  Brand: ${item.brand || 'N/A'}`);
+    console.log(`  Title: ${item.title || 'N/A'}`);
+    console.log(`  Current weight: ${item.weight}${item.weight_unit}`);
+    console.log(`  Has weight warning: ${item.has_weight_warning}`);
+
+    // 只更新 weight 和 weight_unit，不改变 has_weight_warning
     db.prepare(`
       UPDATE line_items 
       SET weight = ?, weight_unit = 'g', updated_at = datetime('now')
       WHERE id = ?
     `).run(weight, id);
 
-    // TODO: Also update Shopify product variant weight via API
-    // This requires additional Shopify API integration
+    console.log('✓ Local database updated successfully');
 
-    res.json({ success: true });
+    let shopifyUpdateSuccess = false;
+    let shopifyError = null;
+
+    if (item.sku) {
+      try {
+        console.log(`\nAttempting Shopify update for SKU: ${item.sku}`);
+        const shopifyClient = require('../shopify/client');
+        const result = await shopifyClient.updateVariantWeightBySku(item.sku, weight);
+        shopifyUpdateSuccess = true;
+        console.log('✓ Shopify update SUCCESS');
+        console.log('Updated variant details:');
+        console.log(`  Variant ID: ${result.id}`);
+        console.log(`  Weight: ${result.weight}${result.weight_unit}`);
+      } catch (shopifyErr) {
+        shopifyError = shopifyErr.message;
+        console.error('✗ Shopify update FAILED');
+        console.error('Error message:', shopifyErr.message);
+        if (shopifyErr.response) {
+          console.error('Response status:', shopifyErr.response.status);
+          console.error('Response data:', JSON.stringify(shopifyErr.response.data, null, 2));
+        }
+        console.error('Full error stack:', shopifyErr.stack);
+      }
+    } else {
+      console.log('⚠ No SKU found for this item, skipping Shopify update');
+    }
+
+    console.log('========================================\n');
+
+    res.json({ 
+      success: true,
+      shopifyUpdated: shopifyUpdateSuccess,
+      shopifyError: shopifyError
+    });
   } catch (error) {
     console.error('Error updating weight:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Failed to update weight: ' + error.message });
   }
 });
 

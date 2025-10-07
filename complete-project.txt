@@ -1,0 +1,3140 @@
+=== PROJECT STRUCTURE ===
+
+
+
+===================
+FILE: client\package.json
+===================
+{
+  "name": "warehouse-client",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.20.0",
+    "react-scripts": "5.0.1",
+    "axios": "^1.6.2",
+    "@shopify/polaris": "^12.0.0",
+    "@shopify/polaris-icons": "^8.0.0"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "test": "react-scripts test",
+    "eject": "react-scripts eject"
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app"
+    ]
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "proxy": "http://localhost:3001"
+}
+
+===================
+FILE: client\src\App.js
+===================
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { AppProvider } from '@shopify/polaris';
+import '@shopify/polaris/build/esm/styles.css';
+import enTranslations from '@shopify/polaris/locales/en.json';
+import Dashboard from './pages/Dashboard';
+import Picker from './pages/Picker';
+import Transfer from './pages/Transfer';
+import Packer from './pages/Packer';
+import OrderDetail from './pages/OrderDetail';
+import Settings from './pages/Settings';
+
+function App() {
+  return (
+    <AppProvider i18n={enTranslations}>
+      <Router>
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/picker" element={<Picker />} />
+          <Route path="/transfer" element={<Transfer />} />
+          <Route path="/packer" element={<Packer />} />
+          <Route path="/packer/order/:shopifyOrderId" element={<OrderDetail />} />
+          <Route path="/settings" element={<Settings />} />
+        </Routes>
+      </Router>
+    </AppProvider>
+  );
+}
+
+export default App;
+
+===================
+FILE: client\src\index.js
+===================
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App';
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+
+===================
+FILE: client\src\pages\Dashboard.js
+===================
+import React from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Page, Layout, Card, Button } from '@shopify/polaris';
+import { PackageIcon, TransferIcon, OrderIcon, SettingsIcon } from '@shopify/polaris-icons';
+
+const Dashboard = () => {
+  const navigate = useNavigate();
+
+  return (
+    <Page title="Warehouse Management">
+      <Layout>
+        <Layout.Section>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1rem' }}>
+            <Card>
+              <div style={{ padding: '1rem' }}>
+                <Button
+                  variant="primary"
+                  size="large"
+                  fullWidth
+                  onClick={() => navigate('/picker')}
+                  icon={PackageIcon}
+                >
+                  Picker
+                </Button>
+              </div>
+            </Card>
+
+            <Card>
+              <div style={{ padding: '1rem' }}>
+                <Button
+                  variant="primary"
+                  size="large"
+                  fullWidth
+                  onClick={() => navigate('/transfer')}
+                  icon={TransferIcon}
+                >
+                  Transfer
+                </Button>
+              </div>
+            </Card>
+
+            <Card>
+              <div style={{ padding: '1rem' }}>
+                <Button
+                  variant="primary"
+                  size="large"
+                  fullWidth
+                  onClick={() => navigate('/packer')}
+                  icon={OrderIcon}
+                >
+                  Packer
+                </Button>
+              </div>
+            </Card>
+
+            <Card>
+              <div style={{ padding: '1rem' }}>
+                <Button
+                  size="large"
+                  fullWidth
+                  onClick={() => navigate('/settings')}
+                  icon={SettingsIcon}
+                >
+                  Settings
+                </Button>
+              </div>
+            </Card>
+          </div>
+        </Layout.Section>
+      </Layout>
+    </Page>
+  );
+};
+
+export default Dashboard;
+
+===================
+FILE: client\src\pages\OrderDetail.js
+===================
+import React from 'react';
+import { useNavigate } from 'react-router-dom';
+
+const OrderDetail = () => {
+  const navigate = useNavigate();
+
+  return (
+    <div style={{ padding: '20px' }}>
+      <button onClick={() => navigate('/packer')}>Back to Packer</button>
+      <h1>Order Detail Page</h1>
+      <p>This is a test page</p>
+    </div>
+  );
+};
+
+export default OrderDetail;
+
+===================
+FILE: client\src\pages\Packer.js
+===================
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import axios from 'axios';
+import {
+  Page,
+  Layout,
+  Card,
+  ResourceList,
+  ResourceItem,
+  Text,
+  Badge,
+  InlineStack,
+  BlockStack,
+  ChoiceList,
+  Banner,
+  Icon
+} from '@shopify/polaris';
+import { AlertCircleIcon, CheckCircleIcon, InfoIcon } from '@shopify/polaris-icons';
+
+const Packer = () => {
+  const navigate = useNavigate();
+  const [orders, setOrders] = useState([]);
+  const [filteredOrders, setFilteredOrders] = useState([]);
+  const [statusFilter, setStatusFilter] = useState(['packing', 'waiting', 'ready', 'holding']);
+
+  useEffect(() => {
+    fetchOrders();
+    const interval = setInterval(fetchOrders, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    applyFilters();
+  }, [orders, statusFilter]);
+
+  const fetchOrders = async () => {
+    try {
+      const response = await axios.get('/api/packer/orders');
+      setOrders(response.data);
+    } catch (error) {
+      console.error('Error fetching orders:', error);
+    }
+  };
+
+  const applyFilters = () => {
+    const filtered = orders.filter(order => {
+      const status = order.status || order.orderStatus;
+      return statusFilter.includes(status);
+    });
+    setFilteredOrders(filtered);
+  };
+
+  const handleOrderClick = (order) => {
+    navigate(`/packer/order/${order.shopify_order_id}`);
+  };
+
+  const handleStatusClick = async (order, e) => {
+    e.stopPropagation();
+    const currentStatus = order.status || order.orderStatus;
+    const newStatus = currentStatus === 'holding' ? order.orderStatus : 'holding';
+
+    try {
+      await axios.patch(`/api/packer/orders/${order.shopify_order_id}/status`, {
+        status: newStatus
+      });
+      await fetchOrders();
+    } catch (error) {
+      console.error('Error updating order status:', error);
+    }
+  };
+
+  const getOrderBadge = (order) => {
+    const status = order.status || order.orderStatus;
+    switch (status) {
+      case 'ready':
+        return <Badge tone="success">Ready</Badge>;
+      case 'waiting':
+        return <Badge tone="info">Waiting</Badge>;
+      case 'holding':
+        return <Badge tone="warning">Holding</Badge>;
+      default:
+        return <Badge>Packing</Badge>;
+    }
+  };
+
+  const renderOrder = (order) => {
+    const status = order.status || order.orderStatus;
+    const { name, hasWeightWarning, box_type, weight, shipping_code, transferInfo, hasTransferring } = order;
+
+    return (
+      <ResourceItem
+        id={order.shopify_order_id}
+        onClick={() => handleOrderClick(order)}
+        verticalAlignment="center"
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+          <div style={{ flex: 1 }}>
+            <BlockStack gap="2">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Text variant="headingMd" as="h3">
+                  {name}
+                </Text>
+                {hasWeightWarning && (
+                  <Icon source={AlertCircleIcon} tone="critical" />
+                )}
+              </div>
+
+              {status === 'ready' && (
+                <InlineStack gap="2">
+                  {box_type && (
+                    <Badge>Box: {box_type}</Badge>
+                  )}
+                  {weight && (
+                    <Badge>{weight}</Badge>
+                  )}
+                  {shipping_code && (
+                    <Text variant="bodySm" color="subdued">
+                      {shipping_code}
+                    </Text>
+                  )}
+                </InlineStack>
+              )}
+
+              {status === 'waiting' && transferInfo && (
+                <Text variant="bodySm" color="subdued">
+                  {transferInfo.quantity} items from {transferInfo.transferFroms.join(', ')} - 
+                  Est: {transferInfo.estimateMonth}/{transferInfo.estimateDay}
+                </Text>
+              )}
+
+              <div>{getOrderBadge(order)}</div>
+            </BlockStack>
+          </div>
+
+          <div onClick={(e) => handleStatusClick(order, e)} style={{ cursor: 'pointer', padding: '8px' }}>
+            {status === 'holding' ? (
+              <div style={{ width: '32px', height: '32px', background: '#B98900', borderRadius: '50%' }} />
+            ) : status === 'ready' ? (
+              <div style={{ position: 'relative' }}>
+                <Icon source={CheckCircleIcon} tone="success" />
+                {hasTransferring && (
+                  <div style={{
+                    position: 'absolute',
+                    top: '-4px',
+                    right: '-4px',
+                    width: '12px',
+                    height: '12px',
+                    background: '#0080FF',
+                    borderRadius: '50%',
+                    border: '2px solid white'
+                  }} />
+                )}
+              </div>
+            ) : status === 'waiting' ? (
+              <Icon source={InfoIcon} tone="info" />
+            ) : (
+              <div style={{ position: 'relative' }}>
+                <div style={{ width: '32px', height: '32px', border: '2px solid #666', borderRadius: '50%' }} />
+                {hasTransferring && (
+                  <div style={{
+                    position: 'absolute',
+                    top: '-4px',
+                    right: '-4px',
+                    width: '14px',
+                    height: '14px',
+                    background: '#0080FF',
+                    borderRadius: '50%',
+                    border: '2px solid white'
+                  }} />
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </ResourceItem>
+    );
+  };
+
+  return (
+    <Page
+      title="Packer"
+      backAction={{ content: 'Dashboard', onAction: () => navigate('/') }}
+    >
+      <Layout>
+        <Layout.Section>
+          <Card>
+            <div style={{ padding: '16px' }}>
+              <ChoiceList
+                title="Show orders"
+                choices={[
+                  { label: 'Packing', value: 'packing' },
+                  { label: 'Waiting', value: 'waiting' },
+                  { label: 'Ready', value: 'ready' },
+                  { label: 'Holding', value: 'holding' }
+                ]}
+                selected={statusFilter}
+                onChange={setStatusFilter}
+                allowMultiple
+              />
+            </div>
+          </Card>
+        </Layout.Section>
+
+        <Layout.Section>
+          <Card>
+            <ResourceList
+              items={filteredOrders}
+              renderItem={renderOrder}
+              emptyState={<Banner>No orders to pack</Banner>}
+            />
+          </Card>
+        </Layout.Section>
+      </Layout>
+    </Page>
+  );
+};
+
+export default Packer;
+
+===================
+FILE: client\src\pages\Picker.js
+===================
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import axios from 'axios';
+import {
+  Page,
+  Layout,
+  Card,
+  ResourceList,
+  ResourceItem,
+  Thumbnail,
+  Text,
+  Badge,
+  Button,
+  ButtonGroup,
+  ChoiceList,
+  Modal,
+  TextField,
+  InlineStack,
+  BlockStack,
+  Banner
+} from '@shopify/polaris';
+import { SortIcon, ImageIcon } from '@shopify/polaris-icons';
+
+const Picker = () => {
+  const navigate = useNavigate();
+  const [items, setItems] = useState([]);
+  const [filteredItems, setFilteredItems] = useState([]);
+  const [isSorted, setIsSorted] = useState(false);
+  const [statusFilter, setStatusFilter] = useState(['picking', 'missing', 'picked']);
+  const [selectedImage, setSelectedImage] = useState(null);
+  const [quantityModal, setQuantityModal] = useState(null);
+  const [pickedQuantity, setPickedQuantity] = useState('');
+
+  useEffect(() => {
+    fetchItems();
+  }, []);
+
+  useEffect(() => {
+    applyFilters();
+  }, [items, statusFilter]);
+
+  const fetchItems = async () => {
+    try {
+      const response = await axios.get('/api/picker/items');
+      setItems(response.data);
+    } catch (error) {
+      console.error('Error fetching items:', error);
+    }
+  };
+
+  const applyFilters = () => {
+    const filtered = items.filter(item => statusFilter.includes(item.picker_status));
+    setFilteredItems(filtered);
+  };
+
+  const handleSort = () => {
+    if (!isSorted) {
+      const sorted = [...filteredItems].sort((a, b) => {
+        const typeA = a.sort_type || '';
+        const typeB = b.sort_type || '';
+        return typeA.localeCompare(typeB);
+      });
+      setFilteredItems(sorted);
+      setIsSorted(true);
+    } else {
+      applyFilters();
+      setIsSorted(false);
+    }
+  };
+
+  const updateItemStatus = async (itemId, newStatus) => {
+    try {
+      await axios.patch(`/api/picker/items/${itemId}/status`, { status: newStatus });
+      setItems(items.map(item => 
+        item.id === itemId ? { ...item, picker_status: newStatus } : item
+      ));
+    } catch (error) {
+      console.error('Error updating status:', error);
+    }
+  };
+
+  const handleGreenClick = (item) => {
+    if (item.picker_status === 'picked') {
+      updateItemStatus(item.id, 'picking');
+    } else {
+      updateItemStatus(item.id, 'picked');
+    }
+  };
+
+  const handleRedClick = (item) => {
+    if (item.quantity === 1) {
+      updateItemStatus(item.id, 'missing');
+    } else {
+      setQuantityModal(item);
+      setPickedQuantity('');
+    }
+  };
+
+  const handleQuantitySubmit = async () => {
+    const qty = parseInt(pickedQuantity);
+    if (!qty || qty >= quantityModal.quantity || qty < 1) {
+      alert(`Please enter a valid quantity (1-${quantityModal.quantity - 1})`);
+      return;
+    }
+
+    try {
+      await axios.post(`/api/picker/items/${quantityModal.id}/split`, {
+        pickedQuantity: qty
+      });
+      await fetchItems();
+      setQuantityModal(null);
+      setPickedQuantity('');
+    } catch (error) {
+      console.error('Error splitting item:', error);
+    }
+  };
+
+  const getItemBadge = (status) => {
+    switch (status) {
+      case 'picked':
+        return <Badge tone="success">Picked</Badge>;
+      case 'missing':
+        return <Badge tone="critical">Missing</Badge>;
+      default:
+        return <Badge>Picking</Badge>;
+    }
+  };
+
+  const renderItem = (item) => {
+    const { id, quantity, image_url, order_name, display_type, sku, brand, title, size, picker_status, url_handle } = item;
+    const media = image_url ? (
+      <Thumbnail
+        source={image_url}
+        alt={title}
+        size="large"
+      />
+    ) : (
+      <Thumbnail source={ImageIcon} alt="No image" size="large" />
+    );
+
+    return (
+      <ResourceItem id={id} media={media}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+          <div style={{ flex: 1 }}>
+            <BlockStack gap="2">
+              <Text variant="bodyMd" as="h3" fontWeight="semibold">
+                Order: {order_name} | Qty: {quantity}
+              </Text>
+              <Text variant="bodySm" color="subdued">
+                Type: {display_type}
+              </Text>
+              <Text variant="bodySm" color="subdued">
+                SKU: {sku}
+              </Text>
+              <Text variant="bodySm">
+                {brand} {title} {size}
+              </Text>
+              <div>{getItemBadge(picker_status)}</div>
+            </BlockStack>
+          </div>
+          <div>
+            <ButtonGroup>
+              {picker_status === 'picked' ? (
+                <Button variant="primary" onClick={() => handleGreenClick(item)}>
+                  Undo
+                </Button>
+              ) : (
+                <>
+                  <Button tone="critical" onClick={() => handleRedClick(item)}>
+                    Missing
+                  </Button>
+                  <Button variant="primary" onClick={() => handleGreenClick(item)}>
+                    Picked
+                  </Button>
+                </>
+              )}
+            </ButtonGroup>
+          </div>
+        </div>
+      </ResourceItem>
+    );
+  };
+
+  return (
+    <Page
+      title="Picker"
+      backAction={{ content: 'Dashboard', onAction: () => navigate('/') }}
+      primaryAction={{
+        content: isSorted ? 'Unsort' : 'Sort by Type',
+        icon: SortIcon,
+        onAction: handleSort
+      }}
+    >
+      <Layout>
+        <Layout.Section>
+          <Card>
+            <div style={{ padding: '16px' }}>
+              <ChoiceList
+                title="Show items"
+                choices={[
+                  { label: 'Picking', value: 'picking' },
+                  { label: 'Missing', value: 'missing' },
+                  { label: 'Picked', value: 'picked' }
+                ]}
+                selected={statusFilter}
+                onChange={setStatusFilter}
+                allowMultiple
+              />
+            </div>
+          </Card>
+        </Layout.Section>
+
+        <Layout.Section>
+          <Card>
+            <ResourceList
+              items={filteredItems}
+              renderItem={renderItem}
+              emptyState={<Banner>No items to pick</Banner>}
+            />
+          </Card>
+        </Layout.Section>
+      </Layout>
+
+      <Modal
+        open={selectedImage !== null}
+        onClose={() => setSelectedImage(null)}
+        title="Product Image"
+      >
+        <Modal.Section>
+          {selectedImage && (
+            <>
+              <img src={selectedImage.url} alt="Product" style={{ width: '100%' }} />
+              <div style={{ marginTop: '16px' }}>
+                <Button url={selectedImage.link} external>
+                  View Product
+                </Button>
+              </div>
+            </>
+          )}
+        </Modal.Section>
+      </Modal>
+
+      <Modal
+        open={quantityModal !== null}
+        onClose={() => setQuantityModal(null)}
+        title="Enter Picked Quantity"
+        primaryAction={{
+          content: 'Submit',
+          onAction: handleQuantitySubmit
+        }}
+        secondaryActions={[
+          {
+            content: 'Cancel',
+            onAction: () => setQuantityModal(null)
+          }
+        ]}
+      >
+        <Modal.Section>
+          {quantityModal && (
+            <>
+              <Text>Total quantity: {quantityModal.quantity}</Text>
+              <div style={{ marginTop: '16px' }}>
+                <TextField
+                  label="Picked quantity"
+                  type="number"
+                  value={pickedQuantity}
+                  onChange={setPickedQuantity}
+                  min={1}
+                  max={quantityModal.quantity - 1}
+                  autoComplete="off"
+                />
+              </div>
+            </>
+          )}
+        </Modal.Section>
+      </Modal>
+    </Page>
+  );
+};
+
+export default Picker;
+
+===================
+FILE: client\src\pages\Settings.js
+===================
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import axios from 'axios';
+import { Page, Layout, Card, TextField, Button } from '@shopify/polaris';
+
+const Settings = () => {
+  const navigate = useNavigate();
+  const [transferColumn, setTransferColumn] = useState('E');
+  const [pickerColumn, setPickerColumn] = useState('E');
+  const [skuColumn, setSkuColumn] = useState('A');
+  const [boxTypes, setBoxTypes] = useState([]);
+  const [lastUpload, setLastUpload] = useState('');
+  const [newBoxCode, setNewBoxCode] = useState('');
+  const [newBoxDimensions, setNewBoxDimensions] = useState('');
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    fetchSettings();
+  }, []);
+
+  const fetchSettings = async () => {
+    try {
+      const response = await axios.get('/api/settings');
+      setTransferColumn(response.data.settings.transfer_csv_column || 'E');
+      setPickerColumn(response.data.settings.picker_wig_column || 'E');
+      setSkuColumn(response.data.settings.sku_column || 'A');
+      setBoxTypes(response.data.boxTypes || []);
+      setLastUpload(response.data.settings.csv_uploaded_at || '');
+    } catch (error) {
+      console.error('Error:', error);
+      showMessage('Error loading settings');
+    }
+  };
+
+  const handleSave = async () => {
+    try {
+      await axios.post('/api/settings/update', {
+        transferCsvColumn: transferColumn,
+        pickerWigColumn: pickerColumn,
+        skuColumn: skuColumn
+      });
+      showMessage('Settings saved successfully!');
+    } catch (error) {
+      showMessage('Error saving settings');
+    }
+  };
+
+  const handleFileChange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const res = await axios.post('/api/settings/upload-csv', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      setLastUpload(res.data.uploadedAt);
+      showMessage(`CSV uploaded! ${res.data.rowsImported} rows imported`);
+      e.target.value = '';
+    } catch (err) {
+      showMessage('Upload failed');
+    }
+  };
+
+  const handleAddBox = async () => {
+    if (!newBoxCode) {
+      showMessage('Please enter a box code');
+      return;
+    }
+
+    try {
+      await axios.post('/api/settings/box-types', {
+        code: newBoxCode.toUpperCase(),
+        dimensions: newBoxDimensions
+      });
+      setNewBoxCode('');
+      setNewBoxDimensions('');
+      await fetchSettings();
+      showMessage('Box type added!');
+    } catch (error) {
+      showMessage(error.response?.data?.error || 'Error adding box type');
+    }
+  };
+
+  const handleDeleteBox = async (id) => {
+    try {
+      await axios.delete(`/api/settings/box-types/${id}`);
+      await fetchSettings();
+      showMessage('Box type deleted!');
+    } catch (error) {
+      showMessage('Error deleting box type');
+    }
+  };
+
+  const handleBoxUpdate = async (id, code, dimensions) => {
+    try {
+      await axios.patch(`/api/settings/box-types/${id}`, {
+        code: code.toUpperCase(),
+        dimensions
+      });
+      showMessage('Box type updated!');
+    } catch (error) {
+      showMessage(error.response?.data?.error || 'Error updating box type');
+    }
+  };
+
+  const showMessage = (msg) => {
+    setMessage(msg);
+    setTimeout(() => setMessage(''), 3000);
+  };
+
+  return (
+    <Page
+      title="Settings"
+      backAction={{ content: 'Dashboard', onAction: () => navigate('/') }}
+      primaryAction={{ content: 'Save', onAction: handleSave }}
+    >
+      {message && (
+        <div style={{ 
+          padding: '12px', 
+          marginBottom: '16px', 
+          backgroundColor: '#d4edda', 
+          borderRadius: '4px',
+          border: '1px solid #c3e6cb'
+        }}>
+          {message}
+        </div>
+      )}
+
+      <Layout>
+        <Layout.Section>
+          <Card title="CSV Upload" sectioned>
+            <input
+              type="file"
+              accept=".csv"
+              onChange={handleFileChange}
+              style={{
+                padding: '8px',
+                border: '1px solid #c9cccf',
+                borderRadius: '4px',
+                width: '100%',
+                marginBottom: '8px'
+              }}
+            />
+            {lastUpload && (
+              <p style={{ fontSize: '14px', color: '#666', marginTop: '8px' }}>
+                Last upload: {new Date(lastUpload).toLocaleString()}
+              </p>
+            )}
+          </Card>
+        </Layout.Section>
+
+        <Layout.Section>
+          <Card title="CSV SKU Column" sectioned>
+            <TextField
+              label="SKU Column"
+              value={skuColumn}
+              onChange={setSkuColumn}
+              maxLength={2}
+              autoComplete="off"
+              helpText="Column letter where SKU is located (e.g., A)"
+            />
+          </Card>
+        </Layout.Section>
+
+        <Layout.Section>
+          <Card title="Transfer CSV Column" sectioned>
+            <TextField
+              label="Transfer Column"
+              value={transferColumn}
+              onChange={setTransferColumn}
+              maxLength={2}
+              autoComplete="off"
+              helpText="Column for transfer copy text (e.g., H)"
+            />
+          </Card>
+        </Layout.Section>
+
+        <Layout.Section>
+          <Card title="Picker WIG Column" sectioned>
+            <TextField
+              label="WIG Column"
+              value={pickerColumn}
+              onChange={setPickerColumn}
+              maxLength={2}
+              autoComplete="off"
+              helpText="Column for WIG product number (e.g., E)"
+            />
+          </Card>
+        </Layout.Section>
+
+        <Layout.Section>
+          <Card title="Box Types" sectioned>
+            <div style={{ marginBottom: '20px' }}>
+              <p style={{ fontWeight: 'bold', marginBottom: '12px' }}>Add New Box Type</p>
+              <div style={{ marginBottom: '12px' }}>
+                <TextField
+                  label="Code"
+                  value={newBoxCode}
+                  onChange={setNewBoxCode}
+                  placeholder="A"
+                  maxLength={2}
+                  autoComplete="off"
+                />
+              </div>
+              <div style={{ marginBottom: '12px' }}>
+                <TextField
+                  label="Dimensions"
+                  value={newBoxDimensions}
+                  onChange={setNewBoxDimensions}
+                  placeholder="10x8x4"
+                  autoComplete="off"
+                />
+              </div>
+              <Button onClick={handleAddBox}>Add Box Type</Button>
+            </div>
+
+            {boxTypes.length > 0 && (
+              <div>
+                <p style={{ fontWeight: 'bold', marginBottom: '12px' }}>Current Box Types</p>
+                {boxTypes.map((box) => (
+                  <div 
+                    key={box.id} 
+                    style={{ 
+                      padding: '16px', 
+                      border: '1px solid #e1e3e5',
+                      borderRadius: '8px',
+                      marginBottom: '12px',
+                      backgroundColor: '#fafbfb'
+                    }}
+                  >
+                    <div style={{ marginBottom: '8px' }}>
+                      <TextField
+                        label="Code"
+                        value={box.code}
+                        onChange={(value) => {
+                          const updated = boxTypes.map(b => 
+                            b.id === box.id ? { ...b, code: value } : b
+                          );
+                          setBoxTypes(updated);
+                        }}
+                        onBlur={() => handleBoxUpdate(box.id, box.code, box.dimensions)}
+                        autoComplete="off"
+                      />
+                    </div>
+                    <div style={{ marginBottom: '8px' }}>
+                      <TextField
+                        label="Dimensions"
+                        value={box.dimensions}
+                        onChange={(value) => {
+                          const updated = boxTypes.map(b => 
+                            b.id === box.id ? { ...b, dimensions: value } : b
+                          );
+                          setBoxTypes(updated);
+                        }}
+                        onBlur={() => handleBoxUpdate(box.id, box.code, box.dimensions)}
+                        autoComplete="off"
+                      />
+                    </div>
+                    <Button onClick={() => handleDeleteBox(box.id)}>Delete</Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        </Layout.Section>
+
+        <Layout.Section>
+          <p style={{ padding: '16px', backgroundColor: '#e3f2fd', borderRadius: '4px' }}>
+            Settings should be configured on desktop/PC. Click Save after making changes.
+          </p>
+        </Layout.Section>
+      </Layout>
+    </Page>
+  );
+};
+
+export default Settings;
+
+===================
+FILE: client\src\pages\Transfer.js
+===================
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import axios from 'axios';
+import {
+  Page,
+  Layout,
+  Card,
+  ResourceList,
+  ResourceItem,
+  Thumbnail,
+  Text,
+  Badge,
+  Button,
+  ButtonGroup,
+  ChoiceList,
+  Modal,
+  TextField,
+  BlockStack,
+  Banner,
+  Toast,
+  Frame
+} from '@shopify/polaris';
+import { DeleteMinor, ImageIcon } from '@shopify/polaris-icons';
+
+const Transfer = () => {
+  const navigate = useNavigate();
+  const [items, setItems] = useState([]);
+  const [filteredItems, setFilteredItems] = useState([]);
+  const [clearMode, setClearMode] = useState(false);
+  const [selectedItems, setSelectedItems] = useState([]);
+  const [statusFilter, setStatusFilter] = useState(['transferring', 'waiting', 'received']);
+  const [transferModal, setTransferModal] = useState(null);
+  const [transferData, setTransferData] = useState({
+    transferQuantity: '',
+    transferFrom: '',
+    estimateDay: ''
+  });
+  const [toastActive, setToastActive] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+
+  useEffect(() => {
+    fetchItems();
+  }, []);
+
+  useEffect(() => {
+    applyFilters();
+  }, [items, statusFilter]);
+
+  const fetchItems = async () => {
+    try {
+      const response = await axios.get('/api/transfer/items');
+      setItems(response.data);
+    } catch (error) {
+      console.error('Error fetching transfer items:', error);
+    }
+  };
+
+  const applyFilters = () => {
+    const filtered = items.filter(item => {
+      if (item.status === 'transferring' && !statusFilter.includes('transferring')) return false;
+      if (item.status === 'waiting' && !statusFilter.includes('waiting')) return false;
+      if ((item.status === 'received' || item.status === 'found') && !statusFilter.includes('received')) return false;
+      return true;
+    });
+    setFilteredItems(filtered);
+  };
+
+  const handleCopy = async (itemId) => {
+    try {
+      const response = await axios.get(`/api/transfer/items/${itemId}/copy-text`);
+      navigator.clipboard.writeText(response.data.copyText);
+      showToast('Copied to clipboard!');
+    } catch (error) {
+      console.error('Error copying text:', error);
+    }
+  };
+
+  const handleSkuCopy = (sku) => {
+    navigator.clipboard.writeText(sku);
+    showToast('SKU copied!');
+  };
+
+  const showToast = (message) => {
+    setToastMessage(message);
+    setToastActive(true);
+  };
+
+  const handleClearToggle = () => {
+    setClearMode(!clearMode);
+    setSelectedItems([]);
+  };
+
+  const handleItemSelect = (itemId) => {
+    if (selectedItems.includes(itemId)) {
+      setSelectedItems(selectedItems.filter(id => id !== itemId));
+    } else {
+      setSelectedItems([...selectedItems, itemId]);
+    }
+  };
+
+  const handleClearSelected = async () => {
+    if (selectedItems.length === 0) return;
+    
+    try {
+      await axios.post('/api/transfer/items/bulk-delete', {
+        ids: selectedItems
+      });
+      await fetchItems();
+      setSelectedItems([]);
+      setClearMode(false);
+      showToast(`Deleted ${selectedItems.length} items`);
+    } catch (error) {
+      console.error('Error clearing items:', error);
+    }
+  };
+
+  const handleGreenClick = async (item) => {
+    const newStatus = item.status === 'transferring' ? 'found' : 'received';
+    try {
+      await axios.patch(`/api/transfer/items/${item.id}`, { status: newStatus });
+      setItems(items.map(i => i.id === item.id ? { ...i, status: newStatus } : i));
+    } catch (error) {
+      console.error('Error updating status:', error);
+    }
+  };
+
+  const handleBlueClick = (item) => {
+    const currentDate = new Date();
+    setTransferModal(item);
+    setTransferData({
+      transferQuantity: item.quantity.toString(),
+      transferFrom: '',
+      estimateDay: currentDate.getDate().toString()
+    });
+  };
+
+  const handleTransferSubmit = async () => {
+    const currentDate = new Date();
+    const currentMonth = currentDate.getMonth() + 1;
+    const day = parseInt(transferData.estimateDay);
+    let month = currentMonth;
+
+    if (day < currentDate.getDate()) {
+      month = currentMonth === 12 ? 1 : currentMonth + 1;
+    }
+
+    if (!transferData.transferFrom) {
+      alert('Please enter Transfer From location');
+      return;
+    }
+
+    try {
+      const qty = parseInt(transferData.transferQuantity);
+      if (qty < transferModal.quantity) {
+        await axios.post(`/api/transfer/items/${transferModal.id}/split`, {
+          transferQuantity: qty,
+          transfer_from: transferData.transferFrom,
+          estimate_month: month,
+          estimate_day: day
+        });
+      } else {
+        await axios.patch(`/api/transfer/items/${transferModal.id}`, {
+          status: 'waiting',
+          transfer_from: transferData.transferFrom,
+          estimate_month: month,
+          estimate_day: day
+        });
+      }
+      await fetchItems();
+      setTransferModal(null);
+    } catch (error) {
+      console.error('Error updating transfer:', error);
+    }
+  };
+
+  const getItemBadge = (status) => {
+    switch (status) {
+      case 'waiting':
+        return <Badge tone="info">Waiting</Badge>;
+      case 'received':
+      case 'found':
+        return <Badge tone="success">Received</Badge>;
+      default:
+        return <Badge>Transferring</Badge>;
+    }
+  };
+
+  const renderItem = (item) => {
+    const { id, quantity, image_url, order_number, sku, brand, title, size, status, transfer_from, estimate_month, estimate_day } = item;
+    
+    const media = image_url ? (
+      <Thumbnail source={image_url} alt={title} size="large" />
+    ) : (
+      <Thumbnail source={ImageIcon} alt="No image" size="large" />
+    );
+
+    return (
+      <ResourceItem
+        id={id}
+        media={media}
+        verticalAlignment="center"
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+          <div style={{ flex: 1 }}>
+            <BlockStack gap="2">
+              <Text variant="bodyMd" as="h3" fontWeight="semibold">
+                Order: {order_number} | Qty: {quantity}
+              </Text>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Text variant="bodySm" color="subdued">
+                  SKU: {sku}
+                </Text>
+                <Button plain monochrome onClick={() => handleSkuCopy(sku)}>
+                  Copy
+                </Button>
+              </div>
+              <Text variant="bodySm">
+                {brand} {title} {size}
+              </Text>
+              {status === 'waiting' && (
+                <Text variant="bodySm" color="subdued">
+                  From: {transfer_from}, Est: {estimate_month}/{estimate_day}
+                </Text>
+              )}
+              <div>{getItemBadge(status)}</div>
+            </BlockStack>
+          </div>
+          <div>
+            {clearMode ? (
+              <input
+                type="checkbox"
+                checked={selectedItems.includes(id)}
+                onChange={() => handleItemSelect(id)}
+              />
+            ) : (
+              <ButtonGroup>
+                <Button plain onClick={() => handleCopy(id)}>
+                  Copy All
+                </Button>
+                {status === 'transferring' && (
+                  <>
+                    <Button onClick={() => handleBlueClick(item)}>
+                      Transfer
+                    </Button>
+                    <Button variant="primary" onClick={() => handleGreenClick(item)}>
+                      Found
+                    </Button>
+                  </>
+                )}
+                {status === 'waiting' && (
+                  <Button variant="primary" onClick={() => handleGreenClick(item)}>
+                    Received
+                  </Button>
+                )}
+              </ButtonGroup>
+            )}
+          </div>
+        </div>
+      </ResourceItem>
+    );
+  };
+
+  const toastMarkup = toastActive ? (
+    <Toast content={toastMessage} onDismiss={() => setToastActive(false)} />
+  ) : null;
+
+  return (
+    <Frame>
+      <Page
+        title="Transfer"
+        backAction={{ content: 'Dashboard', onAction: () => navigate('/') }}
+        primaryAction={{
+          content: clearMode ? 'Delete Selected' : 'Clear Mode',
+          destructive: clearMode,
+          onAction: clearMode ? handleClearSelected : handleClearToggle
+        }}
+        secondaryActions={
+          clearMode
+            ? [
+                {
+                  content: 'Cancel',
+                  onAction: () => {
+                    setClearMode(false);
+                    setSelectedItems([]);
+                  }
+                }
+              ]
+            : []
+        }
+      >
+        <Layout>
+          <Layout.Section>
+            <Card>
+              <div style={{ padding: '16px' }}>
+                <ChoiceList
+                  title="Show items"
+                  choices={[
+                    { label: 'Transferring', value: 'transferring' },
+                    { label: 'Waiting', value: 'waiting' },
+                    { label: 'Received/Found', value: 'received' }
+                  ]}
+                  selected={statusFilter}
+                  onChange={setStatusFilter}
+                  allowMultiple
+                />
+              </div>
+            </Card>
+          </Layout.Section>
+
+          <Layout.Section>
+            <Card>
+              <ResourceList
+                items={filteredItems}
+                renderItem={renderItem}
+                emptyState={<Banner>No items to transfer</Banner>}
+              />
+            </Card>
+          </Layout.Section>
+        </Layout>
+
+        <Modal
+          open={transferModal !== null}
+          onClose={() => setTransferModal(null)}
+          title="Transfer Information"
+          primaryAction={{
+            content: 'Submit',
+            onAction: handleTransferSubmit
+          }}
+          secondaryActions={[
+            {
+              content: 'Cancel',
+              onAction: () => setTransferModal(null)
+            }
+          ]}
+        >
+          <Modal.Section>
+            {transferModal && (
+              <BlockStack gap="4">
+                {transferModal.quantity > 1 && (
+                  <TextField
+                    label="Transfer Quantity"
+                    type="number"
+                    value={transferData.transferQuantity}
+                    onChange={(value) => setTransferData({ ...transferData, transferQuantity: value })}
+                    max={transferModal.quantity}
+                    autoComplete="off"
+                  />
+                )}
+                <TextField
+                  label="Transfer From (warehouse number)"
+                  value={transferData.transferFrom}
+                  onChange={(value) => setTransferData({ ...transferData, transferFrom: value })}
+                  placeholder="e.g., 01, 02, 03"
+                  autoComplete="off"
+                />
+                <TextField
+                  label="Estimated Arrival Day"
+                  type="number"
+                  value={transferData.estimateDay}
+                  onChange={(value) => setTransferData({ ...transferData, estimateDay: value })}
+                  min={1}
+                  max={31}
+                  autoComplete="off"
+                />
+              </BlockStack>
+            )}
+          </Modal.Section>
+        </Modal>
+
+        {toastMarkup}
+      </Page>
+    </Frame>
+  );
+};
+
+export default Transfer;
+
+===================
+FILE: export.js
+===================
+const fs = require('fs');
+const path = require('path');
+
+const output = 'complete-project.txt';
+const ignore = ['node_modules', '.git', 'build', 'dist', 'database.db'];
+
+function walkDir(dir, fileList = []) {
+  try {
+    const files = fs.readdirSync(dir);
+    files.forEach(file => {
+      const filePath = path.join(dir, file);
+      if (ignore.some(i => filePath.includes(i))) return;
+      
+      if (fs.statSync(filePath).isDirectory()) {
+        walkDir(filePath, fileList);
+      } else if (file.endsWith('.js') || file === 'package.json') {
+        fileList.push(filePath);
+      }
+    });
+  } catch (err) {
+    console.error(`Error reading ${dir}:`, err.message);
+  }
+  return fileList;
+}
+
+const files = walkDir('.');
+let content = '=== PROJECT STRUCTURE ===\n\n';
+
+files.sort().forEach(file => {
+  console.log(`Processing: ${file}`);
+  content += `\n\n===================\nFILE: ${file}\n===================\n`;
+  try {
+    content += fs.readFileSync(file, 'utf8');
+  } catch (err) {
+    content += `Error reading file: ${err.message}`;
+  }
+});
+
+fs.writeFileSync(output, content);
+console.log(`\n✓ Exported to ${output}`);
+console.log(`Total files: ${files.length}`);
+
+===================
+FILE: package.json
+===================
+{
+  "name": "shopify-warehouse-app",
+  "version": "1.0.0",
+  "description": "Shopify Warehouse Management System with Picker, Transfer, and Packer",
+  "main": "server/index.js",
+  "scripts": {
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "server": "nodemon server/index.js",
+    "client": "cd client && npm start",
+    "build": "cd client && npm run build",
+    "start": "node server/index.js",
+    "setup-webhooks": "node server/scripts/setupWebhooks.js"
+  },
+  "dependencies": {
+    "@shopify/shopify-api": "^9.0.0",
+    "axios": "^1.12.2",
+    "better-sqlite3": "^9.2.2",
+    "cors": "^2.8.5",
+    "csv-parser": "^3.0.0",
+    "date-fns": "^2.30.0",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "multer": "^1.4.5-lts.1"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "nodemon": "^3.0.2"
+  }
+}
+
+
+===================
+FILE: server\database\init.js
+===================
+const Database = require('better-sqlite3');
+const path = require('path');
+
+const dbPath = path.resolve(__dirname, '../../database.db');
+const db = new Database(dbPath);
+
+// Initialize database schema
+const initDatabase = () => {
+  // Orders table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS orders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      shopify_order_id TEXT UNIQUE NOT NULL,
+      order_number TEXT NOT NULL,
+      name TEXT NOT NULL,
+      fulfillment_status TEXT,
+      total_quantity INTEGER,
+      subtotal_price TEXT,
+      created_at TEXT,
+      shipping_code TEXT,
+      shipping_name TEXT,
+      shipping_address1 TEXT,
+      shipping_address2 TEXT,
+      shipping_city TEXT,
+      shipping_province TEXT,
+      shipping_zip TEXT,
+      shipping_country TEXT,
+      status TEXT DEFAULT 'packing',
+      box_type TEXT,
+      weight TEXT,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Line Items table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS line_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      shopify_order_id TEXT NOT NULL,
+      order_number TEXT NOT NULL,
+      shopify_line_item_id TEXT UNIQUE NOT NULL,
+      quantity INTEGER NOT NULL,
+      image_url TEXT,
+      title TEXT,
+      name TEXT,
+      brand TEXT,
+      size TEXT,
+      weight REAL,
+      weight_unit TEXT,
+      sku TEXT,
+      url_handle TEXT,
+      product_type TEXT,
+      picker_status TEXT DEFAULT 'picking',
+      packer_status TEXT DEFAULT 'packing',
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (shopify_order_id) REFERENCES orders(shopify_order_id) ON DELETE CASCADE
+    )
+  `);
+
+  // Transfer Items table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS transfer_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      line_item_id INTEGER NOT NULL,
+      shopify_order_id TEXT NOT NULL,
+      order_number TEXT NOT NULL,
+      quantity INTEGER NOT NULL,
+      sku TEXT,
+      transfer_from TEXT,
+      estimate_month INTEGER,
+      estimate_day INTEGER,
+      status TEXT DEFAULT 'transferring',
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (line_item_id) REFERENCES line_items(id) ON DELETE CASCADE
+    )
+  `);
+
+  // Settings table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS settings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      key TEXT UNIQUE NOT NULL,
+      value TEXT,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // CSV Data table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS csv_data (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sku TEXT UNIQUE NOT NULL,
+      data TEXT,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Box Types table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS box_types (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      code TEXT UNIQUE NOT NULL,
+      dimensions TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Insert default box types
+  const insertBoxType = db.prepare(`
+    INSERT OR IGNORE INTO box_types (code, dimensions) VALUES (?, ?)
+  `);
+
+  insertBoxType.run('A', '5x20x5');
+  insertBoxType.run('B', '18x10x4');
+  insertBoxType.run('BB', '');
+  insertBoxType.run('C', '18x10x5');
+  insertBoxType.run('D', '18x12x4');
+  insertBoxType.run('E', '18x12x8');
+  insertBoxType.run('F', '18x14x5');
+  insertBoxType.run('G', '26x8x8');
+  insertBoxType.run('H', '12x6x6');
+
+  // Insert default settings
+  const insertSetting = db.prepare(`
+    INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)
+  `);
+
+  insertSetting.run('transfer_csv_column', 'H');
+  insertSetting.run('picker_wig_column', 'E');
+  insertSetting.run('sku_column', 'A');
+  insertSetting.run('csv_uploaded_at', '');
+
+  console.log('Database initialized successfully');
+};
+
+initDatabase();
+
+module.exports = db;
+
+===================
+FILE: server\index.js
+===================
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const path = require('path');
+const db = require('./database/init');
+
+// Import routes
+const pickerRoutes = require('./routes/picker');
+const transferRoutes = require('./routes/transfer');
+const packerRoutes = require('./routes/packer');
+const settingsRoutes = require('./routes/settings');
+const webhookRoutes = require('./routes/webhooks');
+
+const app = express();
+const PORT = process.env.PORT || 3001;
+
+// Middleware
+app.use(cors());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// API Routes
+app.use('/api/picker', pickerRoutes);
+app.use('/api/transfer', transferRoutes);
+app.use('/api/packer', packerRoutes);
+app.use('/api/settings', settingsRoutes);
+app.use('/api/webhooks', webhookRoutes);
+
+// Health check
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Serve static files in production
+if (process.env.NODE_ENV === 'production') {
+  app.use(express.static(path.join(__dirname, '../client/build')));
+  
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, '../client/build', 'index.html'));
+  });
+}
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({ 
+    error: 'Something went wrong!',
+    message: err.message 
+  });
+});
+
+// Start server
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+});
+
+===================
+FILE: server\middleware\webhookVerification.js
+===================
+const crypto = require('crypto');
+
+// Verify Shopify webhook HMAC
+const verifyWebhook = (req, res, next) => {
+  const hmacHeader = req.get('X-Shopify-Hmac-Sha256');
+  
+  if (!hmacHeader) {
+    console.warn('No HMAC header found in webhook request');
+    return res.status(401).send('Unauthorized');
+  }
+
+  const body = JSON.stringify(req.body);
+  const hash = crypto
+    .createHmac('sha256', process.env.SHOPIFY_API_SECRET)
+    .update(body, 'utf8')
+    .digest('base64');
+
+  if (hash !== hmacHeader) {
+    console.warn('HMAC verification failed');
+    return res.status(401).send('Unauthorized');
+  }
+
+  next();
+};
+
+module.exports = verifyWebhook;
+
+===================
+FILE: server\routes\packer.js
+===================
+const express = require('express');
+const router = express.Router();
+const db = require('../database/init');
+
+// Unified function to calculate order status
+function calculateOrderStatus(order, lineItems, transferItems) {
+  // If manually set to holding, keep it
+  if (order.status === 'holding') {
+    return 'holding';
+  }
+
+  // Check for waiting items (items in transfer with 'waiting' status)
+  const waitingItems = transferItems.filter(ti => ti.status === 'waiting');
+  if (waitingItems.length > 0) {
+    return 'waiting';
+  }
+
+  // Check if all items are ready
+  const allReady = lineItems.length > 0 && lineItems.every(item => item.packer_status === 'ready');
+  if (allReady) {
+    return 'ready';
+  }
+
+  // Default to packing
+  return 'packing';
+}
+
+// Get all orders for packer
+router.get('/orders', (req, res) => {
+  try {
+    const orders = db.prepare(`
+      SELECT * FROM orders 
+      WHERE fulfillment_status != 'fulfilled'
+      ORDER BY created_at DESC
+    `).all();
+
+    const ordersWithDetails = orders.map(order => {
+      const lineItems = db.prepare(`
+        SELECT * FROM line_items 
+        WHERE shopify_order_id = ?
+        ORDER BY id
+      `).all(order.shopify_order_id);
+
+      // Get transfer items for this order
+      const transferItems = db.prepare(`
+        SELECT ti.*, li.id as line_item_id
+        FROM transfer_items ti
+        JOIN line_items li ON ti.line_item_id = li.id
+        WHERE ti.shopify_order_id = ?
+      `).all(order.shopify_order_id);
+
+      // Check for weight warnings
+      const hasWeightWarning = lineItems.some(item => 
+        item.weight === 0 || item.weight_unit !== 'g'
+      );
+
+      // Calculate order status using unified logic
+      const orderStatus = calculateOrderStatus(order, lineItems, transferItems);
+
+      // Calculate transfer info for waiting orders
+      let transferInfo = null;
+      const waitingItems = transferItems.filter(ti => ti.status === 'waiting');
+      
+      if (waitingItems.length > 0) {
+        const totalQuantity = waitingItems.reduce((sum, item) => sum + item.quantity, 0);
+        const transferFroms = [...new Set(waitingItems.map(item => item.transfer_from))].filter(Boolean);
+        
+        // Find the latest estimated date
+        const latestDate = waitingItems.reduce((latest, item) => {
+          if (!item.estimate_month || !item.estimate_day) return latest;
+          const itemDate = item.estimate_month * 100 + item.estimate_day;
+          return itemDate > latest ? itemDate : latest;
+        }, 0);
+
+        transferInfo = {
+          quantity: totalQuantity,
+          transferFroms,
+          estimateMonth: Math.floor(latestDate / 100),
+          estimateDay: latestDate % 100
+        };
+      }
+
+      const transferringItems = transferItems.filter(ti => ti.status === 'transferring');
+
+      return {
+        ...order,
+        lineItems,
+        hasWeightWarning,
+        orderStatus,
+        hasTransferring: transferringItems.length > 0,
+        hasWaiting: waitingItems.length > 0,
+        transferInfo
+      };
+    });
+
+    res.json(ordersWithDetails);
+  } catch (error) {
+    console.error('Error fetching packer orders:', error);
+    res.status(500).json({ error: 'Failed to fetch orders: ' + error.message });
+  }
+});
+
+// Get single order details
+router.get('/orders/:shopifyOrderId', (req, res) => {
+  try {
+    const { shopifyOrderId } = req.params;
+    
+    const order = db.prepare('SELECT * FROM orders WHERE shopify_order_id = ?').get(shopifyOrderId);
+    
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    const lineItems = db.prepare(`
+      SELECT * FROM line_items 
+      WHERE shopify_order_id = ?
+      ORDER BY id
+    `).all(shopifyOrderId);
+
+    // Get transfer status for each line item
+    const lineItemsWithTransfer = lineItems.map(item => {
+      const transferItem = db.prepare(`
+        SELECT * FROM transfer_items 
+        WHERE line_item_id = ?
+        ORDER BY created_at DESC
+        LIMIT 1
+      `).get(item.id);
+
+      return {
+        ...item,
+        transferStatus: transferItem?.status || null,
+        transferInfo: transferItem ? {
+          transferFrom: transferItem.transfer_from,
+          estimateMonth: transferItem.estimate_month,
+          estimateDay: transferItem.estimate_day,
+          quantity: transferItem.quantity
+        } : null
+      };
+    });
+
+    res.json({
+      ...order,
+      lineItems: lineItemsWithTransfer
+    });
+  } catch (error) {
+    console.error('Error fetching order details:', error);
+    res.status(500).json({ error: 'Failed to fetch order details: ' + error.message });
+  }
+});
+
+// Update order status (mainly for holding toggle)
+router.patch('/orders/:shopifyOrderId/status', (req, res) => {
+  try {
+    const { shopifyOrderId } = req.params;
+    const { status } = req.body;
+
+    if (!status) {
+      return res.status(400).json({ error: 'Status is required' });
+    }
+
+    db.prepare(`
+      UPDATE orders 
+      SET status = ?, updated_at = datetime('now')
+      WHERE shopify_order_id = ?
+    `).run(status, shopifyOrderId);
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error updating order status:', error);
+    res.status(500).json({ error: 'Failed to update order status: ' + error.message });
+  }
+});
+
+// Update line item packer status
+router.patch('/items/:id/packer-status', (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!status) {
+      return res.status(400).json({ error: 'Status is required' });
+    }
+
+    db.prepare(`
+      UPDATE line_items 
+      SET packer_status = ?, updated_at = datetime('now')
+      WHERE id = ?
+    `).run(status, id);
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error updating item packer status:', error);
+    res.status(500).json({ error: 'Failed to update item status: ' + error.message });
+  }
+});
+
+// Complete order (set box and weight)
+router.post('/orders/:shopifyOrderId/complete', (req, res) => {
+  try {
+    const { shopifyOrderId } = req.params;
+    const { boxType, weight } = req.body;
+
+    if (!boxType) {
+      return res.status(400).json({ error: 'Box type is required' });
+    }
+
+    db.prepare(`
+      UPDATE orders 
+      SET box_type = ?, weight = ?, status = 'ready', updated_at = datetime('now')
+      WHERE shopify_order_id = ?
+    `).run(boxType, weight || null, shopifyOrderId);
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error completing order:', error);
+    res.status(500).json({ error: 'Failed to complete order: ' + error.message });
+  }
+});
+
+// Update product weight (updates both local DB and Shopify)
+router.patch('/items/:id/update-weight', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { weight } = req.body;
+
+    if (!weight || weight <= 0) {
+      return res.status(400).json({ error: 'Valid weight is required' });
+    }
+
+    const item = db.prepare('SELECT * FROM line_items WHERE id = ?').get(id);
+    
+    if (!item) {
+      return res.status(404).json({ error: 'Item not found' });
+    }
+
+    // Update local database
+    db.prepare(`
+      UPDATE line_items 
+      SET weight = ?, weight_unit = 'g', updated_at = datetime('now')
+      WHERE id = ?
+    `).run(weight, id);
+
+    // Update Shopify product variant weight via SKU
+    let shopifyUpdateSuccess = false;
+    let shopifyError = null;
+
+    if (item.sku) {
+      try {
+        const shopifyClient = require('../shopify/client');
+        await shopifyClient.updateVariantWeightBySku(item.sku, weight);
+        shopifyUpdateSuccess = true;
+        console.log(`Successfully updated weight in Shopify for SKU: ${item.sku}`);
+      } catch (shopifyErr) {
+        shopifyError = shopifyErr.message;
+        console.error('Error updating Shopify weight:', shopifyErr.message);
+        // Continue - weight is still saved locally
+      }
+    }
+
+    res.json({ 
+      success: true,
+      shopifyUpdated: shopifyUpdateSuccess,
+      shopifyError: shopifyError
+    });
+  } catch (error) {
+    console.error('Error updating weight:', error);
+    res.status(500).json({ error: 'Failed to update weight: ' + error.message });
+  }
+});
+
+module.exports = router;
+
+===================
+FILE: server\routes\picker.js
+===================
+const express = require('express');
+const router = express.Router();
+const db = require('../database/init');
+
+// Get all line items for picker
+router.get('/items', (req, res) => {
+  try {
+    const items = db.prepare(`
+      SELECT 
+        li.*,
+        o.name as order_name,
+        o.shipping_code
+      FROM line_items li
+      JOIN orders o ON li.shopify_order_id = o.shopify_order_id
+      WHERE o.fulfillment_status != 'fulfilled'
+      ORDER BY li.created_at DESC
+    `).all();
+
+    // Get CSV data for WIG products
+    const csvData = db.prepare('SELECT sku, data FROM csv_data').all();
+    const csvMap = new Map(csvData.map(row => [row.sku, JSON.parse(row.data || '{}')]));
+    
+    const settings = db.prepare('SELECT * FROM settings').all();
+    const wigColumn = settings.find(s => s.key === 'picker_wig_column')?.value || 'E';
+
+    // Process items with WIG type
+    const processedItems = items.map(item => {
+      let displayType = item.product_type;
+      
+      if (item.product_type === 'WIG' && item.sku) {
+        const csvRow = csvMap.get(item.sku);
+        if (csvRow && csvRow[wigColumn]) {
+          displayType = csvRow[wigColumn];
+        }
+      }
+
+      return {
+        ...item,
+        display_type: displayType,
+        sort_type: item.product_type // Keep original for sorting
+      };
+    });
+
+    res.json(processedItems);
+  } catch (error) {
+    console.error('Error fetching picker items:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update item status
+router.patch('/items/:id/status', (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    db.prepare(`
+      UPDATE line_items 
+      SET picker_status = ?, updated_at = datetime('now')
+      WHERE id = ?
+    `).run(status, id);
+
+    // If status is 'missing', create transfer item
+    if (status === 'missing') {
+      const item = db.prepare('SELECT * FROM line_items WHERE id = ?').get(id);
+      
+      db.prepare(`
+        INSERT INTO transfer_items (
+          line_item_id, shopify_order_id, order_number, quantity, sku, status
+        ) VALUES (?, ?, ?, ?, ?, 'transferring')
+      `).run(item.id, item.shopify_order_id, item.order_number, item.quantity, item.sku);
+    }
+
+    // If status changes from 'missing' to 'picked', remove from transfer
+    if (status === 'picked') {
+      db.prepare('DELETE FROM transfer_items WHERE line_item_id = ?').run(id);
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error updating item status:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Split item (when quantity > 1 and partially picked)
+router.post('/items/:id/split', (req, res) => {
+  try {
+    const { id } = req.params;
+    const { pickedQuantity } = req.body;
+
+    const item = db.prepare('SELECT * FROM line_items WHERE id = ?').get(id);
+    
+    if (!item) {
+      return res.status(404).json({ error: 'Item not found' });
+    }
+
+    const missingQuantity = item.quantity - pickedQuantity;
+
+    // Update original item to picked quantity
+    db.prepare(`
+      UPDATE line_items 
+      SET quantity = ?, picker_status = 'picked', updated_at = datetime('now')
+      WHERE id = ?
+    `).run(pickedQuantity, id);
+
+    // Create new item for missing quantity
+    const newItem = db.prepare(`
+      INSERT INTO line_items (
+        shopify_order_id, order_number, shopify_line_item_id, quantity,
+        image_url, title, name, brand, size, weight, weight_unit, sku,
+        url_handle, product_type, picker_status, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'missing', datetime('now'))
+    `).run(
+      item.shopify_order_id,
+      item.order_number,
+      item.shopify_line_item_id + '_split_' + Date.now(),
+      missingQuantity,
+      item.image_url,
+      item.title,
+      item.name,
+      item.brand,
+      item.size,
+      item.weight,
+      item.weight_unit,
+      item.sku,
+      item.url_handle,
+      item.product_type
+    );
+
+    // Create transfer item for missing quantity
+    db.prepare(`
+      INSERT INTO transfer_items (
+        line_item_id, shopify_order_id, order_number, quantity, sku, status
+      ) VALUES (?, ?, ?, ?, ?, 'transferring')
+    `).run(newItem.lastInsertRowid, item.shopify_order_id, item.order_number, missingQuantity, item.sku);
+
+    res.json({ success: true, newItemId: newItem.lastInsertRowid });
+  } catch (error) {
+    console.error('Error splitting item:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+module.exports = router;
+
+===================
+FILE: server\routes\settings.js
+===================
+const express = require('express');
+const router = express.Router();
+const multer = require('multer');
+const csv = require('csv-parser');
+const fs = require('fs');
+const db = require('../database/init');
+
+// Configure multer for file upload
+const upload = multer({ dest: 'uploads/' });
+
+// Get all settings
+router.get('/', (req, res) => {
+  try {
+    const settingsRows = db.prepare('SELECT * FROM settings').all();
+    const settings = {};
+    settingsRows.forEach(row => {
+      settings[row.key] = row.value;
+    });
+
+    const boxTypes = db.prepare('SELECT * FROM box_types ORDER BY code').all();
+
+    res.json({ settings, boxTypes });
+  } catch (error) {
+    console.error('Error fetching settings:', error);
+    res.status(500).json({ error: 'Failed to fetch settings: ' + error.message });
+  }
+});
+
+// Update settings
+router.post('/update', (req, res) => {
+  try {
+    const { transferCsvColumn, pickerWigColumn, skuColumn } = req.body;
+
+    const updateSetting = db.prepare(`
+      INSERT OR REPLACE INTO settings (key, value, updated_at)
+      VALUES (?, ?, datetime('now'))
+    `);
+
+    if (transferCsvColumn) {
+      updateSetting.run('transfer_csv_column', transferCsvColumn.toUpperCase());
+    }
+
+    if (pickerWigColumn) {
+      updateSetting.run('picker_wig_column', pickerWigColumn.toUpperCase());
+    }
+
+    if (skuColumn) {
+      updateSetting.run('sku_column', skuColumn.toUpperCase());
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error updating settings:', error);
+    res.status(500).json({ error: 'Failed to update settings: ' + error.message });
+  }
+});
+
+// Upload CSV file
+router.post('/upload-csv', upload.single('file'), (req, res) => {
+  let filePath = null;
+
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    filePath = req.file.path;
+    const results = [];
+
+    // Parse CSV
+    fs.createReadStream(filePath)
+      .pipe(csv())
+      .on('data', (data) => results.push(data))
+      .on('end', () => {
+        try {
+          // Get SKU column setting
+          const skuColumnSetting = db.prepare('SELECT value FROM settings WHERE key = ?').get('sku_column');
+          const skuColumn = skuColumnSetting?.value || 'A';
+
+          console.log(`Processing CSV with SKU column: ${skuColumn}`);
+          console.log(`Total rows in CSV: ${results.length}`);
+
+          // Clear existing CSV data
+          db.prepare('DELETE FROM csv_data').run();
+
+          // Insert new CSV data
+          const insertStmt = db.prepare(`
+            INSERT INTO csv_data (sku, data, updated_at)
+            VALUES (?, ?, datetime('now'))
+          `);
+
+          let importedCount = 0;
+          let skippedCount = 0;
+
+          results.forEach((row, index) => {
+            const sku = row[skuColumn];
+            
+            if (sku && sku.trim() !== '') {
+              try {
+                insertStmt.run(sku.trim(), JSON.stringify(row));
+                importedCount++;
+              } catch (err) {
+                console.error(`Error inserting row ${index + 1}:`, err.message);
+                skippedCount++;
+              }
+            } else {
+              skippedCount++;
+            }
+          });
+
+          // Update upload timestamp
+          db.prepare(`
+            INSERT OR REPLACE INTO settings (key, value, updated_at)
+            VALUES ('csv_uploaded_at', ?, datetime('now'))
+          `).run(new Date().toISOString());
+
+          // Clean up uploaded file
+          if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+          }
+
+          console.log(`CSV import complete: ${importedCount} imported, ${skippedCount} skipped`);
+
+          res.json({
+            success: true,
+            rowsImported: importedCount,
+            rowsSkipped: skippedCount,
+            totalRows: results.length,
+            uploadedAt: new Date().toISOString()
+          });
+        } catch (error) {
+          console.error('Error processing CSV data:', error);
+          if (filePath && fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+          }
+          res.status(500).json({ error: 'Error processing CSV data: ' + error.message });
+        }
+      })
+      .on('error', (error) => {
+        console.error('Error parsing CSV:', error);
+        if (filePath && fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+        res.status(500).json({ error: 'Error parsing CSV file: ' + error.message });
+      });
+  } catch (error) {
+    console.error('Error uploading CSV:', error);
+    if (filePath && fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+    res.status(500).json({ error: 'Failed to upload CSV: ' + error.message });
+  }
+});
+
+// Get box types
+router.get('/box-types', (req, res) => {
+  try {
+    const boxTypes = db.prepare('SELECT * FROM box_types ORDER BY code').all();
+    res.json(boxTypes);
+  } catch (error) {
+    console.error('Error fetching box types:', error);
+    res.status(500).json({ error: 'Failed to fetch box types: ' + error.message });
+  }
+});
+
+// Add box type
+router.post('/box-types', (req, res) => {
+  try {
+    const { code, dimensions } = req.body;
+
+    if (!code || code.trim() === '') {
+      return res.status(400).json({ error: 'Box code is required' });
+    }
+
+    db.prepare(`
+      INSERT INTO box_types (code, dimensions)
+      VALUES (?, ?)
+    `).run(code.toUpperCase().trim(), dimensions || '');
+
+    res.json({ success: true });
+  } catch (error) {
+    if (error.message.includes('UNIQUE constraint failed')) {
+      return res.status(400).json({ error: 'Box code already exists' });
+    }
+    console.error('Error adding box type:', error);
+    res.status(500).json({ error: 'Failed to add box type: ' + error.message });
+  }
+});
+
+// Update box type
+router.patch('/box-types/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const { code, dimensions } = req.body;
+
+    if (!code || code.trim() === '') {
+      return res.status(400).json({ error: 'Box code is required' });
+    }
+
+    db.prepare(`
+      UPDATE box_types
+      SET code = ?, dimensions = ?
+      WHERE id = ?
+    `).run(code.toUpperCase().trim(), dimensions || '', id);
+
+    res.json({ success: true });
+  } catch (error) {
+    if (error.message.includes('UNIQUE constraint failed')) {
+      return res.status(400).json({ error: 'Box code already exists' });
+    }
+    console.error('Error updating box type:', error);
+    res.status(500).json({ error: 'Failed to update box type: ' + error.message });
+  }
+});
+
+// Delete box type
+router.delete('/box-types/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = db.prepare('DELETE FROM box_types WHERE id = ?').run(id);
+    
+    if (result.changes === 0) {
+      return res.status(404).json({ error: 'Box type not found' });
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting box type:', error);
+    res.status(500).json({ error: 'Failed to delete box type: ' + error.message });
+  }
+});
+
+module.exports = router;
+
+===================
+FILE: server\routes\transfer.js
+===================
+const express = require('express');
+const router = express.Router();
+const db = require('../database/init');
+
+// Emoji mapping for transfer from
+const EMOJI_MAP = {
+  '01': '🟫', '02': '🟧', '03': '🟨', '04': '🟩', '05': '⬛',
+  '06': '🟪', '07': '🟥', '08': '⬜', '09': '🟦', '11': '🔳'
+};
+
+// Get all transfer items
+router.get('/items', (req, res) => {
+  try {
+    const items = db.prepare(`
+      SELECT 
+        ti.*,
+        li.image_url,
+        li.brand,
+        li.title,
+        li.size,
+        li.name
+      FROM transfer_items ti
+      JOIN line_items li ON ti.line_item_id = li.id
+      ORDER BY ti.created_at DESC
+    `).all();
+
+    res.json(items);
+  } catch (error) {
+    console.error('Error fetching transfer items:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get copy text for an item
+router.get('/items/:id/copy-text', (req, res) => {
+  try {
+    const { id } = req.params;
+    const item = db.prepare(`
+      SELECT ti.*, li.sku
+      FROM transfer_items ti
+      JOIN line_items li ON ti.line_item_id = li.id
+      WHERE ti.id = ?
+    `).get(id);
+
+    if (!item) {
+      return res.status(404).json({ error: 'Item not found' });
+    }
+
+    // Get CSV column setting
+    const settings = db.prepare('SELECT * FROM settings WHERE key = ?').get('transfer_csv_column');
+    const column = settings?.value || 'E';
+
+    // Get CSV data for this SKU
+    const csvData = db.prepare('SELECT data FROM csv_data WHERE sku = ?').get(item.sku);
+    const csvRow = csvData ? JSON.parse(csvData.data) : {};
+    const columnData = csvRow[column] || '';
+
+    let copyText = '';
+
+    if (item.status === 'transferring') {
+      // Format: B-C (quantity-csvColumn)
+      copyText = `${item.quantity}-${columnData}`;
+    } else if (item.status === 'waiting') {
+      // Format: A-B-C-D (emoji+transferFrom+emoji-quantity-csvColumn-orderNumber)
+      const emoji = EMOJI_MAP[item.transfer_from] || '⬜';
+      copyText = `${emoji}${item.transfer_from}${emoji}-${item.quantity}-${columnData}-${item.order_number}`;
+    }
+
+    res.json({ copyText });
+  } catch (error) {
+    console.error('Error generating copy text:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update transfer item status
+router.patch('/items/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, transfer_from, estimate_month, estimate_day } = req.body;
+
+    const updates = [];
+    const values = [];
+
+    if (status) {
+      updates.push('status = ?');
+      values.push(status);
+    }
+    if (transfer_from !== undefined) {
+      updates.push('transfer_from = ?');
+      values.push(transfer_from);
+    }
+    if (estimate_month !== undefined) {
+      updates.push('estimate_month = ?');
+      values.push(estimate_month);
+    }
+    if (estimate_day !== undefined) {
+      updates.push('estimate_day = ?');
+      values.push(estimate_day);
+    }
+
+    updates.push("updated_at = datetime('now')");
+    values.push(id);
+
+    db.prepare(`
+      UPDATE transfer_items 
+      SET ${updates.join(', ')}
+      WHERE id = ?
+    `).run(...values);
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error updating transfer item:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Split transfer item (when quantity > 1 and user wants to transfer part)
+router.post('/items/:id/split', (req, res) => {
+  try {
+    const { id } = req.params;
+    const { transferQuantity, transfer_from, estimate_month, estimate_day } = req.body;
+
+    const item = db.prepare('SELECT * FROM transfer_items WHERE id = ?').get(id);
+    
+    if (!item) {
+      return res.status(404).json({ error: 'Transfer item not found' });
+    }
+
+    const qty = parseInt(transferQuantity);
+    const remainingQty = item.quantity - qty;
+
+    if (qty >= item.quantity || qty < 1) {
+      return res.status(400).json({ error: 'Invalid transfer quantity' });
+    }
+
+    // Update original item to transferring quantity
+    db.prepare(`
+      UPDATE transfer_items 
+      SET 
+        quantity = ?,
+        transfer_from = ?,
+        estimate_month = ?,
+        estimate_day = ?,
+        status = 'waiting',
+        updated_at = datetime('now')
+      WHERE id = ?
+    `).run(qty, transfer_from, estimate_month, estimate_day, id);
+
+    // Create new item for remaining quantity
+    db.prepare(`
+      INSERT INTO transfer_items (
+        line_item_id, shopify_order_id, order_number, quantity, sku, status
+      ) VALUES (?, ?, ?, ?, ?, 'transferring')
+    `).run(
+      item.line_item_id,
+      item.shopify_order_id,
+      item.order_number,
+      remainingQty,
+      item.sku
+    );
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error splitting transfer item:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Bulk delete transfer items
+router.post('/items/bulk-delete', (req, res) => {
+  try {
+    const { ids } = req.body;
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'Invalid ids array' });
+    }
+
+    const placeholders = ids.map(() => '?').join(',');
+    db.prepare(`DELETE FROM transfer_items WHERE id IN (${placeholders})`).run(...ids);
+
+    res.json({ success: true, deleted: ids.length });
+  } catch (error) {
+    console.error('Error bulk deleting transfer items:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+module.exports = router;
+
+===================
+FILE: server\routes\webhooks.js
+===================
+const express = require('express');
+const router = express.Router();
+const OrderWebhookHandler = require('../webhooks/orderHandler');
+const verifyWebhook = require('../middleware/webhookVerification');
+
+// Apply webhook verification middleware (optional in development)
+const useVerification = process.env.NODE_ENV === 'production';
+
+// Webhook endpoints
+router.post('/orders/create', useVerification ? verifyWebhook : (req, res, next) => next(), async (req, res) => {
+  try {
+    console.log('Webhook received: Order Created', req.body.id);
+    const result = OrderWebhookHandler.handleOrderCreated(req.body);
+    res.status(200).json(result);
+  } catch (error) {
+    console.error('Webhook error (order/create):', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/orders/updated', useVerification ? verifyWebhook : (req, res, next) => next(), async (req, res) => {
+  try {
+    console.log('Webhook received: Order Updated', req.body.id);
+    const result = OrderWebhookHandler.handleOrderUpdated(req.body);
+    res.status(200).json(result);
+  } catch (error) {
+    console.error('Webhook error (order/updated):', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/orders/cancelled', useVerification ? verifyWebhook : (req, res, next) => next(), async (req, res) => {
+  try {
+    console.log('Webhook received: Order Cancelled', req.body.id);
+    const result = OrderWebhookHandler.handleOrderCancelled(req.body);
+    res.status(200).json(result);
+  } catch (error) {
+    console.error('Webhook error (order/cancelled):', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/orders/fulfilled', useVerification ? verifyWebhook : (req, res, next) => next(), async (req, res) => {
+  try {
+    console.log('Webhook received: Order Fulfilled', req.body.id);
+    const result = OrderWebhookHandler.handleOrderFulfilled(req.body);
+    res.status(200).json(result);
+  } catch (error) {
+    console.error('Webhook error (order/fulfilled):', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+module.exports = router;
+
+===================
+FILE: server\scripts\setupWebhooks.js
+===================
+require('dotenv').config();
+const shopifyClient = require('../shopify/client');
+
+async function setupWebhooks() {
+  const appUrl = process.env.APP_URL;
+  
+  if (!appUrl) {
+    console.error('Error: APP_URL not set in environment variables');
+    process.exit(1);
+  }
+
+  const webhooks = [
+    {
+      topic: 'orders/create',
+      address: `${appUrl}/api/webhooks/orders/create`
+    },
+    {
+      topic: 'orders/updated',
+      address: `${appUrl}/api/webhooks/orders/updated`
+    },
+    {
+      topic: 'orders/cancelled',
+      address: `${appUrl}/api/webhooks/orders/cancelled`
+    },
+    {
+      topic: 'orders/fulfilled',
+      address: `${appUrl}/api/webhooks/orders/fulfilled`
+    }
+  ];
+
+  try {
+    // Get existing webhooks
+    const existingWebhooks = await shopifyClient.listWebhooks();
+    console.log(`Found ${existingWebhooks.length} existing webhooks`);
+
+    // Delete old webhooks for these topics
+    for (const webhook of existingWebhooks) {
+      const shouldDelete = webhooks.some(w => w.topic === webhook.topic);
+      if (shouldDelete) {
+        console.log(`Deleting old webhook: ${webhook.topic} -> ${webhook.address}`);
+        await shopifyClient.deleteWebhook(webhook.id);
+      }
+    }
+
+    // Create new webhooks
+    for (const webhook of webhooks) {
+      console.log(`Creating webhook: ${webhook.topic} -> ${webhook.address}`);
+      await shopifyClient.createWebhook(webhook.topic, webhook.address);
+      console.log(`✓ Created webhook: ${webhook.topic}`);
+    }
+
+    console.log('\n✓ All webhooks configured successfully!');
+    process.exit(0);
+  } catch (error) {
+    console.error('Error setting up webhooks:', error.message);
+    process.exit(1);
+  }
+}
+
+setupWebhooks();
+
+===================
+FILE: server\shopify\client.js
+===================
+require('dotenv').config();
+const axios = require('axios');
+
+class ShopifyClient {
+  constructor() {
+    this.shopUrl = process.env.SHOPIFY_STORE_URL;
+    this.accessToken = process.env.SHOPIFY_ACCESS_TOKEN;
+    this.apiVersion = '2024-01';
+    
+    this.client = axios.create({
+      baseURL: `https://${this.shopUrl}/admin/api/${this.apiVersion}`,
+      headers: {
+        'X-Shopify-Access-Token': this.accessToken,
+        'Content-Type': 'application/json'
+      }
+    });
+  }
+
+  // Get product variant
+  async getProductVariant(variantId) {
+    try {
+      const response = await this.client.get(`/variants/${variantId}.json`);
+      return response.data.variant;
+    } catch (error) {
+      console.error('Error fetching product variant:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  // Update product variant weight
+  async updateVariantWeight(variantId, weightInGrams) {
+    try {
+      const response = await this.client.put(`/variants/${variantId}.json`, {
+        variant: {
+          id: variantId,
+          weight: weightInGrams,
+          weight_unit: 'g'
+        }
+      });
+      return response.data.variant;
+    } catch (error) {
+      console.error('Error updating variant weight:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  // Update variant weight by SKU (searches all products to find matching variant)
+  async updateVariantWeightBySku(sku, weightInGrams) {
+    try {
+      console.log(`Searching for variant with SKU: ${sku}`);
+      
+      // Get all products (paginated)
+      let allProducts = [];
+      let hasNextPage = true;
+      let pageInfo = null;
+
+      while (hasNextPage && allProducts.length < 1000) { // Safety limit
+        const params = {
+          limit: 250,
+          fields: 'id,variants'
+        };
+        
+        if (pageInfo) {
+          params.page_info = pageInfo;
+        }
+
+        const response = await this.client.get('/products.json', { params });
+        allProducts = allProducts.concat(response.data.products);
+
+        // Check for pagination
+        const linkHeader = response.headers.link;
+        if (linkHeader && linkHeader.includes('rel="next"')) {
+          const match = linkHeader.match(/<[^>]*page_info=([^>&]+)[^>]*>;\s*rel="next"/);
+          pageInfo = match ? match[1] : null;
+          hasNextPage = !!pageInfo;
+        } else {
+          hasNextPage = false;
+        }
+      }
+
+      console.log(`Searched ${allProducts.length} products for SKU: ${sku}`);
+
+      // Find variant with matching SKU
+      let variantId = null;
+      for (const product of allProducts) {
+        const variant = product.variants.find(v => v.sku === sku);
+        if (variant) {
+          variantId = variant.id;
+          console.log(`Found variant ID ${variantId} for SKU: ${sku}`);
+          break;
+        }
+      }
+
+      if (!variantId) {
+        throw new Error(`Variant with SKU "${sku}" not found in Shopify`);
+      }
+
+      // Update the variant weight
+      return await this.updateVariantWeight(variantId, weightInGrams);
+    } catch (error) {
+      console.error('Error updating variant weight by SKU:', error.message);
+      throw error;
+    }
+  }
+
+  // Get order
+  async getOrder(orderId) {
+    try {
+      const response = await this.client.get(`/orders/${orderId}.json`);
+      return response.data.order;
+    } catch (error) {
+      console.error('Error fetching order:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  // Update order fulfillment
+  async fulfillOrder(orderId, lineItems) {
+    try {
+      const response = await this.client.post(`/orders/${orderId}/fulfillments.json`, {
+        fulfillment: {
+          line_items: lineItems.map(item => ({
+            id: item.id,
+            quantity: item.quantity
+          })),
+          notify_customer: true
+        }
+      });
+      return response.data.fulfillment;
+    } catch (error) {
+      console.error('Error fulfilling order:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  // Create webhook
+  async createWebhook(topic, address) {
+    try {
+      const response = await this.client.post('/webhooks.json', {
+        webhook: {
+          topic,
+          address,
+          format: 'json'
+        }
+      });
+      return response.data.webhook;
+    } catch (error) {
+      console.error('Error creating webhook:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  // List all webhooks
+  async listWebhooks() {
+    try {
+      const response = await this.client.get('/webhooks.json');
+      return response.data.webhooks;
+    } catch (error) {
+      console.error('Error listing webhooks:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  // Delete webhook
+  async deleteWebhook(webhookId) {
+    try {
+      await this.client.delete(`/webhooks/${webhookId}.json`);
+      return true;
+    } catch (error) {
+      console.error('Error deleting webhook:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+}
+
+module.exports = new ShopifyClient();
+
+===================
+FILE: server\test-connection.js
+===================
+require('dotenv').config();
+const shopifyClient = require('./shopify/client');
+
+async function testConnection() {
+  try {
+    console.log('Testing Shopify connection...');
+    console.log('Store URL:', process.env.SHOPIFY_STORE_URL);
+    
+    const webhooks = await shopifyClient.listWebhooks();
+    console.log('✅ Connection successful!');
+    console.log('Existing webhooks:', webhooks.length);
+    
+  } catch (error) {
+    console.error('❌ Connection failed:', error.message);
+    console.error('Please check your .env configuration');
+  }
+}
+
+testConnection();
+
+===================
+FILE: server\utils\logger.js
+===================
+const fs = require('fs');
+const path = require('path');
+
+class Logger {
+  constructor() {
+    this.logDir = path.join(__dirname, '../../logs');
+    if (!fs.existsSync(this.logDir)) {
+      fs.mkdirSync(this.logDir, { recursive: true });
+    }
+  }
+
+  formatMessage(level, message, context = {}) {
+    return JSON.stringify({
+      timestamp: new Date().toISOString(),
+      level,
+      message,
+      context
+    }) + '\n';
+  }
+
+  writeLog(filename, message) {
+    const logPath = path.join(this.logDir, filename);
+    fs.appendFileSync(logPath, message);
+  }
+
+  info(message, context) {
+    const formatted = this.formatMessage('INFO', message, context);
+    console.log(`[INFO] ${message}`, context);
+    this.writeLog('app.log', formatted);
+  }
+
+  error(message, context) {
+    const formatted = this.formatMessage('ERROR', message, context);
+    console.error(`[ERROR] ${message}`, context);
+    this.writeLog('error.log', formatted);
+  }
+
+  webhook(message, context) {
+    const formatted = this.formatMessage('WEBHOOK', message, context);
+    console.log(`[WEBHOOK] ${message}`, context);
+    this.writeLog('webhook.log', formatted);
+  }
+}
+
+module.exports = new Logger();
+
+===================
+FILE: server\webhooks\orderhandler.js
+===================
+const db = require('../database/init');
+
+class OrderWebhookHandler {
+  // Handle order created
+  static handleOrderCreated(orderData) {
+    try {
+      const order = {
+        shopify_order_id: orderData.id.toString(),
+        order_number: orderData.order_number.toString(),
+        name: orderData.name,
+        fulfillment_status: orderData.fulfillment_status || 'unfulfilled',
+        total_quantity: orderData.line_items.reduce((sum, item) => sum + item.quantity, 0),
+        subtotal_price: orderData.subtotal_price,
+        created_at: orderData.created_at,
+        shipping_code: orderData.shipping_lines[0]?.code || '',
+        shipping_name: orderData.shipping_address?.name || '',
+        shipping_address1: orderData.shipping_address?.address1 || '',
+        shipping_address2: orderData.shipping_address?.address2 || '',
+        shipping_city: orderData.shipping_address?.city || '',
+        shipping_province: orderData.shipping_address?.province || '',
+        shipping_zip: orderData.shipping_address?.zip || '',
+        shipping_country: orderData.shipping_address?.country || ''
+      };
+
+      // Insert order
+      const insertOrder = db.prepare(`
+        INSERT OR REPLACE INTO orders (
+          shopify_order_id, order_number, name, fulfillment_status, 
+          total_quantity, subtotal_price, created_at, shipping_code,
+          shipping_name, shipping_address1, shipping_address2, 
+          shipping_city, shipping_province, shipping_zip, shipping_country
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      insertOrder.run(
+        order.shopify_order_id, order.order_number, order.name,
+        order.fulfillment_status, order.total_quantity, order.subtotal_price,
+        order.created_at, order.shipping_code, order.shipping_name,
+        order.shipping_address1, order.shipping_address2, order.shipping_city,
+        order.shipping_province, order.shipping_zip, order.shipping_country
+      );
+
+      // Insert line items
+      const insertLineItem = db.prepare(`
+        INSERT OR REPLACE INTO line_items (
+          shopify_order_id, order_number, shopify_line_item_id, quantity,
+          image_url, title, name, brand, size, weight, weight_unit, sku,
+          url_handle, product_type
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      orderData.line_items.forEach(item => {
+        const size = item.properties?.find(p => p.name === 'Size')?.value || '';
+        const productType = item.product_type || '';
+        
+        insertLineItem.run(
+          order.shopify_order_id,
+          order.order_number,
+          item.id.toString(),
+          item.quantity,
+          item.product?.images?.[0]?.src || '',
+          item.title,
+          item.name,
+          item.vendor,
+          size,
+          item.grams / 1000 || 0,
+          'g',
+          item.sku,
+          item.product?.handle || '',
+          productType
+        );
+      });
+
+      console.log(`Order ${order.name} created successfully`);
+      return { success: true, order_number: order.name };
+    } catch (error) {
+      console.error('Error handling order created:', error);
+      throw error;
+    }
+  }
+
+  // Handle order updated
+  static handleOrderUpdated(orderData) {
+    try {
+      const existingOrder = db.prepare('SELECT * FROM orders WHERE shopify_order_id = ?')
+        .get(orderData.id.toString());
+
+      if (!existingOrder) {
+        return this.handleOrderCreated(orderData);
+      }
+
+      // Get existing line items
+      const existingLineItems = db.prepare(
+        'SELECT * FROM line_items WHERE shopify_order_id = ?'
+      ).all(orderData.id.toString());
+
+      const existingItemMap = new Map(
+        existingLineItems.map(item => [item.shopify_line_item_id, item])
+      );
+
+      const currentItemIds = new Set();
+
+      // Process each line item in updated order
+      orderData.line_items.forEach(item => {
+        const itemId = item.id.toString();
+        currentItemIds.add(itemId);
+        const existingItem = existingItemMap.get(itemId);
+
+        if (!existingItem) {
+          // New item - add to top
+          const insertLineItem = db.prepare(`
+            INSERT INTO line_items (
+              shopify_order_id, order_number, shopify_line_item_id, quantity,
+              image_url, title, name, brand, size, weight, weight_unit, sku,
+              url_handle, product_type, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+          `);
+
+          const size = item.properties?.find(p => p.name === 'Size')?.value || '';
+          insertLineItem.run(
+            orderData.id.toString(),
+            orderData.order_number.toString(),
+            itemId,
+            item.quantity,
+            item.product?.images?.[0]?.src || '',
+            item.title,
+            item.name,
+            item.vendor,
+            size,
+            item.grams / 1000 || 0,
+            'g',
+            item.sku,
+            item.product?.handle || '',
+            item.product_type || ''
+          );
+        } else if (item.quantity > existingItem.quantity) {
+          // Quantity increased - create new entry for difference
+          const diff = item.quantity - existingItem.quantity;
+          const insertLineItem = db.prepare(`
+            INSERT INTO line_items (
+              shopify_order_id, order_number, shopify_line_item_id, quantity,
+              image_url, title, name, brand, size, weight, weight_unit, sku,
+              url_handle, product_type, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+          `);
+
+          const size = item.properties?.find(p => p.name === 'Size')?.value || '';
+          insertLineItem.run(
+            orderData.id.toString(),
+            orderData.order_number.toString(),
+            itemId + '_' + Date.now(),
+            diff,
+            item.product?.images?.[0]?.src || '',
+            item.title,
+            item.name,
+            item.vendor,
+            size,
+            item.grams / 1000 || 0,
+            'g',
+            item.sku,
+            item.product?.handle || '',
+            item.product_type || ''
+          );
+        } else if (item.quantity < existingItem.quantity && item.quantity > 0) {
+          // Quantity decreased but not removed
+          db.prepare('UPDATE line_items SET quantity = ? WHERE id = ?')
+            .run(item.quantity, existingItem.id);
+        }
+      });
+
+      // Remove deleted items
+      existingLineItems.forEach(item => {
+        if (!currentItemIds.has(item.shopify_line_item_id)) {
+          db.prepare('DELETE FROM line_items WHERE id = ?').run(item.id);
+        }
+      });
+
+      // Update order info
+      db.prepare(`
+        UPDATE orders SET 
+          total_quantity = ?,
+          fulfillment_status = ?,
+          updated_at = datetime('now')
+        WHERE shopify_order_id = ?
+      `).run(
+        orderData.line_items.reduce((sum, item) => sum + item.quantity, 0),
+        orderData.fulfillment_status || 'unfulfilled',
+        orderData.id.toString()
+      );
+
+      console.log(`Order ${orderData.name} updated successfully`);
+      return { success: true, order_number: orderData.name };
+    } catch (error) {
+      console.error('Error handling order updated:', error);
+      throw error;
+    }
+  }
+
+  // Handle order cancelled
+  static handleOrderCancelled(orderData) {
+    try {
+      db.prepare('DELETE FROM orders WHERE shopify_order_id = ?')
+        .run(orderData.id.toString());
+      
+      console.log(`Order ${orderData.name} cancelled and removed`);
+      return { success: true, order_number: orderData.name };
+    } catch (error) {
+      console.error('Error handling order cancelled:', error);
+      throw error;
+    }
+  }
+
+  // Handle order fulfilled
+  static handleOrderFulfilled(orderData) {
+    try {
+      db.prepare(`
+        UPDATE orders SET 
+          fulfillment_status = ?,
+          updated_at = datetime('now')
+        WHERE shopify_order_id = ?
+      `).run('fulfilled', orderData.id.toString());
+
+      console.log(`Order ${orderData.name} fulfilled`);
+      return { success: true, order_number: orderData.name };
+    } catch (error) {
+      console.error('Error handling order fulfilled:', error);
+      throw error;
+    }
+  }
+}
+
+module.exports = OrderWebhookHandler;

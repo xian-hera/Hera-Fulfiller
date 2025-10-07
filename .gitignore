@@ -67,3 +67,6 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+uploads/
+database.db
+logs/

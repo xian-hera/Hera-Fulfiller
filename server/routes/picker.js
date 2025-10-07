@@ -16,12 +16,16 @@ router.get('/items', (req, res) => {
       ORDER BY li.created_at DESC
     `).all();
 
-    // Get CSV data for WIG products
+    // Get CSV data for WIG products - preload into Map
     const csvData = db.prepare('SELECT sku, data FROM csv_data').all();
     const csvMap = new Map(csvData.map(row => [row.sku, JSON.parse(row.data || '{}')]));
     
+    console.log(`Loaded ${csvMap.size} SKUs from CSV data`);
+
     const settings = db.prepare('SELECT * FROM settings').all();
     const wigColumn = settings.find(s => s.key === 'picker_wig_column')?.value || 'E';
+
+    console.log(`Using WIG column: ${wigColumn}`);
 
     // Process items with WIG type
     const processedItems = items.map(item => {
@@ -31,13 +35,16 @@ router.get('/items', (req, res) => {
         const csvRow = csvMap.get(item.sku);
         if (csvRow && csvRow[wigColumn]) {
           displayType = csvRow[wigColumn];
+          console.log(`Replaced WIG with ${displayType} for SKU ${item.sku}`);
+        } else {
+          console.log(`No CSV data found for WIG SKU: ${item.sku}`);
         }
       }
 
       return {
         ...item,
         display_type: displayType,
-        sort_type: item.product_type // Keep original for sorting
+        sort_type: item.product_type
       };
     });
 
@@ -47,6 +54,8 @@ router.get('/items', (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+// ... 其余代码保持不变
 
 // Update item status
 router.patch('/items/:id/status', (req, res) => {

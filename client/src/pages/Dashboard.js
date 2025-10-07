@@ -7,7 +7,7 @@ const Dashboard = () => {
   const navigate = useNavigate();
 
   return (
-    <Page title="Warehouse Management">
+    <Page title="Hera Beauté Fulfiller">
       <Layout>
         <Layout.Section>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1rem' }}>

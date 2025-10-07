@@ -1,17 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import {
   Page,
   Layout,
   Card,
-  ResourceList,
-  ResourceItem,
   Thumbnail,
   Text,
   Badge,
   Button,
-  ButtonGroup,
   ChoiceList,
   Modal,
   TextField,
@@ -20,7 +17,7 @@ import {
   Toast,
   Frame
 } from '@shopify/polaris';
-import { DeleteMinor, ImageIcon } from '@shopify/polaris-icons';
+import { ImageIcon } from '@shopify/polaris-icons';
 
 const Transfer = () => {
   const navigate = useNavigate();
@@ -35,8 +32,19 @@ const Transfer = () => {
     transferFrom: '',
     estimateDay: ''
   });
+  const [selectedImage, setSelectedImage] = useState(null);
   const [toastActive, setToastActive] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
+
+  const applyFilters = useCallback(() => {
+    const filtered = items.filter(item => {
+      if (item.status === 'transferring' && !statusFilter.includes('transferring')) return false;
+      if (item.status === 'waiting' && !statusFilter.includes('waiting')) return false;
+      if ((item.status === 'received' || item.status === 'found') && !statusFilter.includes('received')) return false;
+      return true;
+    });
+    setFilteredItems(filtered);
+  }, [items, statusFilter]);
 
   useEffect(() => {
     fetchItems();
@@ -44,7 +52,7 @@ const Transfer = () => {
 
   useEffect(() => {
     applyFilters();
-  }, [items, statusFilter]);
+  }, [items, statusFilter, applyFilters]);
 
   const fetchItems = async () => {
     try {
@@ -53,16 +61,6 @@ const Transfer = () => {
     } catch (error) {
       console.error('Error fetching transfer items:', error);
     }
-  };
-
-  const applyFilters = () => {
-    const filtered = items.filter(item => {
-      if (item.status === 'transferring' && !statusFilter.includes('transferring')) return false;
-      if (item.status === 'waiting' && !statusFilter.includes('waiting')) return false;
-      if ((item.status === 'received' || item.status === 'found') && !statusFilter.includes('received')) return false;
-      return true;
-    });
-    setFilteredItems(filtered);
   };
 
   const handleCopy = async (itemId) => {
@@ -173,6 +171,16 @@ const Transfer = () => {
     }
   };
 
+  const handleImageClick = (item) => {
+    if (item.image_url) {
+      setSelectedImage({
+        url: item.image_url,
+        link: `https://herabeauty.ca/products/${item.name?.toLowerCase().replace(/\s+/g, '-')}`,
+        title: `${item.brand} ${item.title}`
+      });
+    }
+  };
+
   const getItemBadge = (status) => {
     switch (status) {
       case 'waiting':
@@ -185,84 +193,220 @@ const Transfer = () => {
     }
   };
 
+  // 格式化 SKU：每4位加一个空格
+  const formatSKU = (sku) => {
+    if (!sku) return '';
+    return sku.match(/.{1,4}/g)?.join(' ') || sku;
+  };
+
+  // 格式化日期：补零
+  const formatDate = (month, day) => {
+    const m = month.toString().padStart(2, '0');
+    const d = day.toString().padStart(2, '0');
+    return `${m}/${d}`;
+  };
+
   const renderItem = (item) => {
-    const { id, quantity, image_url, order_number, sku, brand, title, size, status, transfer_from, estimate_month, estimate_day } = item;
+    const { id, quantity, image_url, order_number, sku, brand, title, size, status, transfer_from, estimate_month, estimate_day, variant_title } = item;
     
     const media = image_url ? (
-      <Thumbnail source={image_url} alt={title} size="large" />
+      <div onClick={() => handleImageClick(item)} style={{ cursor: 'pointer' }}>
+        <Thumbnail source={image_url} alt={title} size="large" />
+      </div>
     ) : (
       <Thumbnail source={ImageIcon} alt="No image" size="large" />
     );
 
     return (
-      <ResourceItem
-        id={id}
-        media={media}
-        verticalAlignment="center"
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-          <div style={{ flex: 1 }}>
-            <BlockStack gap="2">
-              <Text variant="bodyMd" as="h3" fontWeight="semibold">
-                Order: {order_number} | Qty: {quantity}
-              </Text>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Text variant="bodySm" color="subdued">
-                  SKU: {sku}
+      <div style={{ padding: '22px 16px', position: 'relative', borderBottom: '1px solid #e1e3e5' }}>
+        {/* 右上角：Transfer info 和状态标签（固定位置）*/}
+        <div style={{ 
+          position: 'absolute', 
+          top: '21px', 
+          right: '16px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px'
+        }}>
+          {status === 'waiting' && transfer_from && (
+            <Text variant="bodySm" fontWeight="bold" as="span" tone="info">
+              {transfer_from}, {formatDate(estimate_month, estimate_day)}
+            </Text>
+          )}
+          {getItemBadge(status)}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          {/* Thumbnail */}
+          <div style={{ marginRight: '16px' }}>
+            {media}
+          </div>
+
+          {/* 数量（38px）*/}
+          <div style={{ 
+            fontSize: '38px', 
+            lineHeight: 1,
+            marginRight: '20px',
+            marginTop: '5px',
+            minWidth: '50px'
+          }}>
+            {quantity}
+          </div>
+
+          {/* 产品信息（向左移动30px）*/}
+          <div style={{ flex: 1, marginLeft: '-30px', maxWidth: 'calc(100% - 300px)' }}>
+            <BlockStack gap="1">
+              {/* Brand + Title（加粗，自动换行）*/}
+              <div style={{ 
+                wordWrap: 'break-word', 
+                overflowWrap: 'break-word',
+                maxWidth: '60ch'
+              }}>
+                <Text variant="bodyLg" fontWeight="bold">
+                  {brand} {title} {size}
                 </Text>
-                <Button plain monochrome onClick={() => handleSkuCopy(sku)}>
-                  Copy
-                </Button>
               </div>
-              <Text variant="bodySm">
-                {brand} {title} {size}
-              </Text>
-              {status === 'waiting' && (
-                <Text variant="bodySm" color="subdued">
-                  From: {transfer_from}, Est: {estimate_month}/{estimate_day}
+              
+              {/* Variant Title */}
+              {variant_title && (
+                <Text variant="bodyMd">
+                  {variant_title}
                 </Text>
               )}
-              <div>{getItemBadge(status)}</div>
+              
+              {/* SKU（每4位一个空格，可点击复制）*/}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Text variant="bodySm">
+                  {formatSKU(sku)}
+                </Text>
+                <button
+                  onClick={() => handleSkuCopy(sku)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: '#005bd3',
+                    cursor: 'pointer',
+                    fontSize: '12px',
+                    padding: 0
+                  }}
+                >
+                  Copy
+                </button>
+              </div>
+              
+              {/* Order Number（灰色，添加#）*/}
+              <Text variant="bodySm" tone="subdued">
+                #{order_number}
+              </Text>
             </BlockStack>
           </div>
-          <div>
+
+          {/* 右侧按钮（固定位置，距离状态标签下方20px）*/}
+          <div style={{ 
+            position: 'absolute', 
+            right: '16px', 
+            top: '61px', // 21px(状态标签top) + 20px(标签高度) + 20px(间距)
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'flex-end',
+            gap: '27px'
+          }}>
             {clearMode ? (
               <input
                 type="checkbox"
                 checked={selectedItems.includes(id)}
                 onChange={() => handleItemSelect(id)}
+                style={{ width: '20px', height: '20px' }}
               />
             ) : (
-              <ButtonGroup>
-                <Button plain onClick={() => handleCopy(id)}>
-                  Copy All
-                </Button>
-                {status === 'transferring' && (
-                  <>
-                    <Button onClick={() => handleBlueClick(item)}>
-                      Transfer
-                    </Button>
-                    <Button variant="primary" onClick={() => handleGreenClick(item)}>
-                      Found
-                    </Button>
-                  </>
-                )}
-                {status === 'waiting' && (
-                  <Button variant="primary" onClick={() => handleGreenClick(item)}>
-                    Received
-                  </Button>
-                )}
-              </ButtonGroup>
+              <>
+                {/* 主按钮区域 */}
+                <div style={{ display: 'flex', gap: '25px' }}>
+                  {status === 'transferring' && (
+                    <>
+                      <button
+                        onClick={() => handleBlueClick(item)}
+                        style={{
+                          backgroundColor: 'white',
+                          color: '#0080FF',
+                          border: '2px solid #0080FF',
+                          borderRadius: '8px',
+                          padding: '8px 16px',
+                          fontSize: '14px',
+                          cursor: 'pointer',
+                          fontWeight: '500',
+                          minWidth: '80px'
+                        }}
+                      >
+                        Transfer
+                      </button>
+                      <button
+                        onClick={() => handleGreenClick(item)}
+                        style={{
+                          backgroundColor: '#00A047',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '8px',
+                          padding: '8px 16px',
+                          fontSize: '14px',
+                          cursor: 'pointer',
+                          fontWeight: '500',
+                          minWidth: '80px'
+                        }}
+                      >
+                        Found
+                      </button>
+                    </>
+                  )}
+                  {status === 'waiting' && (
+                    <button
+                      onClick={() => handleGreenClick(item)}
+                      style={{
+                        backgroundColor: '#0080FF',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '8px',
+                        padding: '8px 16px',
+                        fontSize: '14px',
+                        cursor: 'pointer',
+                        fontWeight: '500',
+                        minWidth: '80px'
+                      }}
+                    >
+                      Received
+                    </button>
+                  )}
+                </div>
+
+                {/* Copy 按钮 */}
+                <button
+                  onClick={() => handleCopy(id)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: '#005bd3',
+                    cursor: 'pointer',
+                    fontSize: '13px',
+                    padding: 0,
+                    fontWeight: '500'
+                  }}
+                >
+                  Copy
+                </button>
+              </>
             )}
           </div>
         </div>
-      </ResourceItem>
+      </div>
     );
   };
 
   const toastMarkup = toastActive ? (
     <Toast content={toastMessage} onDismiss={() => setToastActive(false)} />
   ) : null;
+
+  // Get current month for display
+  const currentMonth = new Date().getMonth() + 1;
 
   return (
     <Frame>
@@ -309,15 +453,49 @@ const Transfer = () => {
 
           <Layout.Section>
             <Card>
-              <ResourceList
-                items={filteredItems}
-                renderItem={renderItem}
-                emptyState={<Banner>No items to transfer</Banner>}
-              />
+              <div>
+                {filteredItems.length === 0 ? (
+                  <Banner>No items to transfer</Banner>
+                ) : (
+                  filteredItems.map(item => (
+                    <div key={item.id}>
+                      {renderItem(item)}
+                    </div>
+                  ))
+                )}
+              </div>
             </Card>
           </Layout.Section>
         </Layout>
 
+        {/* Image Modal */}
+        <Modal
+          open={selectedImage !== null}
+          onClose={() => setSelectedImage(null)}
+          title={selectedImage?.title || 'Product Image'}
+        >
+          <Modal.Section>
+            {selectedImage && (
+              <BlockStack gap="4">
+                <img 
+                  src={selectedImage.url} 
+                  alt="Product" 
+                  style={{ width: '100%', maxHeight: '500px', objectFit: 'contain' }} 
+                />
+                <Button 
+                  url={selectedImage.link} 
+                  external
+                  variant="primary"
+                  fullWidth
+                >
+                  View Product on Website
+                </Button>
+              </BlockStack>
+            )}
+          </Modal.Section>
+        </Modal>
+
+        {/* Transfer Modal */}
         <Modal
           open={transferModal !== null}
           onClose={() => setTransferModal(null)}
@@ -353,15 +531,35 @@ const Transfer = () => {
                   placeholder="e.g., 01, 02, 03"
                   autoComplete="off"
                 />
-                <TextField
-                  label="Estimated Arrival Day"
-                  type="number"
-                  value={transferData.estimateDay}
-                  onChange={(value) => setTransferData({ ...transferData, estimateDay: value })}
-                  min={1}
-                  max={31}
-                  autoComplete="off"
-                />
+                <div>
+                  <Text variant="bodyMd" as="p" fontWeight="semibold">
+                    Estimated Arrival (Month/Day)
+                  </Text>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
+                    <div style={{ flex: 1 }}>
+                      <TextField
+                        type="number"
+                        value={currentMonth.toString()}
+                        onChange={() => {}}
+                        disabled
+                        prefix="Month:"
+                        autoComplete="off"
+                      />
+                    </div>
+                    <Text variant="bodyLg">/</Text>
+                    <div style={{ flex: 1 }}>
+                      <TextField
+                        type="number"
+                        value={transferData.estimateDay}
+                        onChange={(value) => setTransferData({ ...transferData, estimateDay: value })}
+                        min={1}
+                        max={31}
+                        prefix="Day:"
+                        autoComplete="off"
+                      />
+                    </div>
+                  </div>
+                </div>
               </BlockStack>
             )}
           </Modal.Section>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import {
@@ -14,12 +14,12 @@ import {
   ButtonGroup,
   ChoiceList,
   Modal,
-  TextField,
-  InlineStack,
   BlockStack,
-  Banner
+  Banner,
+  InlineStack
 } from '@shopify/polaris';
 import { SortIcon, ImageIcon } from '@shopify/polaris-icons';
+import NumericKeypad from '../components/NumericKeypad';
 
 const Picker = () => {
   const navigate = useNavigate();
@@ -31,13 +31,18 @@ const Picker = () => {
   const [quantityModal, setQuantityModal] = useState(null);
   const [pickedQuantity, setPickedQuantity] = useState('');
 
+  const applyFilters = useCallback(() => {
+    const filtered = items.filter(item => statusFilter.includes(item.picker_status));
+    setFilteredItems(filtered);
+  }, [items, statusFilter]);
+
   useEffect(() => {
     fetchItems();
   }, []);
 
   useEffect(() => {
     applyFilters();
-  }, [items, statusFilter]);
+  }, [items, statusFilter, applyFilters]);
 
   const fetchItems = async () => {
     try {
@@ -46,11 +51,6 @@ const Picker = () => {
     } catch (error) {
       console.error('Error fetching items:', error);
     }
-  };
-
-  const applyFilters = () => {
-    const filtered = items.filter(item => statusFilter.includes(item.picker_status));
-    setFilteredItems(filtered);
   };
 
   const handleSort = () => {
@@ -96,6 +96,18 @@ const Picker = () => {
     }
   };
 
+  const handleUndoMissing = (item) => {
+    updateItemStatus(item.id, 'picking');
+  };
+
+  const handleNumberClick = (number) => {
+    setPickedQuantity(prev => prev + number);
+  };
+
+  const handleBackspace = () => {
+    setPickedQuantity(prev => prev.slice(0, -1));
+  };
+
   const handleQuantitySubmit = async () => {
     const qty = parseInt(pickedQuantity);
     if (!qty || qty >= quantityModal.quantity || qty < 1) {
@@ -115,6 +127,16 @@ const Picker = () => {
     }
   };
 
+  const handleImageClick = (item) => {
+    if (item.image_url && item.url_handle) {
+      setSelectedImage({
+        url: item.image_url,
+        link: `https://herabeauty.ca/products/${item.url_handle}`,
+        title: `${item.brand} ${item.title}`
+      });
+    }
+  };
+
   const getItemBadge = (status) => {
     switch (status) {
       case 'picked':
@@ -126,58 +148,170 @@ const Picker = () => {
     }
   };
 
+  // 格式化 SKU：每4位加一个空格
+  const formatSKU = (sku) => {
+    if (!sku) return '';
+    return sku.match(/.{1,4}/g)?.join(' ') || sku;
+  };
+
   const renderItem = (item) => {
-    const { id, quantity, image_url, order_name, display_type, sku, brand, title, size, picker_status, url_handle } = item;
+    const { id, quantity, image_url, order_name, display_type, sku, brand, title, size, picker_status, variant_title } = item;
+    
     const media = image_url ? (
-      <Thumbnail
-        source={image_url}
-        alt={title}
-        size="large"
-      />
+      <div onClick={() => handleImageClick(item)} style={{ cursor: 'pointer' }}>
+        <Thumbnail
+          source={image_url}
+          alt={title}
+          size="large"
+        />
+      </div>
     ) : (
       <Thumbnail source={ImageIcon} alt="No image" size="large" />
     );
 
     return (
-      <ResourceItem id={id} media={media}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-          <div style={{ flex: 1 }}>
-            <BlockStack gap="2">
-              <Text variant="bodyMd" as="h3" fontWeight="semibold">
-                Order: {order_name} | Qty: {quantity}
-              </Text>
-              <Text variant="bodySm" color="subdued">
-                Type: {display_type}
-              </Text>
-              <Text variant="bodySm" color="subdued">
-                SKU: {sku}
-              </Text>
+      <div style={{ padding: '22px 16px', position: 'relative' }}>
+        {/* 状态标签固定在右上角 */}
+        <div style={{ position: 'absolute', top: '22px', right: '16px' }}>
+          {getItemBadge(picker_status)}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          {/* Thumbnail */}
+          <div style={{ marginRight: '16px' }}>
+            {media}
+          </div>
+
+          {/* 数量（38px）*/}
+          <div style={{ 
+            fontSize: '38px', 
+            lineHeight: 1,
+            marginRight: '20px',
+            marginTop: '5px',
+            minWidth: '50px'
+          }}>
+            {quantity}
+          </div>
+
+          {/* 产品信息（向左移动30px，添加最大宽度限制）*/}
+          <div style={{ flex: 1, marginLeft: '-30px', maxWidth: 'calc(100% - 300px)' }}>
+            <BlockStack gap="1">
+              {/* 第1行：Brand + Title（加粗，自动换行）*/}
+              <div style={{ 
+                wordWrap: 'break-word', 
+                overflowWrap: 'break-word',
+                maxWidth: '60ch'
+              }}>
+                <Text variant="bodyLg" fontWeight="bold">
+                  {brand} {title} {size}
+                </Text>
+              </div>
+              
+              {/* 第2行：Variant Title */}
+              {variant_title && (
+                <Text variant="bodyMd">
+                  {variant_title}
+                </Text>
+              )}
+              
+              {/* 第3行：Type */}
               <Text variant="bodySm">
-                {brand} {title} {size}
+                {display_type}
               </Text>
-              <div>{getItemBadge(picker_status)}</div>
+              
+              {/* 第4行：SKU（每4位一个空格）*/}
+              <Text variant="bodySm">
+                {formatSKU(sku)}
+              </Text>
+              
+              {/* 第5行：Order Number（灰色）*/}
+              <Text variant="bodySm" tone="subdued">
+                {order_name}
+              </Text>
             </BlockStack>
           </div>
-          <div>
-            <ButtonGroup>
-              {picker_status === 'picked' ? (
-                <Button variant="primary" onClick={() => handleGreenClick(item)}>
-                  Undo
-                </Button>
-              ) : (
-                <>
-                  <Button tone="critical" onClick={() => handleRedClick(item)}>
-                    Missing
-                  </Button>
-                  <Button variant="primary" onClick={() => handleGreenClick(item)}>
-                    Picked
-                  </Button>
-                </>
-              )}
-            </ButtonGroup>
+
+          {/* 右侧按钮（垂直居中）*/}
+          <div style={{ 
+            position: 'absolute', 
+            right: '16px', 
+            top: '50%', 
+            transform: 'translateY(-50%)',
+            marginTop: '10px'
+          }}>
+            {picker_status === 'picked' ? (
+              <button
+                onClick={() => handleGreenClick(item)}
+                style={{
+                  backgroundColor: 'white',
+                  color: 'black',
+                  border: '1px solid #c4cdd5',
+                  borderRadius: '8px',
+                  padding: '6px 12px',
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                  fontWeight: '500',
+                  minWidth: '60px'
+                }}
+              >
+                Undo
+              </button>
+            ) : picker_status === 'missing' ? (
+              <button
+                onClick={() => handleUndoMissing(item)}
+                style={{
+                  backgroundColor: 'white',
+                  color: 'black',
+                  border: '1px solid #c4cdd5',
+                  borderRadius: '8px',
+                  padding: '6px 12px',
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                  fontWeight: '500',
+                  minWidth: '60px'
+                }}
+              >
+                Undo
+              </button>
+            ) : (
+              <div style={{ display: 'flex', gap: '25px' }}>
+                <button
+                  onClick={() => handleRedClick(item)}
+                  style={{
+                    backgroundColor: '#ec8b84ff',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    padding: '6px 12px',
+                    fontSize: '13px',
+                    cursor: 'pointer',
+                    fontWeight: '500',
+                    minWidth: '60px'
+                  }}
+                >
+                  Missing
+                </button>
+                <button
+                  onClick={() => handleGreenClick(item)}
+                  style={{
+                    backgroundColor: '#6db477ff',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    padding: '8px 16px',
+                    fontSize: '14px',
+                    cursor: 'pointer',
+                    fontWeight: '500',
+                    minWidth: '80px'
+                  }}
+                >
+                  Picked
+                </button>
+              </div>
+            )}
           </div>
         </div>
-      </ResourceItem>
+      </div>
     );
   };
 
@@ -212,27 +346,86 @@ const Picker = () => {
 
         <Layout.Section>
           <Card>
-            <ResourceList
-              items={filteredItems}
-              renderItem={renderItem}
-              emptyState={<Banner>No items to pick</Banner>}
-            />
+            <div>
+              {filteredItems.length === 0 ? (
+                <Banner>No items to pick</Banner>
+              ) : (
+                filteredItems.map(item => (
+                  <div key={item.id} style={{ borderBottom: '1px solid #e1e3e5' }}>
+                    {renderItem(item)}
+                  </div>
+                ))
+              )}
+            </div>
           </Card>
         </Layout.Section>
       </Layout>
 
+      {/* Image Modal */}
       <Modal
         open={selectedImage !== null}
         onClose={() => setSelectedImage(null)}
-        title="Product Image"
+        title={selectedImage?.title || 'Product Image'}
       >
         <Modal.Section>
           {selectedImage && (
+            <BlockStack gap="4">
+              <img 
+                src={selectedImage.url} 
+                alt="Product" 
+                style={{ width: '100%', maxHeight: '500px', objectFit: 'contain' }} 
+              />
+              <Button 
+                url={selectedImage.link} 
+                external
+                variant="primary"
+                fullWidth
+              >
+                View Product on Website
+              </Button>
+            </BlockStack>
+          )}
+        </Modal.Section>
+      </Modal>
+
+      {/* Quantity Modal */}
+      <Modal
+        open={quantityModal !== null}
+        onClose={() => setQuantityModal(null)}
+        title="Enter Picked Quantity"
+      >
+        <Modal.Section>
+          {quantityModal && (
             <>
-              <img src={selectedImage.url} alt="Product" style={{ width: '100%' }} />
-              <div style={{ marginTop: '16px' }}>
-                <Button url={selectedImage.link} external>
-                  View Product
+              <Text>Total quantity: {quantityModal.quantity}</Text>
+              <div style={{ marginTop: '12px' }}>
+                <div style={{
+                  border: '2px solid #c4cdd5',
+                  borderRadius: '8px',
+                  padding: '12px 16px',
+                  fontSize: '24px',
+                  fontWeight: 'bold',
+                  textAlign: 'center',
+                  backgroundColor: '#ffffff',
+                  minHeight: '50px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  {pickedQuantity || '0'}
+                </div>
+              </div>
+              <div style={{ 
+                marginTop: '20px',
+                display: 'flex',
+                gap: '12px',
+                justifyContent: 'flex-end'
+              }}>
+                <Button onClick={() => setQuantityModal(null)}>
+                  Cancel
+                </Button>
+                <Button variant="primary" onClick={handleQuantitySubmit}>
+                  Submit
                 </Button>
               </div>
             </>
@@ -240,40 +433,21 @@ const Picker = () => {
         </Modal.Section>
       </Modal>
 
-      <Modal
-        open={quantityModal !== null}
-        onClose={() => setQuantityModal(null)}
-        title="Enter Picked Quantity"
-        primaryAction={{
-          content: 'Submit',
-          onAction: handleQuantitySubmit
-        }}
-        secondaryActions={[
-          {
-            content: 'Cancel',
-            onAction: () => setQuantityModal(null)
-          }
-        ]}
-      >
-        <Modal.Section>
-          {quantityModal && (
-            <>
-              <Text>Total quantity: {quantityModal.quantity}</Text>
-              <div style={{ marginTop: '16px' }}>
-                <TextField
-                  label="Picked quantity"
-                  type="number"
-                  value={pickedQuantity}
-                  onChange={setPickedQuantity}
-                  min={1}
-                  max={quantityModal.quantity - 1}
-                  autoComplete="off"
-                />
-              </div>
-            </>
-          )}
-        </Modal.Section>
-      </Modal>
+      {/* Floating Numeric Keypad */}
+      {quantityModal && (
+        <div style={{
+          position: 'fixed',
+          bottom: '20px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 1000
+        }}>
+          <NumericKeypad
+            onNumberClick={handleNumberClick}
+            onBackspace={handleBackspace}
+          />
+        </div>
+      )}
     </Page>
   );
 };

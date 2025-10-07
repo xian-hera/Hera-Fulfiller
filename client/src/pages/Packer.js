@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import {
@@ -9,166 +9,149 @@ import {
   ResourceItem,
   Text,
   Badge,
-  InlineStack,
-  BlockStack,
+  Button,
   ChoiceList,
+  BlockStack,
   Banner,
-  Icon
+  InlineStack
 } from '@shopify/polaris';
-import { AlertCircleIcon, CheckCircleIcon, InfoIcon } from '@shopify/polaris-icons';
 
 const Packer = () => {
   const navigate = useNavigate();
   const [orders, setOrders] = useState([]);
   const [filteredOrders, setFilteredOrders] = useState([]);
-  const [statusFilter, setStatusFilter] = useState(['packing', 'waiting', 'ready', 'holding']);
+  const [statusFilter, setStatusFilter] = useState(['packing', 'waiting', 'holding', 'ready']);
+
+  const applyFilters = useCallback(() => {
+    const filtered = orders.filter(order => statusFilter.includes(order.orderStatus));
+    setFilteredOrders(filtered);
+  }, [orders, statusFilter]);
 
   useEffect(() => {
     fetchOrders();
-    const interval = setInterval(fetchOrders, 30000);
-    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
     applyFilters();
-  }, [orders, statusFilter]);
+  }, [orders, statusFilter, applyFilters]);
 
   const fetchOrders = async () => {
     try {
       const response = await axios.get('/api/packer/orders');
+      console.log('Fetched orders:', response.data);
       setOrders(response.data);
     } catch (error) {
       console.error('Error fetching orders:', error);
     }
   };
 
-  const applyFilters = () => {
-    const filtered = orders.filter(order => {
-      const status = order.status || order.orderStatus;
-      return statusFilter.includes(status);
-    });
-    setFilteredOrders(filtered);
-  };
-
-  const handleOrderClick = (order) => {
-    navigate(`/packer/order/${order.shopify_order_id}`);
-  };
-
-  const handleStatusClick = async (order, e) => {
+  const handleStatusClick = async (e, orderId, currentStatus) => {
     e.stopPropagation();
-    const currentStatus = order.status || order.orderStatus;
-    const newStatus = currentStatus === 'holding' ? order.orderStatus : 'holding';
+    
+    let newStatus;
+    if (currentStatus === 'packing') {
+      newStatus = 'holding';
+    } else if (currentStatus === 'holding') {
+      newStatus = 'packing';
+    } else if (currentStatus === 'ready') {
+      newStatus = 'packing';
+    }
+
+    console.log(`Changing order ${orderId} from ${currentStatus} to ${newStatus}`);
 
     try {
-      await axios.patch(`/api/packer/orders/${order.shopify_order_id}/status`, {
-        status: newStatus
-      });
-      await fetchOrders();
+      await axios.patch(`/api/packer/orders/${orderId}`, { status: newStatus });
+      await fetchOrders(); // 重新获取以更新 orderStatus
     } catch (error) {
       console.error('Error updating order status:', error);
     }
   };
 
-  const getOrderBadge = (order) => {
-    const status = order.status || order.orderStatus;
-    switch (status) {
+  const handleOrderClick = (orderId) => {
+    console.log('Navigating to order:', orderId);
+    navigate(`/packer/${orderId}`);
+  };
+
+  const getStatusBadge = (orderStatus) => {
+    switch (orderStatus) {
       case 'ready':
         return <Badge tone="success">Ready</Badge>;
-      case 'waiting':
-        return <Badge tone="info">Waiting</Badge>;
       case 'holding':
         return <Badge tone="warning">Holding</Badge>;
+      case 'waiting':
+        return <Badge tone="info">Waiting</Badge>;
       default:
         return <Badge>Packing</Badge>;
     }
   };
 
-  const renderOrder = (order) => {
-    const status = order.status || order.orderStatus;
-    const { name, hasWeightWarning, box_type, weight, shipping_code, transferInfo, hasTransferring } = order;
+  // 格式化日期：补零
+  const formatDate = (month, day) => {
+    if (!month || !day) return '';
+    const m = month.toString().padStart(2, '0');
+    const d = day.toString().padStart(2, '0');
+    return `${m}/${d}`;
+  };
+
+  const renderItem = (order) => {
+    const { 
+      shopify_order_id, 
+      order_number, 
+      name, 
+      total_quantity, 
+      shipping_code, 
+      status,
+      orderStatus, 
+      box_type, 
+      weight, 
+      hasWeightWarning,
+      transferInfo
+    } = order;
 
     return (
       <ResourceItem
-        id={order.shopify_order_id}
-        onClick={() => handleOrderClick(order)}
+        id={shopify_order_id}
+        onClick={() => handleOrderClick(shopify_order_id)}
         verticalAlignment="center"
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
           <div style={{ flex: 1 }}>
             <BlockStack gap="2">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Text variant="headingMd" as="h3">
-                  {name}
-                </Text>
-                {hasWeightWarning && (
-                  <Icon source={AlertCircleIcon} tone="critical" />
+              <Text variant="bodyMd" as="h3" fontWeight="semibold">
+                {name} (#{order_number})
+              </Text>
+              <Text variant="bodySm" color="subdued">
+                Items: {total_quantity} | Shipping: {shipping_code || 'Standard'}
+              </Text>
+              <InlineStack gap="2" align="start">
+                {/* Transfer info（在状态标签左侧）*/}
+                {orderStatus === 'waiting' && transferInfo && (
+                  <Text variant="bodySm" fontWeight="bold" tone="info">
+                    {transferInfo.transferFroms.join(', ')}, {formatDate(transferInfo.estimateMonth, transferInfo.estimateDay)}
+                  </Text>
                 )}
-              </div>
-
-              {status === 'ready' && (
-                <InlineStack gap="2">
-                  {box_type && (
-                    <Badge>Box: {box_type}</Badge>
-                  )}
-                  {weight && (
-                    <Badge>{weight}</Badge>
-                  )}
-                  {shipping_code && (
-                    <Text variant="bodySm" color="subdued">
-                      {shipping_code}
-                    </Text>
-                  )}
-                </InlineStack>
-              )}
-
-              {status === 'waiting' && transferInfo && (
-                <Text variant="bodySm" color="subdued">
-                  {transferInfo.quantity} items from {transferInfo.transferFroms.join(', ')} - 
-                  Est: {transferInfo.estimateMonth}/{transferInfo.estimateDay}
-                </Text>
-              )}
-
-              <div>{getOrderBadge(order)}</div>
+                
+                {/* 状态标签 */}
+                {getStatusBadge(orderStatus)}
+                
+                {box_type && (
+                  <Badge tone="info">Box: {box_type}</Badge>
+                )}
+                {weight && (
+                  <Badge>Weight: {weight}g</Badge>
+                )}
+                {hasWeightWarning && (
+                  <Badge tone="warning">⚠️ Weight Warning</Badge>
+                )}
+              </InlineStack>
             </BlockStack>
           </div>
-
-          <div onClick={(e) => handleStatusClick(order, e)} style={{ cursor: 'pointer', padding: '8px' }}>
-            {status === 'holding' ? (
-              <div style={{ width: '32px', height: '32px', background: '#B98900', borderRadius: '50%' }} />
-            ) : status === 'ready' ? (
-              <div style={{ position: 'relative' }}>
-                <Icon source={CheckCircleIcon} tone="success" />
-                {hasTransferring && (
-                  <div style={{
-                    position: 'absolute',
-                    top: '-4px',
-                    right: '-4px',
-                    width: '12px',
-                    height: '12px',
-                    background: '#0080FF',
-                    borderRadius: '50%',
-                    border: '2px solid white'
-                  }} />
-                )}
-              </div>
-            ) : status === 'waiting' ? (
-              <Icon source={InfoIcon} tone="info" />
-            ) : (
-              <div style={{ position: 'relative' }}>
-                <div style={{ width: '32px', height: '32px', border: '2px solid #666', borderRadius: '50%' }} />
-                {hasTransferring && (
-                  <div style={{
-                    position: 'absolute',
-                    top: '-4px',
-                    right: '-4px',
-                    width: '14px',
-                    height: '14px',
-                    background: '#0080FF',
-                    borderRadius: '50%',
-                    border: '2px solid white'
-                  }} />
-                )}
-              </div>
+          <div>
+            {/* Waiting 状态不显示按钮 */}
+            {orderStatus !== 'waiting' && (
+              <Button onClick={(e) => handleStatusClick(e, shopify_order_id, status)}>
+                {status === 'holding' ? 'Resume' : status === 'ready' ? 'Reopen' : 'Hold'}
+              </Button>
             )}
           </div>
         </div>
@@ -190,8 +173,8 @@ const Packer = () => {
                 choices={[
                   { label: 'Packing', value: 'packing' },
                   { label: 'Waiting', value: 'waiting' },
-                  { label: 'Ready', value: 'ready' },
-                  { label: 'Holding', value: 'holding' }
+                  { label: 'Holding', value: 'holding' },
+                  { label: 'Ready', value: 'ready' }
                 ]}
                 selected={statusFilter}
                 onChange={setStatusFilter}
@@ -205,7 +188,7 @@ const Packer = () => {
           <Card>
             <ResourceList
               items={filteredOrders}
-              renderItem={renderOrder}
+              renderItem={renderItem}
               emptyState={<Banner>No orders to pack</Banner>}
             />
           </Card>

@@ -19,7 +19,7 @@ function App() {
           <Route path="/picker" element={<Picker />} />
           <Route path="/transfer" element={<Transfer />} />
           <Route path="/packer" element={<Packer />} />
-          <Route path="/packer/order/:shopifyOrderId" element={<OrderDetail />} />
+          <Route path="/packer/:shopifyOrderId" element={<OrderDetail />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </Router>

@@ -112,22 +112,24 @@ const initDatabase = () => {
     INSERT OR IGNORE INTO box_types (code, dimensions) VALUES (?, ?)
   `);
 
-  insertBoxType.run('A', '10x8x4');
-  insertBoxType.run('B', '12x10x6');
-  insertBoxType.run('C', '14x12x8');
-  insertBoxType.run('D', '16x14x10');
-  insertBoxType.run('E', '18x16x12');
-  insertBoxType.run('F', '20x18x14');
-  insertBoxType.run('G', '22x20x16');
-  insertBoxType.run('H', '24x22x18');
+  insertBoxType.run('A', '5x20x5');
+  insertBoxType.run('B', '18x10x4');
+  insertBoxType.run('BB', '');
+  insertBoxType.run('C', '18x10x5');
+  insertBoxType.run('D', '18x12x4');
+  insertBoxType.run('E', '18x12x8');
+  insertBoxType.run('F', '18x14x5');
+  insertBoxType.run('G', '26x8x8');
+  insertBoxType.run('H', '12x6x6');
 
   // Insert default settings
   const insertSetting = db.prepare(`
     INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)
   `);
 
-  insertSetting.run('transfer_csv_column', 'E');
+  insertSetting.run('transfer_csv_column', 'D');  // 修改：Transfer 用 D 列
   insertSetting.run('picker_wig_column', 'E');
+  insertSetting.run('sku_column', 'A');
   insertSetting.run('csv_uploaded_at', '');
 
   console.log('Database initialized successfully');
