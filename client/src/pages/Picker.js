@@ -170,145 +170,139 @@ const Picker = () => {
     );
 
     return (
-      <div style={{ padding: '22px 16px', position: 'relative' }}>
-        {/* 状态标签固定在右上角 */}
-        <div style={{ position: 'absolute', top: '22px', right: '16px' }}>
+      <div className="picker-item-container">
+        {/* 桌面端：状态标签在右上角 */}
+        <div className="picker-item-badge-desktop">
           {getItemBadge(picker_status)}
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center' }}>
-          {/* Thumbnail */}
-          <div style={{ marginRight: '16px' }}>
-            {media}
+        <div className="picker-item-main">
+          {/* 桌面布局 */}
+          <div className="picker-item-desktop">
+            <div className="picker-item-thumbnail">
+              {media}
+            </div>
+
+            <div className="picker-item-quantity">
+              {quantity}
+            </div>
+
+            <div className="picker-item-info">
+              <BlockStack gap="1">
+                <div style={{ 
+                  wordWrap: 'break-word', 
+                  overflowWrap: 'break-word'
+                }}>
+                  <Text variant="bodyLg" fontWeight="bold">
+                    {brand} {title} {size}
+                  </Text>
+                </div>
+                
+                {variant_title && (
+                  <Text variant="bodyMd">
+                    {variant_title}
+                  </Text>
+                )}
+                
+                <Text variant="bodySm">
+                  {display_type}
+                </Text>
+                
+                <Text variant="bodySm">
+                  {formatSKU(sku)}
+                </Text>
+                
+                <Text variant="bodySm" tone="subdued">
+                  {order_name}
+                </Text>
+              </BlockStack>
+            </div>
+
+            <div className="picker-item-buttons-desktop">
+              {picker_status === 'picked' ? (
+                <button onClick={() => handleGreenClick(item)} className="picker-btn picker-btn-undo">
+                  Undo
+                </button>
+              ) : picker_status === 'missing' ? (
+                <button onClick={() => handleUndoMissing(item)} className="picker-btn picker-btn-undo">
+                  Undo
+                </button>
+              ) : (
+                <div className="picker-btn-group">
+                  <button onClick={() => handleRedClick(item)} className="picker-btn picker-btn-missing">
+                    Missing
+                  </button>
+                  <button onClick={() => handleGreenClick(item)} className="picker-btn picker-btn-picked">
+                    Picked
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* 数量（38px）*/}
-          <div style={{ 
-            fontSize: '38px', 
-            lineHeight: 1,
-            marginRight: '20px',
-            marginTop: '5px',
-            minWidth: '50px'
-          }}>
-            {quantity}
-          </div>
-
-          {/* 产品信息（向左移动30px，添加最大宽度限制）*/}
-          <div style={{ flex: 1, marginLeft: '-30px', maxWidth: 'calc(100% - 300px)' }}>
-            <BlockStack gap="1">
-              {/* 第1行：Brand + Title（加粗，自动换行）*/}
-              <div style={{ 
-                wordWrap: 'break-word', 
-                overflowWrap: 'break-word',
-                maxWidth: '60ch'
-              }}>
-                <Text variant="bodyLg" fontWeight="bold">
+          {/* 手机布局 */}
+          <div className="picker-item-mobile">
+            {/* 上半部分：文本信息 */}
+            <div className="picker-item-mobile-text">
+              <div style={{ marginBottom: '4px' }}>
+                <Text variant="bodyMd" fontWeight="bold">
                   {brand} {title} {size}
                 </Text>
               </div>
-              
-              {/* 第2行：Variant Title */}
-              {variant_title && (
-                <Text variant="bodyMd">
-                  {variant_title}
+              <div style={{ marginBottom: '2px' }}>
+                <Text variant="bodySm">
+                  {display_type}
                 </Text>
-              )}
-              
-              {/* 第3行：Type */}
-              <Text variant="bodySm">
-                {display_type}
-              </Text>
-              
-              {/* 第4行：SKU（每4位一个空格）*/}
-              <Text variant="bodySm">
-                {formatSKU(sku)}
-              </Text>
-              
-              {/* 第5行：Order Number（灰色）*/}
-              <Text variant="bodySm" tone="subdued">
-                {order_name}
-              </Text>
-            </BlockStack>
-          </div>
-
-          {/* 右侧按钮（垂直居中）*/}
-          <div style={{ 
-            position: 'absolute', 
-            right: '16px', 
-            top: '50%', 
-            transform: 'translateY(-50%)',
-            marginTop: '10px'
-          }}>
-            {picker_status === 'picked' ? (
-              <button
-                onClick={() => handleGreenClick(item)}
-                style={{
-                  backgroundColor: 'white',
-                  color: 'black',
-                  border: '1px solid #c4cdd5',
-                  borderRadius: '8px',
-                  padding: '6px 12px',
-                  fontSize: '13px',
-                  cursor: 'pointer',
-                  fontWeight: '500',
-                  minWidth: '60px'
-                }}
-              >
-                Undo
-              </button>
-            ) : picker_status === 'missing' ? (
-              <button
-                onClick={() => handleUndoMissing(item)}
-                style={{
-                  backgroundColor: 'white',
-                  color: 'black',
-                  border: '1px solid #c4cdd5',
-                  borderRadius: '8px',
-                  padding: '6px 12px',
-                  fontSize: '13px',
-                  cursor: 'pointer',
-                  fontWeight: '500',
-                  minWidth: '60px'
-                }}
-              >
-                Undo
-              </button>
-            ) : (
-              <div style={{ display: 'flex', gap: '25px' }}>
-                <button
-                  onClick={() => handleRedClick(item)}
-                  style={{
-                    backgroundColor: '#ec8b84ff',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '8px',
-                    padding: '6px 12px',
-                    fontSize: '13px',
-                    cursor: 'pointer',
-                    fontWeight: '500',
-                    minWidth: '60px'
-                  }}
-                >
-                  Missing
-                </button>
-                <button
-                  onClick={() => handleGreenClick(item)}
-                  style={{
-                    backgroundColor: '#6db477ff',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '8px',
-                    padding: '8px 16px',
-                    fontSize: '14px',
-                    cursor: 'pointer',
-                    fontWeight: '500',
-                    minWidth: '80px'
-                  }}
-                >
-                  Picked
-                </button>
               </div>
-            )}
+              <div style={{ marginBottom: '2px' }}>
+                <Text variant="bodySm">
+                  {formatSKU(sku)}
+                </Text>
+              </div>
+              <div>
+                <Text variant="bodySm" tone="subdued">
+                  {order_name}
+                </Text>
+              </div>
+            </div>
+
+            {/* 下半部分：图片 + 数量 + 状态&按钮 */}
+            <div className="picker-item-mobile-bottom">
+              <div className="picker-item-thumbnail-mobile">
+                {media}
+              </div>
+
+              <div className="picker-item-quantity-mobile">
+                {quantity}
+              </div>
+
+              <div className="picker-item-mobile-right">
+                <div className="picker-item-badge-mobile">
+                  {getItemBadge(picker_status)}
+                </div>
+
+                <div className="picker-item-buttons-mobile">
+                  {picker_status === 'picked' ? (
+                    <button onClick={() => handleGreenClick(item)} className="picker-btn picker-btn-undo">
+                      Undo
+                    </button>
+                  ) : picker_status === 'missing' ? (
+                    <button onClick={() => handleUndoMissing(item)} className="picker-btn picker-btn-undo">
+                      Undo
+                    </button>
+                  ) : (
+                    <div className="picker-btn-group-mobile">
+                      <button onClick={() => handleRedClick(item)} className="picker-btn picker-btn-missing">
+                        Missing
+                      </button>
+                      <button onClick={() => handleGreenClick(item)} className="picker-btn picker-btn-picked">
+                        Picked
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -316,139 +310,335 @@ const Picker = () => {
   };
 
   return (
-    <Page
-      title="Picker"
-      backAction={{ content: 'Dashboard', onAction: () => navigate('/') }}
-      primaryAction={{
-        content: isSorted ? 'Unsort' : 'Sort by Type',
-        icon: SortIcon,
-        onAction: handleSort
-      }}
-    >
-      <Layout>
-        <Layout.Section>
-          <Card>
-            <div style={{ padding: '16px' }}>
-              <ChoiceList
-                title="Show items"
-                choices={[
-                  { label: 'Picking', value: 'picking' },
-                  { label: 'Missing', value: 'missing' },
-                  { label: 'Picked', value: 'picked' }
-                ]}
-                selected={statusFilter}
-                onChange={setStatusFilter}
-                allowMultiple
-              />
-            </div>
-          </Card>
-        </Layout.Section>
+    <>
+      <style>{`
+        /* Picker 响应式样式 */
+        .picker-item-container {
+          padding: 22px 16px;
+          position: relative;
+        }
 
-        <Layout.Section>
-          <Card>
-            <div>
-              {filteredItems.length === 0 ? (
-                <Banner>No items to pick</Banner>
-              ) : (
-                filteredItems.map(item => (
-                  <div key={item.id} style={{ borderBottom: '1px solid #e1e3e5' }}>
-                    {renderItem(item)}
+        .picker-item-badge-desktop {
+          position: absolute;
+          top: 22px;
+          right: 16px;
+        }
+
+        .picker-item-badge-mobile {
+          display: none;
+        }
+
+        .picker-item-main {
+          display: flex;
+          align-items: center;
+        }
+
+        .picker-item-desktop {
+          display: flex;
+          align-items: center;
+          width: 100%;
+        }
+
+        .picker-item-mobile {
+          display: none;
+        }
+
+        .picker-item-thumbnail {
+          margin-right: 16px;
+          flex-shrink: 0;
+        }
+
+        .picker-item-quantity {
+          font-size: 38px;
+          line-height: 1;
+          margin-right: 20px;
+          margin-top: 5px;
+          min-width: 50px;
+          flex-shrink: 0;
+        }
+
+        .picker-item-info {
+          flex: 1;
+          margin-left: -30px;
+          max-width: calc(100% - 300px);
+        }
+
+        .picker-item-buttons-desktop {
+          position: absolute;
+          right: 16px;
+          top: 50%;
+          transform: translateY(-50%);
+          margin-top: 10px;
+        }
+
+        .picker-btn-group {
+          display: flex;
+          gap: 25px;
+        }
+
+        .picker-btn {
+          border-radius: 8px;
+          cursor: pointer;
+          font-weight: 500;
+        }
+
+        .picker-btn-undo {
+          background-color: white;
+          color: black;
+          border: 1px solid #c4cdd5;
+          padding: 6px 12px;
+          font-size: 13px;
+          min-width: 60px;
+        }
+
+        .picker-btn-missing {
+          background-color: #ec8b84ff;
+          color: white;
+          border: none;
+          padding: 6px 12px;
+          font-size: 13px;
+          min-width: 60px;
+        }
+
+        .picker-btn-picked {
+          background-color: #6db477ff;
+          color: white;
+          border: none;
+          padding: 8px 16px;
+          font-size: 14px;
+          min-width: 80px;
+        }
+
+        /* 手机端 ChoiceList 横向布局 */
+        @media (max-width: 600px) {
+          .Polaris-ChoiceList__Choices {
+            display: flex !important;
+            flex-direction: row !important;
+            gap: 16px !important;
+          }
+
+          .Polaris-ChoiceList__Choice {
+            margin-bottom: 0 !important;
+          }
+        }
+
+        /* Modal 和 Keypad 布局修复 */
+        .picker-modal-content {
+          position: relative;
+          min-height: 400px;
+        }
+
+        .picker-modal-input-section {
+          margin-bottom: 30px;
+        }
+
+        .picker-modal-keypad {
+          margin-top: 30px;
+        }
+
+        /* 手机响应式 (600px 以下) */
+        @media (max-width: 600px) {
+          .picker-item-container {
+            padding: 16px 12px;
+          }
+
+          /* 隐藏桌面布局 */
+          .picker-item-desktop {
+            display: none;
+          }
+
+          .picker-item-badge-desktop {
+            display: none;
+          }
+
+          /* 显示手机布局 */
+          .picker-item-mobile {
+            display: block;
+            width: 100%;
+          }
+
+          .picker-item-mobile-text {
+            margin-bottom: 12px;
+          }
+
+          .picker-item-mobile-bottom {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+          }
+
+          .picker-item-thumbnail-mobile {
+            flex-shrink: 0;
+          }
+
+          .picker-item-quantity-mobile {
+            font-size: 30px;
+            line-height: 1;
+            margin-top: 5px;
+            min-width: 45px;
+            flex-shrink: 0;
+          }
+
+          .picker-item-mobile-right {
+            margin-left: auto;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 8px;
+          }
+
+          .picker-item-badge-mobile {
+            display: block;
+          }
+
+          .picker-item-buttons-mobile {
+            display: flex;
+            justify-content: flex-end;
+          }
+
+          .picker-btn-group-mobile {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+          }
+
+          .picker-btn-missing,
+          .picker-btn-picked {
+            min-width: 70px;
+            padding: 6px 12px;
+            font-size: 13px;
+          }
+        }
+      `}</style>
+
+      <Page
+        title="Picker"
+        backAction={{ content: 'Dashboard', onAction: () => navigate('/') }}
+        primaryAction={{
+          content: isSorted ? 'Unsort' : 'Sort by Type',
+          icon: SortIcon,
+          onAction: handleSort
+        }}
+      >
+        <Layout>
+          <Layout.Section>
+            <Card>
+              <div style={{ padding: '16px' }}>
+                <ChoiceList
+                  title="Show items"
+                  choices={[
+                    { label: 'Picking', value: 'picking' },
+                    { label: 'Missing', value: 'missing' },
+                    { label: 'Picked', value: 'picked' }
+                  ]}
+                  selected={statusFilter}
+                  onChange={setStatusFilter}
+                  allowMultiple
+                />
+              </div>
+            </Card>
+          </Layout.Section>
+
+          <Layout.Section>
+            <Card>
+              <div>
+                {filteredItems.length === 0 ? (
+                  <Banner>No items to pick</Banner>
+                ) : (
+                  filteredItems.map(item => (
+                    <div key={item.id} style={{ borderBottom: '1px solid #e1e3e5' }}>
+                      {renderItem(item)}
+                    </div>
+                  ))
+                )}
+              </div>
+            </Card>
+          </Layout.Section>
+        </Layout>
+
+        {/* Image Modal */}
+        <Modal
+          open={selectedImage !== null}
+          onClose={() => setSelectedImage(null)}
+          title={selectedImage?.title || 'Product Image'}
+        >
+          <Modal.Section>
+            {selectedImage && (
+              <BlockStack gap="4">
+                <img 
+                  src={selectedImage.url} 
+                  alt="Product" 
+                  style={{ width: '100%', maxHeight: '500px', objectFit: 'contain' }} 
+                />
+                <Button 
+                  url={selectedImage.link} 
+                  external
+                  variant="primary"
+                  fullWidth
+                >
+                  View Product on Website
+                </Button>
+              </BlockStack>
+            )}
+          </Modal.Section>
+        </Modal>
+
+        {/* Quantity Modal */}
+        <Modal
+          open={quantityModal !== null}
+          onClose={() => setQuantityModal(null)}
+          title="Enter Picked Quantity"
+        >
+          <Modal.Section>
+            {quantityModal && (
+              <div className="picker-modal-content">
+                <div className="picker-modal-input-section">
+                  <Text>Total quantity: {quantityModal.quantity}</Text>
+                  <div style={{ marginTop: '12px' }}>
+                    <div style={{
+                      border: '2px solid #c4cdd5',
+                      borderRadius: '8px',
+                      padding: '12px 16px',
+                      fontSize: '24px',
+                      fontWeight: 'bold',
+                      textAlign: 'center',
+                      backgroundColor: '#ffffff',
+                      minHeight: '50px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}>
+                      {pickedQuantity || '0'}
+                    </div>
                   </div>
-                ))
-              )}
-            </div>
-          </Card>
-        </Layout.Section>
-      </Layout>
+                </div>
 
-      {/* Image Modal */}
-      <Modal
-        open={selectedImage !== null}
-        onClose={() => setSelectedImage(null)}
-        title={selectedImage?.title || 'Product Image'}
-      >
-        <Modal.Section>
-          {selectedImage && (
-            <BlockStack gap="4">
-              <img 
-                src={selectedImage.url} 
-                alt="Product" 
-                style={{ width: '100%', maxHeight: '500px', objectFit: 'contain' }} 
-              />
-              <Button 
-                url={selectedImage.link} 
-                external
-                variant="primary"
-                fullWidth
-              >
-                View Product on Website
-              </Button>
-            </BlockStack>
-          )}
-        </Modal.Section>
-      </Modal>
+                <div className="picker-modal-keypad">
+                  <NumericKeypad
+                    onNumberClick={handleNumberClick}
+                    onBackspace={handleBackspace}
+                  />
+                </div>
 
-      {/* Quantity Modal */}
-      <Modal
-        open={quantityModal !== null}
-        onClose={() => setQuantityModal(null)}
-        title="Enter Picked Quantity"
-      >
-        <Modal.Section>
-          {quantityModal && (
-            <>
-              <Text>Total quantity: {quantityModal.quantity}</Text>
-              <div style={{ marginTop: '12px' }}>
-                <div style={{
-                  border: '2px solid #c4cdd5',
-                  borderRadius: '8px',
-                  padding: '12px 16px',
-                  fontSize: '24px',
-                  fontWeight: 'bold',
-                  textAlign: 'center',
-                  backgroundColor: '#ffffff',
-                  minHeight: '50px',
+                <div style={{ 
+                  marginTop: '20px',
                   display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
+                  gap: '12px',
+                  justifyContent: 'flex-end'
                 }}>
-                  {pickedQuantity || '0'}
+                  <Button onClick={() => setQuantityModal(null)}>
+                    Cancel
+                  </Button>
+                  <Button variant="primary" onClick={handleQuantitySubmit}>
+                    Submit
+                  </Button>
                 </div>
               </div>
-              <div style={{ 
-                marginTop: '20px',
-                display: 'flex',
-                gap: '12px',
-                justifyContent: 'flex-end'
-              }}>
-                <Button onClick={() => setQuantityModal(null)}>
-                  Cancel
-                </Button>
-                <Button variant="primary" onClick={handleQuantitySubmit}>
-                  Submit
-                </Button>
-              </div>
-            </>
-          )}
-        </Modal.Section>
-      </Modal>
-
-      {/* Floating Numeric Keypad */}
-      {quantityModal && (
-        <div style={{
-          position: 'fixed',
-          bottom: '20px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          zIndex: 1000
-        }}>
-          <NumericKeypad
-            onNumberClick={handleNumberClick}
-            onBackspace={handleBackspace}
-          />
-        </div>
-      )}
-    </Page>
+            )}
+          </Modal.Section>
+        </Modal>
+      </Page>
+    </>
   );
 };
 
