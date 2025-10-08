@@ -369,6 +369,28 @@ class OrderWebhookHandler {
     }
   }
 
+  // Handle order edits complete (新增方法)
+  static async handleOrderEditsComplete(editData) {
+    try {
+      console.log(`\n=== Order Edits Complete Webhook ===`);
+      console.log(`Edit ID: ${editData.id}`);
+      console.log(`Order ID: ${editData.order_id}`);
+      
+      // 从 Shopify 获取最新的订单数据
+      console.log('Fetching latest order data from Shopify API...');
+      const orderData = await shopifyClient.getOrder(editData.order_id);
+      
+      console.log(`✓ Got fresh data for order ${orderData.name}`);
+      console.log(`Line items count: ${orderData.line_items.length}`);
+      
+      // 调用 handleOrderUpdated 处理
+      return await this.handleOrderUpdated(orderData);
+    } catch (error) {
+      console.error('Error handling order edits complete:', error);
+      throw error;
+    }
+  }
+
   // Handle order cancelled
   static handleOrderCancelled(orderData) {
     try {

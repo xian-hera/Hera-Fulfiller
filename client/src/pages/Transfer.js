@@ -218,184 +218,179 @@ const Transfer = () => {
     );
 
     return (
-      <div style={{ padding: '22px 16px', position: 'relative', borderBottom: '1px solid #e1e3e5' }}>
-        {/* 右上角：Transfer info 和状态标签（固定位置）*/}
-        <div style={{ 
-          position: 'absolute', 
-          top: '21px', 
-          right: '16px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '12px'
-        }}>
-          {status === 'waiting' && transfer_from && (
-            <Text variant="bodySm" fontWeight="bold" as="span" tone="info">
-              {transfer_from}, {formatDate(estimate_month, estimate_day)}
-            </Text>
-          )}
-          {getItemBadge(status)}
+      <div style={{ 
+        padding: '22px 16px', 
+        borderBottom: '1px solid #e1e3e5',
+        display: 'flex',
+        alignItems: 'center'
+      }}>
+        {/* Thumbnail */}
+        <div style={{ marginRight: '16px' }}>
+          {media}
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center' }}>
-          {/* Thumbnail */}
-          <div style={{ marginRight: '16px' }}>
-            {media}
-          </div>
+        {/* 数量（38px）*/}
+        <div style={{ 
+          fontSize: '38px', 
+          lineHeight: 1,
+          marginRight: '20px',
+          marginTop: '5px',
+          minWidth: '50px'
+        }}>
+          {quantity}
+        </div>
 
-          {/* 数量（38px）*/}
-          <div style={{ 
-            fontSize: '38px', 
-            lineHeight: 1,
-            marginRight: '20px',
-            marginTop: '5px',
-            minWidth: '50px'
-          }}>
-            {quantity}
-          </div>
+        {/* 产品信息 */}
+        <div style={{ flex: 1, maxWidth: 'calc(100% - 350px)' }}>
+          <BlockStack gap="1">
+            {/* Brand + Title（加粗，自动换行）*/}
+            <div style={{ 
+              wordWrap: 'break-word', 
+              overflowWrap: 'break-word',
+              maxWidth: '60ch'
+            }}>
+              <Text variant="bodyLg" fontWeight="bold">
+                {brand} {title} {size}
+              </Text>
+            </div>
+            
+            {/* Variant Title */}
+            {variant_title && (
+              <Text variant="bodyMd">
+                {variant_title}
+              </Text>
+            )}
+            
+            {/* SKU（每4位一个空格，可点击复制）*/}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Text variant="bodySm">
+                {formatSKU(sku)}
+              </Text>
+              <button
+                onClick={() => handleSkuCopy(sku)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#005bd3',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  padding: 0
+                }}
+              >
+                Copy
+              </button>
+            </div>
+            
+            {/* Order Number（灰色，添加#）*/}
+            <Text variant="bodySm" tone="subdued">
+              #{order_number}
+            </Text>
+          </BlockStack>
+        </div>
 
-          {/* 产品信息（向左移动30px）*/}
-          <div style={{ flex: 1, marginLeft: '-30px', maxWidth: 'calc(100% - 300px)' }}>
-            <BlockStack gap="1">
-              {/* Brand + Title（加粗，自动换行）*/}
-              <div style={{ 
-                wordWrap: 'break-word', 
-                overflowWrap: 'break-word',
-                maxWidth: '60ch'
-              }}>
-                <Text variant="bodyLg" fontWeight="bold">
-                  {brand} {title} {size}
-                </Text>
+        {/* 右侧按钮区域（垂直居中，右对齐）*/}
+        <div style={{ 
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'flex-end',
+          gap: '17px',
+          marginLeft: 'auto'
+        }}>
+          {clearMode ? (
+            <input
+              type="checkbox"
+              checked={selectedItems.includes(id)}
+              onChange={() => handleItemSelect(id)}
+              style={{ width: '20px', height: '20px' }}
+            />
+          ) : (
+            <>
+              {/* Transfer info 和状态标签同行（waiting 状态）*/}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                {status === 'waiting' && transfer_from && (
+                  <Text variant="bodySm" fontWeight="bold" as="span" tone="info">
+                    {transfer_from}, {formatDate(estimate_month, estimate_day)}
+                  </Text>
+                )}
+                {getItemBadge(status)}
               </div>
               
-              {/* Variant Title */}
-              {variant_title && (
-                <Text variant="bodyMd">
-                  {variant_title}
-                </Text>
+              {/* 主按钮 */}
+              {status === 'transferring' && (
+                <div style={{ display: 'flex', gap: '12px' }}>
+                  <button
+                    onClick={() => handleBlueClick(item)}
+                    style={{
+                      backgroundColor: 'white',
+                      color: '#0080FF',
+                      border: '2px solid #0080FF',
+                      borderRadius: '8px',
+                      padding: '8px 16px',
+                      fontSize: '14px',
+                      cursor: 'pointer',
+                      fontWeight: '500',
+                      minWidth: '80px'
+                    }}
+                  >
+                    Transfer
+                  </button>
+                  <button
+                    onClick={() => handleGreenClick(item)}
+                    style={{
+                      backgroundColor: '#00A047',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '8px',
+                      padding: '8px 16px',
+                      fontSize: '14px',
+                      cursor: 'pointer',
+                      fontWeight: '500',
+                      minWidth: '80px'
+                    }}
+                  >
+                    Found
+                  </button>
+                </div>
               )}
               
-              {/* SKU（每4位一个空格，可点击复制）*/}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Text variant="bodySm">
-                  {formatSKU(sku)}
-                </Text>
+              {status === 'waiting' && (
                 <button
-                  onClick={() => handleSkuCopy(sku)}
+                  onClick={() => handleGreenClick(item)}
                   style={{
-                    background: 'none',
+                    backgroundColor: '#0080FF',
+                    color: 'white',
                     border: 'none',
-                    color: '#005bd3',
+                    borderRadius: '8px',
+                    padding: '8px 16px',
+                    fontSize: '14px',
                     cursor: 'pointer',
-                    fontSize: '12px',
-                    padding: 0
+                    fontWeight: '500',
+                    minWidth: '100px'
                   }}
                 >
-                  Copy
+                  Received
                 </button>
-              </div>
+              )}
               
-              {/* Order Number（灰色，添加#）*/}
-              <Text variant="bodySm" tone="subdued">
-                #{order_number}
-              </Text>
-            </BlockStack>
-          </div>
-
-          {/* 右侧按钮（固定位置，距离状态标签下方20px）*/}
-          <div style={{ 
-            position: 'absolute', 
-            right: '16px', 
-            top: '61px', // 21px(状态标签top) + 20px(标签高度) + 20px(间距)
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'flex-end',
-            gap: '27px'
-          }}>
-            {clearMode ? (
-              <input
-                type="checkbox"
-                checked={selectedItems.includes(id)}
-                onChange={() => handleItemSelect(id)}
-                style={{ width: '20px', height: '20px' }}
-              />
-            ) : (
-              <>
-                {/* 主按钮区域 */}
-                <div style={{ display: 'flex', gap: '25px' }}>
-                  {status === 'transferring' && (
-                    <>
-                      <button
-                        onClick={() => handleBlueClick(item)}
-                        style={{
-                          backgroundColor: 'white',
-                          color: '#0080FF',
-                          border: '2px solid #0080FF',
-                          borderRadius: '8px',
-                          padding: '8px 16px',
-                          fontSize: '14px',
-                          cursor: 'pointer',
-                          fontWeight: '500',
-                          minWidth: '80px'
-                        }}
-                      >
-                        Transfer
-                      </button>
-                      <button
-                        onClick={() => handleGreenClick(item)}
-                        style={{
-                          backgroundColor: '#00A047',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '8px',
-                          padding: '8px 16px',
-                          fontSize: '14px',
-                          cursor: 'pointer',
-                          fontWeight: '500',
-                          minWidth: '80px'
-                        }}
-                      >
-                        Found
-                      </button>
-                    </>
-                  )}
-                  {status === 'waiting' && (
-                    <button
-                      onClick={() => handleGreenClick(item)}
-                      style={{
-                        backgroundColor: '#0080FF',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '8px',
-                        padding: '8px 16px',
-                        fontSize: '14px',
-                        cursor: 'pointer',
-                        fontWeight: '500',
-                        minWidth: '80px'
-                      }}
-                    >
-                      Received
-                    </button>
-                  )}
-                </div>
-
-                {/* Copy 按钮 */}
-                <button
-                  onClick={() => handleCopy(id)}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: '#005bd3',
-                    cursor: 'pointer',
-                    fontSize: '13px',
-                    padding: 0,
-                    fontWeight: '500'
-                  }}
-                >
-                  Copy
-                </button>
-              </>
-            )}
-          </div>
+              {/* Copy 按钮（最小尺寸，白底黑字）*/}
+              <button
+                onClick={() => handleCopy(id)}
+                style={{
+                  backgroundColor: 'white',
+                  color: '#202223',
+                  border: '1px solid #c9cccf',
+                  borderRadius: '6px',
+                  padding: '4px 12px',
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                  fontWeight: '500',
+                  minWidth: '60px'
+                }}
+              >
+                Copy
+              </button>
+            </>
+          )}
         </div>
       </div>
     );

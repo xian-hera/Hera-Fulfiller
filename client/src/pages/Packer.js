@@ -77,7 +77,20 @@ const Packer = () => {
       case 'ready':
         return <Badge tone="success">Ready</Badge>;
       case 'holding':
-        return <Badge tone="warning">Holding</Badge>;
+        // 自定义紫色标签
+        return (
+          <span style={{
+            display: 'inline-block',
+            padding: '2px 8px',
+            borderRadius: '6px',
+            backgroundColor: '#9c6ade',
+            color: 'white',
+            fontSize: '12px',
+            fontWeight: '500'
+          }}>
+            Holding
+          </span>
+        );
       case 'waiting':
         return <Badge tone="info">Waiting</Badge>;
       default:
@@ -118,41 +131,62 @@ const Packer = () => {
           <div style={{ flex: 1 }}>
             <BlockStack gap="2">
               <Text variant="bodyMd" as="h3" fontWeight="semibold">
-                {name} (#{order_number})
+                {name}
               </Text>
               <Text variant="bodySm" color="subdued">
-                Items: {total_quantity} | Shipping: {shipping_code || 'Standard'}
+                Items: {total_quantity}
               </Text>
-              <InlineStack gap="2" align="start">
-                {/* Transfer info（在状态标签左侧）*/}
-                {orderStatus === 'waiting' && transferInfo && (
-                  <Text variant="bodySm" fontWeight="bold" tone="info">
-                    {transferInfo.transferFroms.join(', ')}, {formatDate(transferInfo.estimateMonth, transferInfo.estimateDay)}
-                  </Text>
+            </BlockStack>
+          </div>
+          
+          {/* 右侧区域：从右往左排列 */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            {/* 位置5-1（从左到右） */}
+            
+            {/* Ready 状态的额外信息 */}
+            {orderStatus === 'ready' && (
+              <>
+                {/* 位置5: Shipping（只在 ready 且有 warning 时显示）*/}
+                {hasWeightWarning && shipping_code && (
+                  <Badge tone="info">{shipping_code}</Badge>
                 )}
                 
-                {/* 状态标签 */}
-                {getStatusBadge(orderStatus)}
-                
+                {/* 位置4/3: Box Type */}
                 {box_type && (
                   <Badge tone="info">Box: {box_type}</Badge>
                 )}
+                
+                {/* 位置3/2: Weight（如果没有 warning，这是位置3；有 warning 则是位置4）*/}
                 {weight && (
                   <Badge>Weight: {weight}g</Badge>
                 )}
-                {hasWeightWarning && (
-                  <Badge tone="warning">⚠️ Weight Warning</Badge>
+                
+                {/* 位置2: Shipping（只在 ready 且没有 warning 时显示）*/}
+                {!hasWeightWarning && shipping_code && (
+                  <Badge tone="info">{shipping_code}</Badge>
                 )}
-              </InlineStack>
-            </BlockStack>
-          </div>
-          <div>
-            {/* Waiting 状态不显示按钮 */}
-            {orderStatus !== 'waiting' && (
-              <Button onClick={(e) => handleStatusClick(e, shopify_order_id, status)}>
-                {status === 'holding' ? 'Resume' : status === 'ready' ? 'Reopen' : 'Hold'}
-              </Button>
+              </>
             )}
+            
+            {/* Waiting 状态的 Transfer Info */}
+            {orderStatus === 'waiting' && transferInfo && (
+              <Text variant="bodySm" fontWeight="bold" tone="info">
+                {transferInfo.transferFroms.join(', ')}, {formatDate(transferInfo.estimateMonth, transferInfo.estimateDay)}
+              </Text>
+            )}
+            
+            {/* 位置2: Weight Warning */}
+            {hasWeightWarning && (
+              <Badge tone="warning">⚠️ Weight</Badge>
+            )}
+            
+            {/* 位置1: 状态标签 */}
+            {getStatusBadge(orderStatus)}
+            
+            {/* Hold/Undo 按钮（所有状态都显示）*/}
+            <Button onClick={(e) => handleStatusClick(e, shopify_order_id, status)}>
+              {status === 'holding' ? 'Undo' : 'Hold'}
+            </Button>
           </div>
         </div>
       </ResourceItem>

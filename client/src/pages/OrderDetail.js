@@ -288,6 +288,20 @@ const OrderDetail = () => {
     }
   };
 
+  // 格式化 SKU：每4位加一个空格
+  const formatSKU = (sku) => {
+    if (!sku) return '';
+    return sku.match(/.{1,4}/g)?.join(' ') || sku;
+  };
+
+  // 格式化日期：补零
+  const formatDate = (month, day) => {
+    if (!month || !day) return '';
+    const m = month.toString().padStart(2, '0');
+    const d = day.toString().padStart(2, '0');
+    return `${m}/${d}`;
+  };
+
   if (!order) {
     return (
       <Page>
@@ -313,26 +327,58 @@ const OrderDetail = () => {
     );
 
     return (
-      <ResourceItem
-        id={item.id}
-        media={media}
-        verticalAlignment="center"
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-          <div style={{ flex: 1 }}>
-            <div style={{ marginBottom: '8px' }}>
-              <Text variant="bodyMd" as="p">
-                ×{item.quantity}
+      <div style={{ 
+        padding: '22px 16px', 
+        borderBottom: '1px solid #e1e3e5',
+        display: 'flex',
+        alignItems: 'center'
+      }}>
+        {/* Thumbnail */}
+        <div style={{ marginRight: '16px' }}>
+          {media}
+        </div>
+
+        {/* 数量（30px）*/}
+        <div style={{ 
+          fontSize: '30px', 
+          lineHeight: 1,
+          marginRight: '20px',
+          marginTop: '5px',
+          minWidth: '50px'
+        }}>
+          {item.quantity}
+        </div>
+
+        {/* 产品信息 */}
+        <div style={{ flex: 1, maxWidth: 'calc(100% - 350px)' }}>
+          <BlockStack gap="1">
+            {/* 第1行：Brand */}
+            <Text variant="bodySm">
+              {item.brand}
+            </Text>
+            
+            {/* 第2行：Title（加粗）*/}
+            <Text variant="bodyMd" fontWeight="bold">
+              {item.title} {item.size}
+            </Text>
+            
+            {/* 第3行：Variant Title */}
+            {item.variant_title && (
+              <Text variant="bodySm">
+                {item.variant_title}
               </Text>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+            )}
+            
+            {/* 第4行：Weight + Warning */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <Text variant="bodySm" tone={hasWarning ? 'critical' : 'subdued'}>
                 {item.weight}{item.weight_unit}
               </Text>
               {hasWarning && (
                 <Button
                   plain
-                  onClick={() => {
+                  onClick={(e) => {
+                    e.stopPropagation();
                     setWeightModal(item);
                     setWeightValue('');
                   }}
@@ -341,26 +387,29 @@ const OrderDetail = () => {
                 </Button>
               )}
             </div>
-            <div style={{ marginBottom: '4px' }}>
-              <Text variant="bodySm">
-                {item.brand} {item.title} {item.size} {item.variant_title && `- ${item.variant_title}`}
-              </Text>
-            </div>
-            <div style={{ marginBottom: '4px' }}>
-              <Text variant="bodySm" tone="subdued">
-                {item.sku}
-              </Text>
-            </div>
-            {item.transferInfo && (
-              <div style={{ marginTop: '8px' }}>
-                <Badge tone="info">
-                  Transfer: {item.transferInfo.quantity} from {item.transferInfo.transferFrom}, 
-                  Est: {item.transferInfo.estimateMonth}/{item.transferInfo.estimateDay}
-                </Badge>
-              </div>
-            )}
-          </div>
+            
+            {/* 第5行：SKU（加粗，每4位加空格）*/}
+            <Text variant="bodySm" fontWeight="bold">
+              {formatSKU(item.sku)}
+            </Text>
+          </BlockStack>
+        </div>
 
+        {/* 右侧区域：Transfer info 和状态按钮 */}
+        <div style={{ 
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          marginLeft: 'auto'
+        }}>
+          {/* Transfer info */}
+          {item.transferInfo && (
+            <Text variant="bodySm" fontWeight="bold" tone="info">
+              Transfer: {item.transferInfo.quantity} from {item.transferInfo.transferFrom}, Est: {formatDate(item.transferInfo.estimateMonth, item.transferInfo.estimateDay)}
+            </Text>
+          )}
+          
+          {/* 状态按钮 */}
           <div onClick={() => handleItemClick(item)} style={{ cursor: 'pointer', padding: '8px' }}>
             {item.packer_status === 'ready' ? (
               <span style={{ fontSize: '32px', color: '#00a047' }}>✓</span>
@@ -393,7 +442,7 @@ const OrderDetail = () => {
             )}
           </div>
         </div>
-      </ResourceItem>
+      </div>
     );
   };
 
@@ -457,10 +506,13 @@ const OrderDetail = () => {
 
           <Layout.Section>
             <Card>
-              <ResourceList
-                items={lineItems}
-                renderItem={renderLineItem}
-              />
+              <div>
+                {lineItems.map(item => (
+                  <div key={item.id}>
+                    {renderLineItem(item)}
+                  </div>
+                ))}
+              </div>
             </Card>
           </Layout.Section>
         </Layout>

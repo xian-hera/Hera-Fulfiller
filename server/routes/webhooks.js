@@ -1,63 +1,64 @@
 const express = require('express');
 const router = express.Router();
 const OrderWebhookHandler = require('../webhooks/orderHandler');
-const verifyWebhook = require('../middleware/webhookVerification');
 
-// Apply webhook verification middleware (optional in development)
-const useVerification = process.env.NODE_ENV === 'production';
-
-// Webhook endpoints
-router.post('/orders/create', useVerification ? verifyWebhook : (req, res, next) => next(), async (req, res) => {
+// Order Created
+router.post('/orders/create', async (req, res) => {
   try {
     console.log('Webhook received: Order Created', req.body.id);
     const result = await OrderWebhookHandler.handleOrderCreated(req.body);
-    res.status(200).json(result);
+    res.json(result);
   } catch (error) {
-    console.error('Webhook error (order/create):', error);
-    res.status(500).json({ error: error.message });
+    console.error('Error processing order created webhook:', error);
+    res.status(500).json({ error: 'Failed to process webhook' });
   }
 });
 
-router.post('/orders/updated', useVerification ? verifyWebhook : (req, res, next) => next(), async (req, res) => {
+// Order Updated
+router.post('/orders/updated', async (req, res) => {
   try {
     console.log('Webhook received: Order Updated', req.body.id);
     const result = await OrderWebhookHandler.handleOrderUpdated(req.body);
-    res.status(200).json(result);
+    res.json(result);
   } catch (error) {
-    console.error('Webhook error (order/updated):', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-router.post('/orders/edited', useVerification ? verifyWebhook : (req, res, next) => next(), async (req, res) => {
-  try {
-    console.log('Webhook received: Order Edited', req.body.id);
-    const result = OrderWebhookHandler.handleOrderUpdated(req.body);
-    res.status(200).json(result);
-  } catch (error) {
-    console.error('Webhook error (order/edited):', error);
-    res.status(500).json({ error: error.message });
+    console.error('Error processing order updated webhook:', error);
+    res.status(500).json({ error: 'Failed to process webhook' });
   }
 });
 
-router.post('/orders/cancelled', useVerification ? verifyWebhook : (req, res, next) => next(), async (req, res) => {
+// Order Edits Complete (新增路由)
+router.post('/order-edits/complete', async (req, res) => {
+  try {
+    console.log('Webhook received: Order Edits Complete');
+    const result = await OrderWebhookHandler.handleOrderEditsComplete(req.body);
+    res.json(result);
+  } catch (error) {
+    console.error('Error processing order edits complete webhook:', error);
+    res.status(500).json({ error: 'Failed to process webhook' });
+  }
+});
+
+// Order Cancelled
+router.post('/orders/cancelled', async (req, res) => {
   try {
     console.log('Webhook received: Order Cancelled', req.body.id);
-    const result = OrderWebhookHandler.handleOrderCancelled(req.body);
-    res.status(200).json(result);
+    const result = await OrderWebhookHandler.handleOrderCancelled(req.body);
+    res.json(result);
   } catch (error) {
-    console.error('Webhook error (order/cancelled):', error);
-    res.status(500).json({ error: error.message });
+    console.error('Error processing order cancelled webhook:', error);
+    res.status(500).json({ error: 'Failed to process webhook' });
   }
 });
 
-router.post('/orders/fulfilled', useVerification ? verifyWebhook : (req, res, next) => next(), async (req, res) => {
+// Order Fulfilled
+router.post('/orders/fulfilled', async (req, res) => {
   try {
     console.log('Webhook received: Order Fulfilled', req.body.id);
-    const result = OrderWebhookHandler.handleOrderFulfilled(req.body);
-    res.status(200).json(result);
+    const result = await OrderWebhookHandler.handleOrderFulfilled(req.body);
+    res.json(result);
   } catch (error) {
-    console.error('Webhook error (order/fulfilled):', error);
-    res.status(500).json({ error: error.message });
+    console.error('Error processing order fulfilled webhook:', error);
+    res.status(500).json({ error: 'Failed to process webhook' });
   }
 });
 
