@@ -288,4 +288,62 @@ router.delete('/box-types/:id', (req, res) => {
   }
 });
 
+const { cleanupOldData } = require('../utils/cleanup');
+
+// 手动触发清理
+router.post('/cleanup', async (req, res) => {
+  try {
+    const result = await cleanupOldData();
+    res.json({
+      success: true,
+      message: `Cleaned up ${result.deleted} orders`,
+      deletedOrders: result.orders
+    });
+  } catch (error) {
+    console.error('Manual cleanup error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 查看即将被清理的数据
+router.get('/cleanup-preview', async (req, res) => {
+  try {
+    const sixtyDaysAgo = new Date();
+    sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
+
+    const oldOrders = db.prepare(`
+      SELECT shopify_order_id, name, created_at, fulfillment_status 
+      FROM orders 
+      WHERE created_at < ?
+      ORDER BY created_at DESC
+    `).all(sixtyDaysAgo.toISOString());
+
+    res.json({
+      count: oldOrders.length,
+      cutoffDate: sixtyDaysAgo.toISOString(),
+      orders: oldOrders
+    });
+  } catch (error) {
+    console.error('Cleanup preview error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 查看数据库统计
+router.get('/database-stats', async (req, res) => {
+  try {
+    const stats = {
+      orders: db.prepare('SELECT COUNT(*) as count FROM orders').get(),
+      lineItems: db.prepare('SELECT COUNT(*) as count FROM line_items').get(),
+      transferItems: db.prepare('SELECT COUNT(*) as count FROM transfer_items').get(),
+      oldestOrder: db.prepare('SELECT created_at FROM orders ORDER BY created_at ASC LIMIT 1').get(),
+      newestOrder: db.prepare('SELECT created_at FROM orders ORDER BY created_at DESC LIMIT 1').get()
+    };
+    res.json(stats);
+  } catch (error) {
+    console.error('Database stats error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = router;

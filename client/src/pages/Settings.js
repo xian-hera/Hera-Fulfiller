@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { Page, Layout, Card, TextField, Button } from '@shopify/polaris';
+import { Page, Layout, Card, TextField, Button, Text, BlockStack, InlineStack, Badge } from '@shopify/polaris';
 
 const Settings = () => {
   const navigate = useNavigate();
@@ -13,9 +13,15 @@ const Settings = () => {
   const [newBoxCode, setNewBoxCode] = useState('');
   const [newBoxDimensions, setNewBoxDimensions] = useState('');
   const [message, setMessage] = useState('');
+  
+  // 清理相关状态
+  const [cleanupPreview, setCleanupPreview] = useState(null);
+  const [dbStats, setDbStats] = useState(null);
+  const [isCleanupLoading, setIsCleanupLoading] = useState(false);
 
   useEffect(() => {
     fetchSettings();
+    fetchDbStats();
   }, []);
 
   const fetchSettings = async () => {
@@ -29,6 +35,48 @@ const Settings = () => {
     } catch (error) {
       console.error('Error:', error);
       showMessage('Error loading settings');
+    }
+  };
+
+  const fetchDbStats = async () => {
+    try {
+      const response = await axios.get('/api/settings/database-stats');
+      setDbStats(response.data);
+    } catch (error) {
+      console.error('Error fetching database stats:', error);
+    }
+  };
+
+  const fetchCleanupPreview = async () => {
+    setIsCleanupLoading(true);
+    try {
+      const response = await axios.get('/api/settings/cleanup-preview');
+      setCleanupPreview(response.data);
+      showMessage(`Found ${response.data.count} orders to clean up`);
+    } catch (error) {
+      console.error('Error fetching cleanup preview:', error);
+      showMessage('Error loading cleanup preview');
+    } finally {
+      setIsCleanupLoading(false);
+    }
+  };
+
+  const handleManualCleanup = async () => {
+    if (!window.confirm('Are you sure you want to delete all data older than 60 days? This action cannot be undone.')) {
+      return;
+    }
+
+    setIsCleanupLoading(true);
+    try {
+      const response = await axios.post('/api/settings/cleanup');
+      showMessage(response.data.message);
+      await fetchCleanupPreview();
+      await fetchDbStats();
+    } catch (error) {
+      console.error('Error running cleanup:', error);
+      showMessage('Cleanup failed');
+    } finally {
+      setIsCleanupLoading(false);
     }
   };
 
@@ -111,6 +159,11 @@ const Settings = () => {
     setTimeout(() => setMessage(''), 3000);
   };
 
+  const formatDate = (dateString) => {
+    if (!dateString) return 'N/A';
+    return new Date(dateString).toLocaleString();
+  };
+
   return (
     <Page
       title="Settings"
@@ -130,6 +183,141 @@ const Settings = () => {
       )}
 
       <Layout>
+        {/* 数据库统计和清理 */}
+        <Layout.Section>
+          <Card title="Database Management" sectioned>
+            <BlockStack gap="4">
+              {/* 数据库统计 */}
+              <div>
+                <Text variant="headingSm" as="h3">Database Statistics</Text>
+                {dbStats && (
+                  <div style={{ marginTop: '12px' }}>
+                    <InlineStack gap="4" wrap>
+                      <div style={{ 
+                        padding: '12px', 
+                        backgroundColor: '#f6f6f7', 
+                        borderRadius: '8px',
+                        minWidth: '150px'
+                      }}>
+                        <Text variant="bodySm" tone="subdued">Total Orders</Text>
+                        <Text variant="headingMd" as="p">{dbStats.orders?.count || 0}</Text>
+                      </div>
+                      <div style={{ 
+                        padding: '12px', 
+                        backgroundColor: '#f6f6f7', 
+                        borderRadius: '8px',
+                        minWidth: '150px'
+                      }}>
+                        <Text variant="bodySm" tone="subdued">Total Line Items</Text>
+                        <Text variant="headingMd" as="p">{dbStats.lineItems?.count || 0}</Text>
+                      </div>
+                      <div style={{ 
+                        padding: '12px', 
+                        backgroundColor: '#f6f6f7', 
+                        borderRadius: '8px',
+                        minWidth: '150px'
+                      }}>
+                        <Text variant="bodySm" tone="subdued">Transfer Items</Text>
+                        <Text variant="headingMd" as="p">{dbStats.transferItems?.count || 0}</Text>
+                      </div>
+                    </InlineStack>
+                    <div style={{ marginTop: '12px' }}>
+                      <Text variant="bodySm" tone="subdued">
+                        Oldest order: {formatDate(dbStats.oldestOrder?.created_at)}
+                      </Text>
+                      <br />
+                      <Text variant="bodySm" tone="subdued">
+                        Newest order: {formatDate(dbStats.newestOrder?.created_at)}
+                      </Text>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* 自动清理信息 */}
+              <div style={{ 
+                padding: '16px', 
+                backgroundColor: '#e3f2fd', 
+                borderRadius: '8px',
+                border: '1px solid #90caf9'
+              }}>
+                <Text variant="headingSm" as="h3">Automatic Cleanup</Text>
+                <div style={{ marginTop: '8px' }}>
+                  <Text variant="bodySm">
+                    The system automatically deletes data older than <strong>60 days</strong> every day at <strong>2:00 AM</strong>.
+                  </Text>
+                </div>
+              </div>
+
+              {/* 清理预览 */}
+              {cleanupPreview && (
+                <div style={{ 
+                  padding: '16px', 
+                  backgroundColor: '#fff3e0', 
+                  borderRadius: '8px',
+                  border: '1px solid #ffb74d'
+                }}>
+                  <Text variant="headingSm" as="h3">Cleanup Preview</Text>
+                  <div style={{ marginTop: '12px' }}>
+                    <Text variant="bodyMd">
+                      <strong>{cleanupPreview.count}</strong> orders will be deleted
+                    </Text>
+                    <br />
+                    <Text variant="bodySm" tone="subdued">
+                      Cutoff date: {formatDate(cleanupPreview.cutoffDate)}
+                    </Text>
+                    {cleanupPreview.count > 0 && (
+                      <div style={{ marginTop: '12px', maxHeight: '200px', overflow: 'auto' }}>
+                        <Text variant="bodySm" fontWeight="bold">Orders to be deleted:</Text>
+                        <ul style={{ marginTop: '8px', paddingLeft: '20px' }}>
+                          {cleanupPreview.orders.slice(0, 10).map(order => (
+                            <li key={order.shopify_order_id}>
+                              <Text variant="bodySm">
+                                {order.name} - {formatDate(order.created_at)} ({order.fulfillment_status})
+                              </Text>
+                            </li>
+                          ))}
+                          {cleanupPreview.orders.length > 10 && (
+                            <li>
+                              <Text variant="bodySm" tone="subdued">
+                                ... and {cleanupPreview.orders.length - 10} more
+                              </Text>
+                            </li>
+                          )}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* 清理操作按钮 */}
+              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                <Button 
+                  onClick={fetchCleanupPreview}
+                  loading={isCleanupLoading}
+                >
+                  Check Preview
+                </Button>
+                <Button 
+                  onClick={handleManualCleanup}
+                  tone="critical"
+                  loading={isCleanupLoading}
+                  disabled={cleanupPreview?.count === 0}
+                >
+                  Run Cleanup Now
+                </Button>
+                <Button 
+                  onClick={fetchDbStats}
+                  plain
+                >
+                  Refresh Stats
+                </Button>
+              </div>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+
         <Layout.Section>
           <Card title="CSV Upload" sectioned>
             <input
