@@ -19,6 +19,10 @@ async function setupWebhooks() {
       address: `${appUrl}/api/webhooks/orders/updated`
     },
     {
+      topic: 'orders/edited',
+      address: `${appUrl}/api/webhooks/orders/edited`
+    },
+    {
       topic: 'orders/cancelled',
       address: `${appUrl}/api/webhooks/orders/cancelled`
     },

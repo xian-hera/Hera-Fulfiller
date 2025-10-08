@@ -28,6 +28,16 @@ router.post('/orders/updated', useVerification ? verifyWebhook : (req, res, next
     res.status(500).json({ error: error.message });
   }
 });
+router.post('/orders/edited', useVerification ? verifyWebhook : (req, res, next) => next(), async (req, res) => {
+  try {
+    console.log('Webhook received: Order Edited', req.body.id);
+    const result = OrderWebhookHandler.handleOrderUpdated(req.body);
+    res.status(200).json(result);
+  } catch (error) {
+    console.error('Webhook error (order/edited):', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 router.post('/orders/cancelled', useVerification ? verifyWebhook : (req, res, next) => next(), async (req, res) => {
   try {
