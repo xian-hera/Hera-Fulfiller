@@ -25,22 +25,22 @@ function calculateOrderStatus(order, lineItems, transferItems) {
 }
 
 // Get all orders for packer
-router.get('/orders', (req, res) => {
+router.get('/orders', async (req, res) => {
   try {
-    const orders = db.prepare(`
+    const orders = await db.prepare(`
       SELECT * FROM orders 
       WHERE fulfillment_status != 'fulfilled'
       ORDER BY created_at DESC
     `).all();
 
-    const ordersWithDetails = orders.map(order => {
-      const lineItems = db.prepare(`
+    const ordersWithDetails = await Promise.all(orders.map(async (order) => {
+      const lineItems = await db.prepare(`
         SELECT * FROM line_items 
         WHERE shopify_order_id = ?
         ORDER BY id
       `).all(order.shopify_order_id);
 
-      const transferItems = db.prepare(`
+      const transferItems = await db.prepare(`
         SELECT ti.*, li.id as line_item_id
         FROM transfer_items ti
         JOIN line_items li ON ti.line_item_id = li.id
@@ -88,7 +88,7 @@ router.get('/orders', (req, res) => {
         hasWaiting: waitingItems.length > 0,
         transferInfo
       };
-    });
+    }));
 
     res.json(ordersWithDetails);
   } catch (error) {
@@ -98,24 +98,24 @@ router.get('/orders', (req, res) => {
 });
 
 // Get single order details
-router.get('/orders/:shopifyOrderId', (req, res) => {
+router.get('/orders/:shopifyOrderId', async (req, res) => {
   try {
     const { shopifyOrderId } = req.params;
     
-    const order = db.prepare('SELECT * FROM orders WHERE shopify_order_id = ?').get(shopifyOrderId);
+    const order = await db.prepare('SELECT * FROM orders WHERE shopify_order_id = ?').get(shopifyOrderId);
     
     if (!order) {
       return res.status(404).json({ error: 'Order not found' });
     }
 
-    const lineItems = db.prepare(`
+    const lineItems = await db.prepare(`
       SELECT * FROM line_items 
       WHERE shopify_order_id = ?
       ORDER BY id
     `).all(shopifyOrderId);
 
-    const lineItemsWithTransfer = lineItems.map(item => {
-      const transferItem = db.prepare(`
+    const lineItemsWithTransfer = await Promise.all(lineItems.map(async (item) => {
+      const transferItem = await db.prepare(`
         SELECT * FROM transfer_items 
         WHERE line_item_id = ?
         ORDER BY created_at DESC
@@ -132,7 +132,7 @@ router.get('/orders/:shopifyOrderId', (req, res) => {
           quantity: transferItem.quantity
         } : null
       };
-    });
+    }));
 
     res.json({
       ...order,
@@ -144,7 +144,7 @@ router.get('/orders/:shopifyOrderId', (req, res) => {
   }
 });
 
-router.patch('/orders/:shopifyOrderId', (req, res) => {
+router.patch('/orders/:shopifyOrderId', async (req, res) => {
   try {
     const { shopifyOrderId } = req.params;
     const { status } = req.body;
@@ -153,9 +153,9 @@ router.patch('/orders/:shopifyOrderId', (req, res) => {
       return res.status(400).json({ error: 'Status is required' });
     }
 
-    db.prepare(`
+    await db.prepare(`
       UPDATE orders 
-      SET status = ?, updated_at = datetime('now')
+      SET status = ?, updated_at = CURRENT_TIMESTAMP
       WHERE shopify_order_id = ?
     `).run(status, shopifyOrderId);
 
@@ -166,7 +166,7 @@ router.patch('/orders/:shopifyOrderId', (req, res) => {
   }
 });
 
-router.patch('/orders/:shopifyOrderId/status', (req, res) => {
+router.patch('/orders/:shopifyOrderId/status', async (req, res) => {
   try {
     const { shopifyOrderId } = req.params;
     const { status } = req.body;
@@ -175,9 +175,9 @@ router.patch('/orders/:shopifyOrderId/status', (req, res) => {
       return res.status(400).json({ error: 'Status is required' });
     }
 
-    db.prepare(`
+    await db.prepare(`
       UPDATE orders 
-      SET status = ?, updated_at = datetime('now')
+      SET status = ?, updated_at = CURRENT_TIMESTAMP
       WHERE shopify_order_id = ?
     `).run(status, shopifyOrderId);
 
@@ -188,7 +188,7 @@ router.patch('/orders/:shopifyOrderId/status', (req, res) => {
   }
 });
 
-router.patch('/items/:id/packer-status', (req, res) => {
+router.patch('/items/:id/packer-status', async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
@@ -197,9 +197,9 @@ router.patch('/items/:id/packer-status', (req, res) => {
       return res.status(400).json({ error: 'Status is required' });
     }
 
-    db.prepare(`
+    await db.prepare(`
       UPDATE line_items 
-      SET packer_status = ?, updated_at = datetime('now')
+      SET packer_status = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(status, id);
 
@@ -210,7 +210,7 @@ router.patch('/items/:id/packer-status', (req, res) => {
   }
 });
 
-router.post('/orders/:shopifyOrderId/complete', (req, res) => {
+router.post('/orders/:shopifyOrderId/complete', async (req, res) => {
   try {
     const { shopifyOrderId } = req.params;
     const { boxType, weight } = req.body;
@@ -219,9 +219,9 @@ router.post('/orders/:shopifyOrderId/complete', (req, res) => {
       return res.status(400).json({ error: 'Box type is required' });
     }
 
-    db.prepare(`
+    await db.prepare(`
       UPDATE orders 
-      SET box_type = ?, weight = ?, status = 'ready', updated_at = datetime('now')
+      SET box_type = ?, weight = ?, status = 'ready', updated_at = CURRENT_TIMESTAMP
       WHERE shopify_order_id = ?
     `).run(boxType, weight || null, shopifyOrderId);
 
@@ -246,7 +246,7 @@ router.patch('/items/:id/update-weight', async (req, res) => {
       return res.status(400).json({ error: 'Valid weight is required' });
     }
 
-    const item = db.prepare('SELECT * FROM line_items WHERE id = ?').get(id);
+    const item = await db.prepare('SELECT * FROM line_items WHERE id = ?').get(id);
     
     if (!item) {
       console.log('✗ Item not found in database');
@@ -261,9 +261,9 @@ router.patch('/items/:id/update-weight', async (req, res) => {
     console.log(`  Has weight warning: ${item.has_weight_warning}`);
 
     // 只更新 weight 和 weight_unit，不改变 has_weight_warning
-    db.prepare(`
+    await db.prepare(`
       UPDATE line_items 
-      SET weight = ?, weight_unit = 'g', updated_at = datetime('now')
+      SET weight = ?, weight_unit = 'g', updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(weight, id);
 
