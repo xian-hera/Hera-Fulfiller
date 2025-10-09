@@ -2,22 +2,26 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const csv = require('csv-parser');
-const fs = require('fs');
+const { Readable } = require('stream');
 const db = require('../database/init');
 
-// Configure multer for file upload
-const upload = multer({ dest: 'uploads/' });
+// 使用内存存储而不是磁盘
+const storage = multer.memoryStorage();
+const upload = multer({ 
+  storage: storage,
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+});
 
 // Get all settings
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
-    const settingsRows = db.prepare('SELECT * FROM settings').all();
+    const settingsRows = await db.prepare('SELECT * FROM settings').all();
     const settings = {};
     settingsRows.forEach(row => {
       settings[row.key] = row.value;
     });
 
-    const boxTypes = db.prepare('SELECT * FROM box_types ORDER BY code').all();
+    const boxTypes = await db.prepare('SELECT * FROM box_types ORDER BY code').all();
 
     res.json({ settings, boxTypes });
   } catch (error) {
@@ -27,10 +31,10 @@ router.get('/', (req, res) => {
 });
 
 // Test endpoint to check CSV data
-router.get('/test-csv/:sku', (req, res) => {
+router.get('/test-csv/:sku', async (req, res) => {
   try {
     const { sku } = req.params;
-    const csvData = db.prepare('SELECT * FROM csv_data WHERE sku = ?').get(sku);
+    const csvData = await db.prepare('SELECT * FROM csv_data WHERE sku = ?').get(sku);
     
     if (csvData) {
       res.json({
@@ -39,7 +43,7 @@ router.get('/test-csv/:sku', (req, res) => {
         data: JSON.parse(csvData.data)
       });
     } else {
-      const totalCount = db.prepare('SELECT COUNT(*) as count FROM csv_data').get();
+      const totalCount = await db.prepare('SELECT COUNT(*) as count FROM csv_data').get();
       res.json({ 
         found: false, 
         sku,
@@ -52,25 +56,38 @@ router.get('/test-csv/:sku', (req, res) => {
 });
 
 // Update settings
-router.post('/update', (req, res) => {
+router.post('/update', async (req, res) => {
   try {
     const { transferCsvColumn, pickerWigColumn, skuColumn } = req.body;
 
-    const updateSetting = db.prepare(`
-      INSERT OR REPLACE INTO settings (key, value, updated_at)
-      VALUES (?, ?, datetime('now'))
-    `);
-
     if (transferCsvColumn) {
-      updateSetting.run('transfer_csv_column', transferCsvColumn.toUpperCase());
+      await db.prepare(`
+        INSERT INTO settings (key, value, updated_at)
+        VALUES (?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT (key) DO UPDATE SET
+          value = EXCLUDED.value,
+          updated_at = CURRENT_TIMESTAMP
+      `).run('transfer_csv_column', transferCsvColumn.toUpperCase());
     }
 
     if (pickerWigColumn) {
-      updateSetting.run('picker_wig_column', pickerWigColumn.toUpperCase());
+      await db.prepare(`
+        INSERT INTO settings (key, value, updated_at)
+        VALUES (?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT (key) DO UPDATE SET
+          value = EXCLUDED.value,
+          updated_at = CURRENT_TIMESTAMP
+      `).run('picker_wig_column', pickerWigColumn.toUpperCase());
     }
 
     if (skuColumn) {
-      updateSetting.run('sku_column', skuColumn.toUpperCase());
+      await db.prepare(`
+        INSERT INTO settings (key, value, updated_at)
+        VALUES (?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT (key) DO UPDATE SET
+          value = EXCLUDED.value,
+          updated_at = CURRENT_TIMESTAMP
+      `).run('sku_column', skuColumn.toUpperCase());
     }
 
     res.json({ success: true });
@@ -81,25 +98,25 @@ router.post('/update', (req, res) => {
 });
 
 // Upload CSV file
-router.post('/upload-csv', upload.single('file'), (req, res) => {
-  let filePath = null;
-
+router.post('/upload-csv', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    filePath = req.file.path;
+    console.log('CSV upload started');
     const results = [];
 
-    // Parse CSV without headers - get raw arrays
-    fs.createReadStream(filePath)
+    // 从内存缓冲区创建可读流
+    const bufferStream = Readable.from(req.file.buffer);
+
+    bufferStream
       .pipe(csv({ headers: false }))
       .on('data', (data) => {
         const rowArray = Object.values(data);
         results.push(rowArray);
       })
-      .on('end', () => {
+      .on('end', async () => {
         try {
           console.log(`Total rows in CSV: ${results.length}`);
           
@@ -114,69 +131,58 @@ router.post('/upload-csv', upload.single('file'), (req, res) => {
           console.log(`Processing ${dataRows.length} data rows...`);
 
           // Clear existing CSV data
-          db.prepare('DELETE FROM csv_data').run();
-
-          // Use transaction for bulk insert - MUCH faster
-          const insertStmt = db.prepare(`
-            INSERT OR IGNORE INTO csv_data (sku, data, updated_at)
-            VALUES (?, ?, datetime('now'))
-          `);
+          await db.prepare('DELETE FROM csv_data').run();
 
           let importedCount = 0;
           let skippedCount = 0;
 
-          // Wrap in transaction
-          const insertMany = db.transaction((rows) => {
-            rows.forEach((rowArray, index) => {
-              // Convert array to object with letter keys
-              const row = {};
-              rowArray.forEach((value, idx) => {
-                const letter = String.fromCharCode(65 + idx);
-                row[letter] = value || '';
-              });
-              
-              const skuA = row['A']?.trim();
-              const skuB = row['B']?.trim();
-              
-              // Insert with SKU from column A
-              if (skuA && skuA !== '') {
-                const result = insertStmt.run(skuA, JSON.stringify(row));
-                if (result.changes > 0) importedCount++;
-              }
-              
-              // Insert with SKU from column B (if different)
-              if (skuB && skuB !== '' && skuB !== skuA) {
-                const result = insertStmt.run(skuB, JSON.stringify(row));
-                if (result.changes > 0) importedCount++;
-              }
-              
-              if ((!skuA || skuA === '') && (!skuB || skuB === '')) {
-                skippedCount++;
-              }
-
-              // Log progress every 5000 rows
-              if ((index + 1) % 5000 === 0) {
-                console.log(`Processed ${index + 1} rows...`);
-              }
+          for (const rowArray of dataRows) {
+            // Convert array to object with letter keys
+            const row = {};
+            rowArray.forEach((value, idx) => {
+              const letter = String.fromCharCode(65 + idx);
+              row[letter] = value || '';
             });
-          });
-
-          // Execute transaction
-          insertMany(dataRows);
+            
+            const skuA = row['A']?.trim();
+            const skuB = row['B']?.trim();
+            
+            // Insert with SKU from column A
+            if (skuA && skuA !== '') {
+              await db.prepare(`
+                INSERT INTO csv_data (sku, data, updated_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT (sku) DO NOTHING
+              `).run(skuA, JSON.stringify(row));
+              importedCount++;
+            }
+            
+            // Insert with SKU from column B (if different)
+            if (skuB && skuB !== '' && skuB !== skuA) {
+              await db.prepare(`
+                INSERT INTO csv_data (sku, data, updated_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT (sku) DO NOTHING
+              `).run(skuB, JSON.stringify(row));
+              importedCount++;
+            }
+            
+            if ((!skuA || skuA === '') && (!skuB || skuB === '')) {
+              skippedCount++;
+            }
+          }
 
           const duration = ((Date.now() - startTime) / 1000).toFixed(2);
           console.log(`CSV import complete in ${duration}s: ${importedCount} records imported, ${skippedCount} rows skipped`);
 
           // Update upload timestamp
-          db.prepare(`
-            INSERT OR REPLACE INTO settings (key, value, updated_at)
-            VALUES ('csv_uploaded_at', ?, datetime('now'))
+          await db.prepare(`
+            INSERT INTO settings (key, value, updated_at)
+            VALUES ('csv_uploaded_at', ?, CURRENT_TIMESTAMP)
+            ON CONFLICT (key) DO UPDATE SET
+              value = EXCLUDED.value,
+              updated_at = CURRENT_TIMESTAMP
           `).run(new Date().toISOString());
-
-          // Clean up uploaded file
-          if (fs.existsSync(filePath)) {
-            fs.unlinkSync(filePath);
-          }
 
           res.json({
             success: true,
@@ -188,32 +194,23 @@ router.post('/upload-csv', upload.single('file'), (req, res) => {
           });
         } catch (error) {
           console.error('Error processing CSV data:', error);
-          if (filePath && fs.existsSync(filePath)) {
-            fs.unlinkSync(filePath);
-          }
           res.status(500).json({ error: 'Error processing CSV data: ' + error.message });
         }
       })
       .on('error', (error) => {
         console.error('Error parsing CSV:', error);
-        if (filePath && fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
-        }
         res.status(500).json({ error: 'Error parsing CSV file: ' + error.message });
       });
+
   } catch (error) {
     console.error('Error uploading CSV:', error);
-    if (filePath && fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-    }
     res.status(500).json({ error: 'Failed to upload CSV: ' + error.message });
   }
 });
-
 // Get box types
-router.get('/box-types', (req, res) => {
+router.get('/box-types', async (req, res) => {
   try {
-    const boxTypes = db.prepare('SELECT * FROM box_types ORDER BY code').all();
+    const boxTypes = await db.prepare('SELECT * FROM box_types ORDER BY code').all();
     res.json(boxTypes);
   } catch (error) {
     console.error('Error fetching box types:', error);
@@ -222,7 +219,7 @@ router.get('/box-types', (req, res) => {
 });
 
 // Add box type
-router.post('/box-types', (req, res) => {
+router.post('/box-types', async (req, res) => {
   try {
     const { code, dimensions } = req.body;
 
@@ -230,14 +227,14 @@ router.post('/box-types', (req, res) => {
       return res.status(400).json({ error: 'Box code is required' });
     }
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO box_types (code, dimensions)
       VALUES (?, ?)
     `).run(code.toUpperCase().trim(), dimensions || '');
 
     res.json({ success: true });
   } catch (error) {
-    if (error.message.includes('UNIQUE constraint failed')) {
+    if (error.message.includes('UNIQUE constraint failed') || error.code === '23505') {
       return res.status(400).json({ error: 'Box code already exists' });
     }
     console.error('Error adding box type:', error);
@@ -246,7 +243,7 @@ router.post('/box-types', (req, res) => {
 });
 
 // Update box type
-router.patch('/box-types/:id', (req, res) => {
+router.patch('/box-types/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { code, dimensions } = req.body;
@@ -255,7 +252,7 @@ router.patch('/box-types/:id', (req, res) => {
       return res.status(400).json({ error: 'Box code is required' });
     }
 
-    db.prepare(`
+    await db.prepare(`
       UPDATE box_types
       SET code = ?, dimensions = ?
       WHERE id = ?
@@ -263,7 +260,7 @@ router.patch('/box-types/:id', (req, res) => {
 
     res.json({ success: true });
   } catch (error) {
-    if (error.message.includes('UNIQUE constraint failed')) {
+    if (error.message.includes('UNIQUE constraint failed') || error.code === '23505') {
       return res.status(400).json({ error: 'Box code already exists' });
     }
     console.error('Error updating box type:', error);
@@ -272,10 +269,10 @@ router.patch('/box-types/:id', (req, res) => {
 });
 
 // Delete box type
-router.delete('/box-types/:id', (req, res) => {
+router.delete('/box-types/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const result = db.prepare('DELETE FROM box_types WHERE id = ?').run(id);
+    const result = await db.prepare('DELETE FROM box_types WHERE id = ?').run(id);
     
     if (result.changes === 0) {
       return res.status(404).json({ error: 'Box type not found' });
@@ -311,7 +308,7 @@ router.get('/cleanup-preview', async (req, res) => {
     const sixtyDaysAgo = new Date();
     sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
 
-    const oldOrders = db.prepare(`
+    const oldOrders = await db.prepare(`
       SELECT shopify_order_id, name, created_at, fulfillment_status 
       FROM orders 
       WHERE created_at < ?
@@ -333,11 +330,11 @@ router.get('/cleanup-preview', async (req, res) => {
 router.get('/database-stats', async (req, res) => {
   try {
     const stats = {
-      orders: db.prepare('SELECT COUNT(*) as count FROM orders').get(),
-      lineItems: db.prepare('SELECT COUNT(*) as count FROM line_items').get(),
-      transferItems: db.prepare('SELECT COUNT(*) as count FROM transfer_items').get(),
-      oldestOrder: db.prepare('SELECT created_at FROM orders ORDER BY created_at ASC LIMIT 1').get(),
-      newestOrder: db.prepare('SELECT created_at FROM orders ORDER BY created_at DESC LIMIT 1').get()
+      orders: await db.prepare('SELECT COUNT(*) as count FROM orders').get(),
+      lineItems: await db.prepare('SELECT COUNT(*) as count FROM line_items').get(),
+      transferItems: await db.prepare('SELECT COUNT(*) as count FROM transfer_items').get(),
+      oldestOrder: await db.prepare('SELECT created_at FROM orders ORDER BY created_at ASC LIMIT 1').get(),
+      newestOrder: await db.prepare('SELECT created_at FROM orders ORDER BY created_at DESC LIMIT 1').get()
     };
     res.json(stats);
   } catch (error) {

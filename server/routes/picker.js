@@ -3,9 +3,9 @@ const router = express.Router();
 const db = require('../database/init');
 
 // Get all line items for picker
-router.get('/items', (req, res) => {
+router.get('/items', async (req, res) => {
   try {
-    const items = db.prepare(`
+    const items = await db.prepare(`
       SELECT 
         li.*,
         o.name as order_name,
@@ -17,12 +17,12 @@ router.get('/items', (req, res) => {
     `).all();
 
     // Get CSV data for WIG products - preload into Map
-    const csvData = db.prepare('SELECT sku, data FROM csv_data').all();
+    const csvData = await db.prepare('SELECT sku, data FROM csv_data').all();
     const csvMap = new Map(csvData.map(row => [row.sku, JSON.parse(row.data || '{}')]));
     
     console.log(`Loaded ${csvMap.size} SKUs from CSV data`);
 
-    const settings = db.prepare('SELECT * FROM settings').all();
+    const settings = await db.prepare('SELECT * FROM settings').all();
     const wigColumn = settings.find(s => s.key === 'picker_wig_column')?.value || 'E';
 
     console.log(`Using WIG column: ${wigColumn}`);
@@ -55,25 +55,23 @@ router.get('/items', (req, res) => {
   }
 });
 
-// ... 其余代码保持不变
-
 // Update item status
-router.patch('/items/:id/status', (req, res) => {
+router.patch('/items/:id/status', async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
 
-    db.prepare(`
+    await db.prepare(`
       UPDATE line_items 
-      SET picker_status = ?, updated_at = datetime('now')
+      SET picker_status = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(status, id);
 
     // If status is 'missing', create transfer item
     if (status === 'missing') {
-      const item = db.prepare('SELECT * FROM line_items WHERE id = ?').get(id);
+      const item = await db.prepare('SELECT * FROM line_items WHERE id = ?').get(id);
       
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO transfer_items (
           line_item_id, shopify_order_id, order_number, quantity, sku, status
         ) VALUES (?, ?, ?, ?, ?, 'transferring')
@@ -82,7 +80,7 @@ router.patch('/items/:id/status', (req, res) => {
 
     // If status changes from 'missing' to 'picked', remove from transfer
     if (status === 'picked') {
-      db.prepare('DELETE FROM transfer_items WHERE line_item_id = ?').run(id);
+      await db.prepare('DELETE FROM transfer_items WHERE line_item_id = ?').run(id);
     }
 
     res.json({ success: true });
@@ -93,12 +91,12 @@ router.patch('/items/:id/status', (req, res) => {
 });
 
 // Split item (when quantity > 1 and partially picked)
-router.post('/items/:id/split', (req, res) => {
+router.post('/items/:id/split', async (req, res) => {
   try {
     const { id } = req.params;
     const { pickedQuantity } = req.body;
 
-    const item = db.prepare('SELECT * FROM line_items WHERE id = ?').get(id);
+    const item = await db.prepare('SELECT * FROM line_items WHERE id = ?').get(id);
     
     if (!item) {
       return res.status(404).json({ error: 'Item not found' });
@@ -107,20 +105,21 @@ router.post('/items/:id/split', (req, res) => {
     const missingQuantity = item.quantity - pickedQuantity;
 
     // Update original item to picked quantity
-    db.prepare(`
+    await db.prepare(`
       UPDATE line_items 
-      SET quantity = ?, picker_status = 'picked', updated_at = datetime('now')
+      SET quantity = ?, picker_status = 'picked', updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(pickedQuantity, id);
 
     // Create new item for missing quantity
-    const newItem = db.prepare(`
+    const newItem = await db.prepare(`
       INSERT INTO line_items (
         shopify_order_id, order_number, shopify_line_item_id, quantity,
         image_url, title, name, brand, size, weight, weight_unit, sku,
         url_handle, product_type, picker_status, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'missing', datetime('now'))
-    `).run(
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'missing', CURRENT_TIMESTAMP)
+      RETURNING id
+    `).get(
       item.shopify_order_id,
       item.order_number,
       item.shopify_line_item_id + '_split_' + Date.now(),
@@ -138,13 +137,13 @@ router.post('/items/:id/split', (req, res) => {
     );
 
     // Create transfer item for missing quantity
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO transfer_items (
         line_item_id, shopify_order_id, order_number, quantity, sku, status
       ) VALUES (?, ?, ?, ?, ?, 'transferring')
-    `).run(newItem.lastInsertRowid, item.shopify_order_id, item.order_number, missingQuantity, item.sku);
+    `).run(newItem.id, item.shopify_order_id, item.order_number, missingQuantity, item.sku);
 
-    res.json({ success: true, newItemId: newItem.lastInsertRowid });
+    res.json({ success: true, newItemId: newItem.id });
   } catch (error) {
     console.error('Error splitting item:', error);
     res.status(500).json({ error: error.message });
