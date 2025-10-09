@@ -3,9 +3,23 @@ const axios = require('axios');
 
 class ShopifyClient {
   constructor() {
-    this.shopUrl = process.env.SHOPIFY_STORE_URL;
+    // 修复：使用正确的环境变量名
+    this.shopUrl = process.env.SHOPIFY_SHOP_NAME || process.env.SHOPIFY_STORE_URL;
     this.accessToken = process.env.SHOPIFY_ACCESS_TOKEN;
     this.apiVersion = '2024-01';
+    
+    // 添加验证
+    if (!this.shopUrl) {
+      console.error('ERROR: SHOPIFY_SHOP_NAME is not set!');
+      throw new Error('SHOPIFY_SHOP_NAME environment variable is required');
+    }
+    
+    if (!this.accessToken) {
+      console.error('ERROR: SHOPIFY_ACCESS_TOKEN is not set!');
+      throw new Error('SHOPIFY_ACCESS_TOKEN environment variable is required');
+    }
+    
+    console.log(`Shopify Client initialized for: ${this.shopUrl}`);
     
     this.client = axios.create({
       baseURL: `https://${this.shopUrl}/admin/api/${this.apiVersion}`,
