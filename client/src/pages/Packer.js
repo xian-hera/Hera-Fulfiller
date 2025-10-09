@@ -112,7 +112,7 @@ const Packer = () => {
       order_number, 
       name, 
       total_quantity, 
-      shipping_code, 
+      shipping_title, 
       status,
       orderStatus, 
       box_type, 
@@ -147,8 +147,8 @@ const Packer = () => {
             {orderStatus === 'ready' && (
               <>
                 {/* 位置5: Shipping（只在 ready 且有 warning 时显示）*/}
-                {hasWeightWarning && shipping_code && (
-                  <Badge tone="info">{shipping_code}</Badge>
+                {hasWeightWarning && shipping_title && (
+                  <Badge tone="info">{shipping_title}</Badge>
                 )}
                 
                 {/* 位置4/3: Box Type */}
@@ -162,8 +162,8 @@ const Packer = () => {
                 )}
                 
                 {/* 位置2: Shipping（只在 ready 且没有 warning 时显示）*/}
-                {!hasWeightWarning && shipping_code && (
-                  <Badge tone="info">{shipping_code}</Badge>
+                {!hasWeightWarning && shipping_title && (
+                  <Badge tone="info">{shipping_title}</Badge>
                 )}
               </>
             )}

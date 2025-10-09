@@ -25,6 +25,7 @@ class OrderWebhookHandler {
         subtotal_price: orderData.subtotal_price,
         created_at: orderData.created_at,
         shipping_code: orderData.shipping_lines[0]?.code || '',
+        shipping_title: orderData.shipping_lines[0]?.title || '',
         shipping_name: orderData.shipping_address?.name || '',
         shipping_address1: orderData.shipping_address?.address1 || '',
         shipping_address2: orderData.shipping_address?.address2 || '',

@@ -24,6 +24,7 @@ async function initPostgres() {
       subtotal_price TEXT,
       created_at TIMESTAMP,
       shipping_code TEXT,
+      shipping_title TEXT,
       shipping_name TEXT,
       shipping_address1 TEXT,
       shipping_address2 TEXT,
