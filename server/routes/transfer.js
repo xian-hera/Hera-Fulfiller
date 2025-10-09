@@ -9,9 +9,9 @@ const EMOJI_MAP = {
 };
 
 // Get all transfer items
-router.get('/items', (req, res) => {
+router.get('/items', async (req, res) => {
   try {
-    const items = db.prepare(`
+    const items = await db.prepare(`
       SELECT 
         ti.*,
         li.image_url,
@@ -25,6 +25,7 @@ router.get('/items', (req, res) => {
       ORDER BY ti.created_at DESC
     `).all();
 
+    console.log(`Transfer: Found ${items.length} items`);
     res.json(items);
   } catch (error) {
     console.error('Error fetching transfer items:', error);
@@ -33,10 +34,10 @@ router.get('/items', (req, res) => {
 });
 
 // Get copy text for an item
-router.get('/items/:id/copy-text', (req, res) => {
+router.get('/items/:id/copy-text', async (req, res) => {
   try {
     const { id } = req.params;
-    const item = db.prepare(`
+    const item = await db.prepare(`
       SELECT ti.*, li.sku
       FROM transfer_items ti
       JOIN line_items li ON ti.line_item_id = li.id
@@ -48,13 +49,13 @@ router.get('/items/:id/copy-text', (req, res) => {
     }
 
     // Get CSV column setting
-    const settings = db.prepare('SELECT * FROM settings WHERE key = ?').get('transfer_csv_column');
+    const settings = await db.prepare('SELECT * FROM settings WHERE key = ?').get('transfer_csv_column');
     const column = settings?.value || 'D';
 
     console.log(`Transfer: Using column ${column} for SKU ${item.sku}`);
 
     // Get CSV data for this SKU
-    const csvData = db.prepare('SELECT data FROM csv_data WHERE sku = ?').get(item.sku);
+    const csvData = await db.prepare('SELECT data FROM csv_data WHERE sku = ?').get(item.sku);
     const csvRow = csvData ? JSON.parse(csvData.data) : {};
     const columnData = csvRow[column] || '';
 
@@ -81,7 +82,7 @@ router.get('/items/:id/copy-text', (req, res) => {
 });
 
 // Update transfer item status
-router.patch('/items/:id', (req, res) => {
+router.patch('/items/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { status, transfer_from, estimate_month, estimate_day } = req.body;
@@ -106,10 +107,10 @@ router.patch('/items/:id', (req, res) => {
       values.push(estimate_day);
     }
 
-    updates.push("updated_at = datetime('now')");
+    updates.push("updated_at = CURRENT_TIMESTAMP");
     values.push(id);
 
-    db.prepare(`
+    await db.prepare(`
       UPDATE transfer_items 
       SET ${updates.join(', ')}
       WHERE id = ?
@@ -123,12 +124,12 @@ router.patch('/items/:id', (req, res) => {
 });
 
 // Split transfer item (when quantity > 1 and user wants to transfer part)
-router.post('/items/:id/split', (req, res) => {
+router.post('/items/:id/split', async (req, res) => {
   try {
     const { id } = req.params;
     const { transferQuantity, transfer_from, estimate_month, estimate_day } = req.body;
 
-    const item = db.prepare('SELECT * FROM transfer_items WHERE id = ?').get(id);
+    const item = await db.prepare('SELECT * FROM transfer_items WHERE id = ?').get(id);
     
     if (!item) {
       return res.status(404).json({ error: 'Transfer item not found' });
@@ -142,7 +143,7 @@ router.post('/items/:id/split', (req, res) => {
     }
 
     // Update original item to transferring quantity
-    db.prepare(`
+    await db.prepare(`
       UPDATE transfer_items 
       SET 
         quantity = ?,
@@ -150,12 +151,12 @@ router.post('/items/:id/split', (req, res) => {
         estimate_month = ?,
         estimate_day = ?,
         status = 'waiting',
-        updated_at = datetime('now')
+        updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(qty, transfer_from, estimate_month, estimate_day, id);
 
     // Create new item for remaining quantity
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO transfer_items (
         line_item_id, shopify_order_id, order_number, quantity, sku, status
       ) VALUES (?, ?, ?, ?, ?, 'transferring')
@@ -175,7 +176,7 @@ router.post('/items/:id/split', (req, res) => {
 });
 
 // Bulk delete transfer items
-router.post('/items/bulk-delete', (req, res) => {
+router.post('/items/bulk-delete', async (req, res) => {
   try {
     const { ids } = req.body;
 
@@ -184,7 +185,7 @@ router.post('/items/bulk-delete', (req, res) => {
     }
 
     const placeholders = ids.map(() => '?').join(',');
-    db.prepare(`DELETE FROM transfer_items WHERE id IN (${placeholders})`).run(...ids);
+    await db.prepare(`DELETE FROM transfer_items WHERE id IN (${placeholders})`).run(...ids);
 
     res.json({ success: true, deleted: ids.length });
   } catch (error) {
