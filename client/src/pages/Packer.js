@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import axios from '../api/axios';  // 确保使用正确的 axios
+import axios from '../api/axios';
 import {
   Page,
   Layout,
@@ -15,17 +15,35 @@ import {
   Banner,
   InlineStack
 } from '@shopify/polaris';
+import { SortIcon } from '@shopify/polaris-icons';
 
 const Packer = () => {
   const navigate = useNavigate();
   const [orders, setOrders] = useState([]);
   const [filteredOrders, setFilteredOrders] = useState([]);
   const [statusFilter, setStatusFilter] = useState(['packing', 'waiting', 'holding', 'ready']);
+  const [showEditedOnly, setShowEditedOnly] = useState(false);
+  const [isSorted, setIsSorted] = useState(false);
 
   const applyFilters = useCallback(() => {
-    const filtered = orders.filter(order => statusFilter.includes(order.orderStatus));
+    let filtered = orders.filter(order => statusFilter.includes(order.orderStatus));
+    
+    // 如果启用了 "只显示 Edited"，进一步过滤
+    if (showEditedOnly) {
+      filtered = filtered.filter(order => order.is_edited);
+    }
+    
+    // 如果启用了排序，按订单号排序
+    if (isSorted) {
+      filtered = filtered.sort((a, b) => {
+        const orderNumA = parseInt(a.order_number) || 0;
+        const orderNumB = parseInt(b.order_number) || 0;
+        return orderNumA - orderNumB;
+      });
+    }
+    
     setFilteredOrders(filtered);
-  }, [orders, statusFilter]);
+  }, [orders, statusFilter, showEditedOnly, isSorted]);
 
   useEffect(() => {
     fetchOrders();
@@ -33,7 +51,7 @@ const Packer = () => {
 
   useEffect(() => {
     applyFilters();
-  }, [orders, statusFilter, applyFilters]);
+  }, [orders, statusFilter, showEditedOnly, isSorted, applyFilters]);
 
   const fetchOrders = async () => {
     try {
@@ -43,6 +61,10 @@ const Packer = () => {
     } catch (error) {
       console.error('Error fetching orders:', error);
     }
+  };
+
+  const handleSort = () => {
+    setIsSorted(!isSorted);
   };
 
   const handleStatusClick = async (e, orderId, currentStatus) => {
@@ -61,7 +83,7 @@ const Packer = () => {
 
     try {
       await axios.patch(`/api/packer/orders/${orderId}`, { status: newStatus });
-      await fetchOrders(); // 重新获取以更新 orderStatus
+      await fetchOrders();
     } catch (error) {
       console.error('Error updating order status:', error);
     }
@@ -77,7 +99,6 @@ const Packer = () => {
       case 'ready':
         return <Badge tone="success">Ready</Badge>;
       case 'holding':
-        // 自定义紫色标签
         return (
           <span style={{
             display: 'inline-block',
@@ -98,13 +119,36 @@ const Packer = () => {
     }
   };
 
-  // 格式化日期：补零
   const formatDate = (month, day) => {
     if (!month || !day) return '';
     const m = month.toString().padStart(2, '0');
     const d = day.toString().padStart(2, '0');
     return `${m}/${d}`;
   };
+
+  // 计算每种状态的数量
+  const getStatusCounts = () => {
+    const counts = {
+      packing: 0,
+      waiting: 0,
+      holding: 0,
+      ready: 0,
+      edited: 0
+    };
+    
+    orders.forEach(order => {
+      if (counts.hasOwnProperty(order.orderStatus)) {
+        counts[order.orderStatus]++;
+      }
+      if (order.is_edited) {
+        counts.edited++;
+      }
+    });
+    
+    return counts;
+  };
+
+  const statusCounts = getStatusCounts();
 
   const renderItem = (order) => {
     const { 
@@ -119,7 +163,7 @@ const Packer = () => {
       weight, 
       hasWeightWarning,
       transferInfo,
-      is_edited  // 添加 is_edited
+      is_edited
     } = order;
 
     return (
@@ -140,56 +184,43 @@ const Packer = () => {
             </BlockStack>
           </div>
           
-          {/* 右侧区域：从右往左排列 */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            {/* 位置5-1（从左到右） */}
-            
-            {/* Ready 状态的额外信息 */}
             {orderStatus === 'ready' && (
               <>
-                {/* 位置5: Shipping（只在 ready 且有 warning 时显示）*/}
                 {hasWeightWarning && shipping_title && (
                   <Badge tone="info">{shipping_title}</Badge>
                 )}
                 
-                {/* 位置4/3: Box Type */}
                 {box_type && (
                   <Badge tone="info">Box: {box_type}</Badge>
                 )}
                 
-                {/* 位置3/2: Weight（如果没有 warning，这是位置3；有 warning 则是位置4）*/}
                 {weight && (
                   <Badge>Weight: {weight}g</Badge>
                 )}
                 
-                {/* 位置2: Shipping（只在 ready 且没有 warning 时显示）*/}
                 {!hasWeightWarning && shipping_title && (
                   <Badge tone="info">{shipping_title}</Badge>
                 )}
               </>
             )}
             
-            {/* Waiting 状态的 Transfer Info */}
             {orderStatus === 'waiting' && transferInfo && (
               <Text variant="bodySm" fontWeight="bold" tone="info">
                 {transferInfo.transferFroms.join(', ')}, {formatDate(transferInfo.estimateMonth, transferInfo.estimateDay)}
               </Text>
             )}
             
-            {/* 位置3: Edited Badge（红色）*/}
             {is_edited && (
               <Badge tone="critical">Edited</Badge>
             )}
             
-            {/* 位置2: Weight Warning */}
             {hasWeightWarning && (
               <Badge tone="warning">⚠️ Weight</Badge>
             )}
             
-            {/* 位置1: 状态标签 */}
             {getStatusBadge(orderStatus)}
             
-            {/* Hold/Undo 按钮（所有状态都显示）*/}
             <Button onClick={(e) => handleStatusClick(e, shopify_order_id, status)}>
               {status === 'holding' ? 'Undo' : 'Hold'}
             </Button>
@@ -203,23 +234,53 @@ const Packer = () => {
     <Page
       title="Packer"
       backAction={{ content: 'Dashboard', onAction: () => navigate('/') }}
+      primaryAction={{
+        content: isSorted ? 'Unsort' : 'Sort by Order #',
+        icon: SortIcon,
+        onAction: handleSort
+      }}
     >
       <Layout>
         <Layout.Section>
           <Card>
             <div style={{ padding: '16px' }}>
-              <ChoiceList
-                title="Show orders"
-                choices={[
-                  { label: 'Packing', value: 'packing' },
-                  { label: 'Waiting', value: 'waiting' },
-                  { label: 'Holding', value: 'holding' },
-                  { label: 'Ready', value: 'ready' }
-                ]}
-                selected={statusFilter}
-                onChange={setStatusFilter}
-                allowMultiple
-              />
+              <BlockStack gap="4">
+                <ChoiceList
+                  title="Show orders"
+                  choices={[
+                    { label: `Packing (${statusCounts.packing})`, value: 'packing' },
+                    { label: `Waiting (${statusCounts.waiting})`, value: 'waiting' },
+                    { label: `Holding (${statusCounts.holding})`, value: 'holding' },
+                    { label: `Ready (${statusCounts.ready})`, value: 'ready' }
+                  ]}
+                  selected={statusFilter}
+                  onChange={setStatusFilter}
+                  allowMultiple
+                />
+                
+                {/* Edited 单独的复选框 */}
+                <div style={{ 
+                  paddingTop: '12px', 
+                  borderTop: '1px solid #e1e3e5',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}>
+                  <input
+                    type="checkbox"
+                    id="edited-filter"
+                    checked={showEditedOnly}
+                    onChange={(e) => setShowEditedOnly(e.target.checked)}
+                    style={{ cursor: 'pointer' }}
+                  />
+                  <label 
+                    htmlFor="edited-filter" 
+                    style={{ cursor: 'pointer', fontSize: '14px' }}
+                  >
+                    Show only Edited orders ({statusCounts.edited})
+                  </label>
+                </div>
+              </BlockStack>
             </div>
           </Card>
         </Layout.Section>

@@ -342,12 +342,11 @@ class OrderWebhookHandler {
         }
       }
 
-      // 更新订单信息，并标记为已编辑
+      // ✅ 修改：更新订单信息（不设置 is_edited）
       await db.prepare(`
         UPDATE orders SET 
           total_quantity = ?,
           fulfillment_status = ?,
-          is_edited = TRUE,
           updated_at = CURRENT_TIMESTAMP
         WHERE shopify_order_id = ?
       `).run(
@@ -364,15 +363,11 @@ class OrderWebhookHandler {
     }
   }
 
-  // Handle order edits complete
+  // ✅ 修改：Handle order edits complete
   static async handleOrderEditsComplete(editData) {
     try {
       console.log(`\n=== Order Edits Complete Webhook ===`);
       console.log('Full webhook data:', JSON.stringify(editData, null, 2));
-      
-      // Order Edits webhook 的数据结构可能是：
-      // { admin_graphql_api_id: "gid://shopify/OrderEdit/123", order_id: 456 }
-      // 或者 { id: 123, order_id: 456 }
       
       const orderId = editData.order_id || editData.admin_graphql_api_order_id;
       
@@ -392,11 +387,20 @@ class OrderWebhookHandler {
       console.log(`✓ Got fresh data for order ${orderData.name}`);
       console.log(`Line items count: ${orderData.line_items.length}`);
       
-      // 调用 handleOrderUpdated 处理（会自动设置 is_edited = TRUE）
+      // ⚠️ 关键：先标记为 edited
+      await db.prepare(`
+        UPDATE orders SET 
+          is_edited = TRUE,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE shopify_order_id = ?
+      `).run(orderData.id.toString());
+      
+      console.log(`✓ Marked order ${orderData.name} as edited`);
+      
+      // 然后调用 handleOrderUpdated 处理内容变化
       return await this.handleOrderUpdated(orderData);
     } catch (error) {
       console.error('Error handling order edits complete:', error.message);
-      // 不抛出错误，避免 Shopify 重试
       return { success: false, error: error.message };
     }
   }

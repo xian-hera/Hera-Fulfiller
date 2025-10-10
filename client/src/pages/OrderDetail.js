@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import axios from 'axios';
+import axios from '../api/axios';
 import {
   Page,
   Layout,
@@ -25,7 +25,6 @@ const OrderDetail = () => {
   const [order, setOrder] = useState(null);
   const [lineItems, setLineItems] = useState([]);
   const [allOrders, setAllOrders] = useState([]);
-  const [currentIndex, setCurrentIndex] = useState(-1);
   const [isSorted, setIsSorted] = useState(false);
   const [weightModal, setWeightModal] = useState(null);
   const [weightValue, setWeightValue] = useState('');
@@ -35,46 +34,58 @@ const OrderDetail = () => {
   const [boxTypes, setBoxTypes] = useState([]);
   const [message, setMessage] = useState('');
   const [selectedImage, setSelectedImage] = useState(null);
-  const [activeInput, setActiveInput] = useState('boxType'); // 'boxType' or 'weight'
+  const [activeInput, setActiveInput] = useState('boxType');
 
   // Touch gesture support
   const touchStartX = useRef(0);
   const touchEndX = useRef(0);
+  const touchStartY = useRef(0);
+  const touchEndY = useRef(0);
   const pageRef = useRef(null);
+  const isNavigatingRef = useRef(false);
 
   useEffect(() => {
     fetchAllOrders();
   }, []);
 
   useEffect(() => {
-    if (shopifyOrderId) {
+    if (shopifyOrderId && !isNavigatingRef.current) {
       fetchOrderDetail();
     }
   }, [shopifyOrderId]);
 
-  useEffect(() => {
-    if (allOrders.length > 0 && shopifyOrderId) {
-      const index = allOrders.findIndex(o => o.shopify_order_id === shopifyOrderId);
-      setCurrentIndex(index);
-    }
-  }, [allOrders, shopifyOrderId]);
-
   // Add touch event listeners
   useEffect(() => {
     const handleTouchStart = (e) => {
+      // 忽略modal内的touch事件
+      if (weightModal || completeModal || selectedImage) {
+        return;
+      }
       touchStartX.current = e.touches[0].clientX;
+      touchStartY.current = e.touches[0].clientY;
     };
 
     const handleTouchMove = (e) => {
+      if (weightModal || completeModal || selectedImage) {
+        return;
+      }
       touchEndX.current = e.touches[0].clientX;
+      touchEndY.current = e.touches[0].clientY;
     };
 
     const handleTouchEnd = () => {
-      const swipeDistance = touchStartX.current - touchEndX.current;
-      const minSwipeDistance = 50;
+      if (weightModal || completeModal || selectedImage) {
+        return;
+      }
 
-      if (Math.abs(swipeDistance) > minSwipeDistance) {
-        if (swipeDistance > 0) {
+      const swipeDistanceX = touchStartX.current - touchEndX.current;
+      const swipeDistanceY = Math.abs(touchStartY.current - touchEndY.current);
+      const minSwipeDistance = 100; // 增加最小滑动距离
+      const maxVerticalDistance = 50; // 垂直滑动不能超过这个距离
+
+      // 只有在水平滑动明显大于垂直滑动时才触发导航
+      if (Math.abs(swipeDistanceX) > minSwipeDistance && swipeDistanceY < maxVerticalDistance) {
+        if (swipeDistanceX > 0) {
           handleNextOrder();
         } else {
           handlePreviousOrder();
@@ -83,13 +94,15 @@ const OrderDetail = () => {
 
       touchStartX.current = 0;
       touchEndX.current = 0;
+      touchStartY.current = 0;
+      touchEndY.current = 0;
     };
 
     const element = pageRef.current;
     if (element) {
-      element.addEventListener('touchstart', handleTouchStart);
-      element.addEventListener('touchmove', handleTouchMove);
-      element.addEventListener('touchend', handleTouchEnd);
+      element.addEventListener('touchstart', handleTouchStart, { passive: true });
+      element.addEventListener('touchmove', handleTouchMove, { passive: true });
+      element.addEventListener('touchend', handleTouchEnd, { passive: true });
 
       return () => {
         element.removeEventListener('touchstart', handleTouchStart);
@@ -97,12 +110,18 @@ const OrderDetail = () => {
         element.removeEventListener('touchend', handleTouchEnd);
       };
     }
-  }, [currentIndex, allOrders]);
+  }, [allOrders, weightModal, completeModal, selectedImage, order]);
 
   const fetchAllOrders = async () => {
     try {
       const response = await axios.get('/api/packer/orders');
-      setAllOrders(response.data);
+      // 按订单号排序
+      const sorted = response.data.sort((a, b) => {
+        const numA = parseInt(a.order_number) || 0;
+        const numB = parseInt(b.order_number) || 0;
+        return numA - numB;
+      });
+      setAllOrders(sorted);
     } catch (error) {
       console.error('Error fetching all orders:', error);
     }
@@ -128,17 +147,54 @@ const OrderDetail = () => {
     }
   };
 
+  // 根据订单号查找上一个和下一个订单
+  const getCurrentOrderNumber = () => {
+    return order ? parseInt(order.order_number) : 0;
+  };
+
+  const findPreviousOrder = () => {
+    const currentNum = getCurrentOrderNumber();
+    // 找到订单号小于当前订单的最大订单号
+    for (let i = allOrders.length - 1; i >= 0; i--) {
+      const orderNum = parseInt(allOrders[i].order_number) || 0;
+      if (orderNum < currentNum) {
+        return allOrders[i];
+      }
+    }
+    return null;
+  };
+
+  const findNextOrder = () => {
+    const currentNum = getCurrentOrderNumber();
+    // 找到订单号大于当前订单的最小订单号
+    for (let i = 0; i < allOrders.length; i++) {
+      const orderNum = parseInt(allOrders[i].order_number) || 0;
+      if (orderNum > currentNum) {
+        return allOrders[i];
+      }
+    }
+    return null;
+  };
+
   const handlePreviousOrder = () => {
-    if (currentIndex > 0) {
-      const prevOrder = allOrders[currentIndex - 1];
+    const prevOrder = findPreviousOrder();
+    if (prevOrder) {
+      isNavigatingRef.current = true;
       navigate(`/packer/${prevOrder.shopify_order_id}`);
+      setTimeout(() => {
+        isNavigatingRef.current = false;
+      }, 100);
     }
   };
 
   const handleNextOrder = () => {
-    if (currentIndex < allOrders.length - 1) {
-      const nextOrder = allOrders[currentIndex + 1];
+    const nextOrder = findNextOrder();
+    if (nextOrder) {
+      isNavigatingRef.current = true;
       navigate(`/packer/${nextOrder.shopify_order_id}`);
+      setTimeout(() => {
+        isNavigatingRef.current = false;
+      }, 100);
     }
   };
 
@@ -160,7 +216,7 @@ const OrderDetail = () => {
       const currentStatusMap = new Map(lineItems.map(item => [item.id, item.packer_status]));
       const restored = order.lineItems.map(item => ({
         ...item,
-       packer_status: currentStatusMap.get(item.id) || item.packer_status
+        packer_status: currentStatusMap.get(item.id) || item.packer_status
       }));
       setLineItems(restored);
       setIsSorted(false);
@@ -177,6 +233,11 @@ const OrderDetail = () => {
   };
 
   const handleItemClick = async (item) => {
+    // 防止在modal打开时点击item
+    if (weightModal || completeModal || selectedImage) {
+      return;
+    }
+
     const newStatus = item.packer_status === 'ready' ? 'packing' : 'ready';
     
     try {
@@ -268,8 +329,8 @@ const OrderDetail = () => {
     }
 
     const hasWeightWarning = lineItems.some(item => 
-    item.has_weight_warning === 1
-);
+      item.has_weight_warning === 1
+    );
 
     if (hasWeightWarning && !orderWeight) {
       setMessage('Please enter the order weight');
@@ -281,7 +342,23 @@ const OrderDetail = () => {
         boxType,
         weight: orderWeight || null
       });
-      navigate('/packer');
+      
+      setCompleteModal(false);
+      
+      // 查找下一个packing状态的订单
+      const nextOrder = findNextOrder();
+      
+      if (nextOrder) {
+        // 如果找到下一个订单，跳转到该订单
+        isNavigatingRef.current = true;
+        navigate(`/packer/${nextOrder.shopify_order_id}`);
+        setTimeout(() => {
+          isNavigatingRef.current = false;
+        }, 100);
+      } else {
+        // 如果没有下一个订单，返回列表
+        navigate('/packer');
+      }
     } catch (error) {
       console.error('Error completing order:', error);
       setMessage('Error completing order');
@@ -312,7 +389,7 @@ const OrderDetail = () => {
 
   const hasWeightWarning = lineItems.some(item => 
     item.has_weight_warning === 1
-);
+  );
 
   const renderLineItem = (item) => {
     const status = getItemStatus(item);
@@ -451,13 +528,13 @@ const OrderDetail = () => {
       content: 'Previous',
       icon: ChevronLeftIcon,
       onAction: handlePreviousOrder,
-      disabled: currentIndex <= 0
+      disabled: !findPreviousOrder()
     },
     {
       content: 'Next',
       icon: ChevronRightIcon,
       onAction: handleNextOrder,
-      disabled: currentIndex >= allOrders.length - 1 || currentIndex === -1
+      disabled: !findNextOrder()
     },
     {
       content: isSorted ? 'Unsort' : 'Sort',
