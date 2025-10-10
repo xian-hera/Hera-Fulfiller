@@ -39,23 +39,25 @@ class OrderWebhookHandler {
       const insertOrder = db.prepare(`
         INSERT INTO orders (
           shopify_order_id, order_number, name, fulfillment_status, 
-          total_quantity, subtotal_price, created_at, shipping_code,
+          total_quantity, subtotal_price, created_at, shipping_code, shipping_title,
           shipping_name, shipping_address1, shipping_address2, 
           shipping_city, shipping_province, shipping_zip, shipping_country
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (shopify_order_id) DO UPDATE SET
           order_number = EXCLUDED.order_number,
           name = EXCLUDED.name,
           fulfillment_status = EXCLUDED.fulfillment_status,
           total_quantity = EXCLUDED.total_quantity,
           subtotal_price = EXCLUDED.subtotal_price,
+          shipping_title = EXCLUDED.shipping_title,
           updated_at = CURRENT_TIMESTAMP
       `);
 
       await insertOrder.run(
         order.shopify_order_id, order.order_number, order.name,
         order.fulfillment_status, order.total_quantity, order.subtotal_price,
-        order.created_at, order.shipping_code, order.shipping_name,
+        order.created_at, order.shipping_code, order.shipping_title,
+        order.shipping_name,
         order.shipping_address1, order.shipping_address2, order.shipping_city,
         order.shipping_province, order.shipping_zip, order.shipping_country
       );
@@ -340,10 +342,12 @@ class OrderWebhookHandler {
         }
       }
 
+      // 更新订单信息，并标记为已编辑
       await db.prepare(`
         UPDATE orders SET 
           total_quantity = ?,
           fulfillment_status = ?,
+          is_edited = TRUE,
           updated_at = CURRENT_TIMESTAMP
         WHERE shopify_order_id = ?
       `).run(
@@ -364,19 +368,36 @@ class OrderWebhookHandler {
   static async handleOrderEditsComplete(editData) {
     try {
       console.log(`\n=== Order Edits Complete Webhook ===`);
-      console.log(`Edit ID: ${editData.id}`);
-      console.log(`Order ID: ${editData.order_id}`);
+      console.log('Full webhook data:', JSON.stringify(editData, null, 2));
       
+      // Order Edits webhook 的数据结构可能是：
+      // { admin_graphql_api_id: "gid://shopify/OrderEdit/123", order_id: 456 }
+      // 或者 { id: 123, order_id: 456 }
+      
+      const orderId = editData.order_id || editData.admin_graphql_api_order_id;
+      
+      if (!orderId) {
+        console.error('No order_id found in Order Edits webhook data');
+        console.error('Available keys:', Object.keys(editData));
+        return { success: false, error: 'No order_id in webhook data' };
+      }
+      
+      console.log(`Edit ID: ${editData.id || editData.admin_graphql_api_id}`);
+      console.log(`Order ID: ${orderId}`);
+      
+      // 从 Shopify 获取最新的订单数据
       console.log('Fetching latest order data from Shopify API...');
-      const orderData = await shopifyClient.getOrder(editData.order_id);
+      const orderData = await shopifyClient.getOrder(orderId);
       
       console.log(`✓ Got fresh data for order ${orderData.name}`);
       console.log(`Line items count: ${orderData.line_items.length}`);
       
+      // 调用 handleOrderUpdated 处理（会自动设置 is_edited = TRUE）
       return await this.handleOrderUpdated(orderData);
     } catch (error) {
-      console.error('Error handling order edits complete:', error);
-      throw error;
+      console.error('Error handling order edits complete:', error.message);
+      // 不抛出错误，避免 Shopify 重试
+      return { success: false, error: error.message };
     }
   }
 

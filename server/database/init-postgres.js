@@ -35,6 +35,7 @@ async function initPostgres() {
       status TEXT DEFAULT 'packing',
       box_type TEXT,
       weight NUMERIC,
+      is_edited BOOLEAN DEFAULT FALSE,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);

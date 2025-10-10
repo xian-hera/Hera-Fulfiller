@@ -343,4 +343,34 @@ router.get('/database-stats', async (req, res) => {
   }
 });
 
+// Clear all orders and items (for testing purposes)
+router.post('/clear-all-data', async (req, res) => {
+  try {
+    console.log('⚠️  CLEARING ALL DATA - This action cannot be undone!');
+    
+    // 删除所有数据（按依赖顺序）
+    await db.prepare('DELETE FROM transfer_items').run();
+    console.log('✓ Cleared transfer_items');
+    
+    await db.prepare('DELETE FROM line_items').run();
+    console.log('✓ Cleared line_items');
+    
+    await db.prepare('DELETE FROM orders').run();
+    console.log('✓ Cleared orders');
+    
+    console.log('✓ All order data cleared successfully');
+    
+    res.json({ 
+      success: true, 
+      message: 'All orders, line items, and transfer items have been deleted. CSV data and settings were preserved.'
+    });
+  } catch (error) {
+    console.error('Error clearing data:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to clear data: ' + error.message 
+    });
+  }
+});
+
 module.exports = router;

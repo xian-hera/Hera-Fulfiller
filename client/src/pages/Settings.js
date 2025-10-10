@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import axios from '../api/axios';  // 使用正确的 axios
 import { Page, Layout, Card, TextField, Button, Text, BlockStack, InlineStack, Badge } from '@shopify/polaris';
 
 const Settings = () => {
@@ -18,6 +18,10 @@ const Settings = () => {
   const [cleanupPreview, setCleanupPreview] = useState(null);
   const [dbStats, setDbStats] = useState(null);
   const [isCleanupLoading, setIsCleanupLoading] = useState(false);
+  
+  // 清空所有数据相关状态
+  const [isClearingData, setIsClearingData] = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
 
   useEffect(() => {
     fetchSettings();
@@ -78,6 +82,33 @@ const Settings = () => {
     } finally {
       setIsCleanupLoading(false);
     }
+  };
+
+  const handleClearAllData = async () => {
+    if (!showClearConfirm) {
+      setShowClearConfirm(true);
+      return;
+    }
+
+    setIsClearingData(true);
+    try {
+      const response = await axios.post('/api/settings/clear-all-data');
+      showMessage(response.data.message);
+      setShowClearConfirm(false);
+      
+      // 刷新统计数据
+      await fetchDbStats();
+      setCleanupPreview(null); // 清除预览
+    } catch (error) {
+      console.error('Error clearing data:', error);
+      showMessage('Failed to clear data: ' + (error.response?.data?.error || error.message));
+    } finally {
+      setIsClearingData(false);
+    }
+  };
+
+  const handleCancelClear = () => {
+    setShowClearConfirm(false);
   };
 
   const handleSave = async () => {
@@ -156,7 +187,7 @@ const Settings = () => {
 
   const showMessage = (msg) => {
     setMessage(msg);
-    setTimeout(() => setMessage(''), 3000);
+    setTimeout(() => setMessage(''), 5000);
   };
 
   const formatDate = (dateString) => {
@@ -174,9 +205,9 @@ const Settings = () => {
         <div style={{ 
           padding: '12px', 
           marginBottom: '16px', 
-          backgroundColor: '#d4edda', 
+          backgroundColor: message.includes('Error') || message.includes('failed') || message.includes('Failed') ? '#f8d7da' : '#d4edda', 
           borderRadius: '4px',
-          border: '1px solid #c3e6cb'
+          border: `1px solid ${message.includes('Error') || message.includes('failed') || message.includes('Failed') ? '#f5c6cb' : '#c3e6cb'}`
         }}>
           {message}
         </div>
@@ -313,6 +344,69 @@ const Settings = () => {
                 >
                   Refresh Stats
                 </Button>
+              </div>
+
+              {/* 危险区域：清空所有数据 */}
+              <div style={{ 
+                marginTop: '24px',
+                padding: '16px', 
+                backgroundColor: '#fff1f0', 
+                borderRadius: '8px',
+                border: '2px solid #ff4d4f'
+              }}>
+                <Text variant="headingSm" as="h3">⚠️ Danger Zone</Text>
+                <div style={{ marginTop: '12px' }}>
+                  <Text variant="bodySm" tone="critical">
+                    This will permanently delete ALL orders, line items, and transfer items from the database. 
+                    CSV data and settings will NOT be affected.
+                  </Text>
+                </div>
+                
+                {showClearConfirm && (
+                  <div style={{ 
+                    marginTop: '12px',
+                    padding: '12px',
+                    backgroundColor: '#fff',
+                    borderRadius: '4px',
+                    border: '1px solid #ff4d4f'
+                  }}>
+                    <Text variant="bodyMd" fontWeight="bold" tone="critical">
+                      Are you absolutely sure?
+                    </Text>
+                    <br />
+                    <Text variant="bodySm" tone="subdued">
+                      This action cannot be undone. All order data will be permanently deleted.
+                    </Text>
+                  </div>
+                )}
+                
+                <div style={{ marginTop: '12px', display: 'flex', gap: '12px' }}>
+                  {!showClearConfirm ? (
+                    <Button 
+                      onClick={handleClearAllData}
+                      tone="critical"
+                      disabled={isClearingData}
+                    >
+                      Clear All Data
+                    </Button>
+                  ) : (
+                    <>
+                      <Button 
+                        onClick={handleClearAllData}
+                        tone="critical"
+                        loading={isClearingData}
+                      >
+                        Yes, Delete Everything
+                      </Button>
+                      <Button 
+                        onClick={handleCancelClear}
+                        disabled={isClearingData}
+                      >
+                        Cancel
+                      </Button>
+                    </>
+                  )}
+                </div>
               </div>
             </BlockStack>
           </Card>

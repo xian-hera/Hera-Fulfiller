@@ -31,10 +31,21 @@ const Picker = () => {
   const [quantityModal, setQuantityModal] = useState(null);
   const [pickedQuantity, setPickedQuantity] = useState('');
 
+  // 修复：applyFilters 现在会保持排序状态
   const applyFilters = useCallback(() => {
-    const filtered = items.filter(item => statusFilter.includes(item.picker_status));
+    let filtered = items.filter(item => statusFilter.includes(item.picker_status));
+    
+    // 如果当前是排序状态，保持排序
+    if (isSorted) {
+      filtered = filtered.sort((a, b) => {
+        const typeA = a.sort_type || '';
+        const typeB = b.sort_type || '';
+        return typeA.localeCompare(typeB);
+      });
+    }
+    
     setFilteredItems(filtered);
-  }, [items, statusFilter]);
+  }, [items, statusFilter, isSorted]);
 
   useEffect(() => {
     fetchItems();
@@ -55,6 +66,7 @@ const Picker = () => {
 
   const handleSort = () => {
     if (!isSorted) {
+      // 启用排序
       const sorted = [...filteredItems].sort((a, b) => {
         const typeA = a.sort_type || '';
         const typeB = b.sort_type || '';
@@ -63,8 +75,9 @@ const Picker = () => {
       setFilteredItems(sorted);
       setIsSorted(true);
     } else {
-      applyFilters();
+      // 取消排序
       setIsSorted(false);
+      applyFilters(); // 重新应用过滤，不排序
     }
   };
 
@@ -74,6 +87,7 @@ const Picker = () => {
       setItems(items.map(item => 
         item.id === itemId ? { ...item, picker_status: newStatus } : item
       ));
+      // isSorted 状态会保持，applyFilters 会自动重新排序
     } catch (error) {
       console.error('Error updating status:', error);
     }
@@ -122,6 +136,7 @@ const Picker = () => {
       await fetchItems();
       setQuantityModal(null);
       setPickedQuantity('');
+      // isSorted 状态会保持，applyFilters 会自动重新排序
     } catch (error) {
       console.error('Error splitting item:', error);
     }
@@ -249,6 +264,16 @@ const Picker = () => {
                   {brand} {title} {size}
                 </Text>
               </div>
+              
+              {/* 添加 variant_title */}
+              {variant_title && (
+                <div style={{ marginBottom: '4px' }}>
+                  <Text variant="bodySm">
+                    {variant_title}
+                  </Text>
+                </div>
+              )}
+              
               <div style={{ marginBottom: '2px' }}>
                 <Text variant="bodySm">
                   {display_type}

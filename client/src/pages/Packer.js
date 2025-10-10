@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import axios from '../api/axios';  // 确保使用正确的 axios
 import {
   Page,
   Layout,
@@ -118,7 +118,8 @@ const Packer = () => {
       box_type, 
       weight, 
       hasWeightWarning,
-      transferInfo
+      transferInfo,
+      is_edited  // 添加 is_edited
     } = order;
 
     return (
@@ -173,6 +174,11 @@ const Packer = () => {
               <Text variant="bodySm" fontWeight="bold" tone="info">
                 {transferInfo.transferFroms.join(', ')}, {formatDate(transferInfo.estimateMonth, transferInfo.estimateDay)}
               </Text>
+            )}
+            
+            {/* 位置3: Edited Badge（红色）*/}
+            {is_edited && (
+              <Badge tone="critical">Edited</Badge>
             )}
             
             {/* 位置2: Weight Warning */}
