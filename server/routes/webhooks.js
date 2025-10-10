@@ -62,4 +62,17 @@ router.post('/orders/fulfilled', async (req, res) => {
   }
 });
 
+// Refund Created
+router.post('/refunds/create', async (req, res) => {
+  try {
+    console.log('Webhook received: Refund Created', req.body.order_id);
+    const result = await OrderWebhookHandler.handleRefundCreated(req.body);
+    res.json(result);
+  } catch (error) {
+    console.error('Error processing refund created webhook:', error);
+    res.status(500).json({ error: 'Failed to process webhook' });
+  }
+});
+
+
 module.exports = router;

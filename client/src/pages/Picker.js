@@ -124,21 +124,34 @@ const Picker = () => {
 
   const handleQuantitySubmit = async () => {
     const qty = parseInt(pickedQuantity);
-    if (!qty || qty >= quantityModal.quantity || qty < 1) {
-      alert(`Please enter a valid quantity (1-${quantityModal.quantity - 1})`);
+    
+    // 验证：必须是 0 到 quantity-1 之间的数字
+    if (isNaN(qty) || qty < 0 || qty >= quantityModal.quantity) {
+      alert(`Please enter a valid quantity (0-${quantityModal.quantity - 1})`);
       return;
     }
 
     try {
-      await axios.post(`/api/picker/items/${quantityModal.id}/split`, {
-        pickedQuantity: qty
-      });
-      await fetchItems();
+      if (qty === 0) {
+        // 如果输入 0，直接将整个 item 标记为 missing
+        await axios.patch(`/api/picker/items/${quantityModal.id}/status`, { 
+          status: 'missing' 
+        });
+        await fetchItems();
+      } else {
+        // 如果输入 1 到 quantity-1，调用 split API
+        await axios.post(`/api/picker/items/${quantityModal.id}/split`, {
+          pickedQuantity: qty
+        });
+        await fetchItems();
+      }
+      
       setQuantityModal(null);
       setPickedQuantity('');
       // isSorted 状态会保持，applyFilters 会自动重新排序
     } catch (error) {
-      console.error('Error splitting item:', error);
+      console.error('Error handling quantity:', error);
+      alert('Error processing item. Please try again.');
     }
   };
 
@@ -619,6 +632,7 @@ const Picker = () => {
               <div className="picker-modal-content">
                 <div className="picker-modal-input-section">
                   <Text>Total quantity: {quantityModal.quantity}</Text>
+                  <Text variant="bodySm" tone="subdued">Enter 0 if you have none, or 1-{quantityModal.quantity - 1} for the amount you have</Text>
                   <div style={{ marginTop: '12px' }}>
                     <div style={{
                       border: '2px solid #c4cdd5',

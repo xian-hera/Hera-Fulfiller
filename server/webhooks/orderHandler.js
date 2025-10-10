@@ -148,6 +148,48 @@ class OrderWebhookHandler {
         return await this.handleOrderCreated(orderData);
       }
 
+      // 🆕 获取所有退款记录，构建已退款 items 的 Map
+      const refundedItems = new Map(); // line_item_id -> 已退款数量
+      
+      if (orderData.refunds && Array.isArray(orderData.refunds)) {
+        console.log(`\n📋 Checking refunds: ${orderData.refunds.length} refund records`);
+        
+        orderData.refunds.forEach(refund => {
+          if (refund.refund_line_items) {
+            refund.refund_line_items.forEach(refundItem => {
+              const itemId = refundItem.line_item_id.toString();
+              const refundedQty = refundItem.quantity;
+              const currentRefunded = refundedItems.get(itemId) || 0;
+              refundedItems.set(itemId, currentRefunded + refundedQty);
+              console.log(`  💰 Item ${itemId} refunded: ${refundedQty} (total refunded: ${currentRefunded + refundedQty})`);
+            });
+          }
+        });
+      }
+
+      // 🆕 过滤掉完全退款的 items，调整部分退款的数量
+      const activeLineItems = [];
+      orderData.line_items.forEach(item => {
+        const itemId = item.id.toString();
+        const refundedQty = refundedItems.get(itemId) || 0;
+        const activeQty = item.quantity - refundedQty;
+        
+        if (activeQty > 0) {
+          // 只保留有效数量的 items
+          activeLineItems.push({
+            ...item,
+            quantity: activeQty,
+            original_quantity: item.quantity,
+            refunded_quantity: refundedQty
+          });
+          if (refundedQty > 0) {
+            console.log(`  ✓ Item ${itemId}: original=${item.quantity}, refunded=${refundedQty}, active=${activeQty}`);
+          }
+        } else if (refundedQty > 0) {
+          console.log(`  ✗ Item ${itemId}: fully refunded (original=${item.quantity}, refunded=${refundedQty})`);
+        }
+      });
+
       // Get existing line items
       const existingLineItems = await db.prepare(
         'SELECT * FROM line_items WHERE shopify_order_id = ?'
@@ -165,8 +207,8 @@ class OrderWebhookHandler {
       const currentItemIds = new Set();
 
       console.log('\n=== Processing Updated Order ===');
-      console.log('Incoming items from Shopify:', orderData.line_items.length);
-      orderData.line_items.forEach(item => {
+      console.log('Incoming items from Shopify (after refunds):', activeLineItems.length);
+      activeLineItems.forEach(item => {
         console.log(`  - ${item.id}: qty=${item.quantity}, title=${item.title}`);
       });
 
@@ -181,8 +223,8 @@ class OrderWebhookHandler {
         console.log(`  - ${baseId}: ${group.length} entries, total qty=${total}`);
       });
 
-      // Process each line item in updated order
-      for (const item of orderData.line_items) {
+      // 🆕 使用 activeLineItems 而不是 orderData.line_items
+      for (const item of activeLineItems) {
         const itemId = item.id.toString();
         currentItemIds.add(itemId);
         
@@ -342,7 +384,8 @@ class OrderWebhookHandler {
         }
       }
 
-      // ✅ 修改：更新订单信息（不设置 is_edited）
+      // 更新订单信息（不设置 is_edited）
+      // 🆕 使用 activeLineItems 计算总数量
       await db.prepare(`
         UPDATE orders SET 
           total_quantity = ?,
@@ -350,7 +393,7 @@ class OrderWebhookHandler {
           updated_at = CURRENT_TIMESTAMP
         WHERE shopify_order_id = ?
       `).run(
-        orderData.line_items.reduce((sum, item) => sum + item.quantity, 0),
+        activeLineItems.reduce((sum, item) => sum + item.quantity, 0),
         orderData.fulfillment_status || 'unfulfilled',
         orderData.id.toString()
       );
@@ -363,13 +406,87 @@ class OrderWebhookHandler {
     }
   }
 
-  // ✅ 修改：Handle order edits complete
+  // 🆕 Handle refund created
+  static async handleRefundCreated(refundData) {
+    try {
+      console.log('\n=== Refund Created Webhook ===');
+      console.log('Refund ID:', refundData.id);
+      console.log('Order ID:', refundData.order_id);
+      
+      const orderId = refundData.order_id.toString();
+      
+      // 获取退款的 line items
+      const refundLineItems = refundData.refund_line_items || [];
+      console.log(`Refunded items: ${refundLineItems.length}`);
+      
+      for (const refundItem of refundLineItems) {
+        const lineItemId = refundItem.line_item_id.toString();
+        const quantity = refundItem.quantity;
+        
+        console.log(`  💰 Refunding line_item ${lineItemId}, qty: ${quantity}`);
+        
+        // 查找数据库中的 line_items（可能有多个，因为可能被 split 过）
+        const dbItems = await db.prepare(
+          `SELECT * FROM line_items 
+           WHERE shopify_order_id = ? 
+           AND (shopify_line_item_id = ? OR shopify_line_item_id LIKE ?)
+           ORDER BY created_at ASC`
+        ).all(orderId, lineItemId, `${lineItemId}_%`);
+        
+        console.log(`    Found ${dbItems.length} matching items in DB`);
+        
+        let remainingToDelete = quantity;
+        
+        // 从最新的开始删除
+        for (const dbItem of dbItems.reverse()) {
+          if (remainingToDelete <= 0) break;
+          
+          if (dbItem.quantity <= remainingToDelete) {
+            // 完全删除这个 item
+            console.log(`    ✗ Deleting item ${dbItem.id} (qty: ${dbItem.quantity})`);
+            await db.prepare('DELETE FROM line_items WHERE id = ?').run(dbItem.id);
+            await db.prepare(`
+              DELETE FROM transfer_items 
+              WHERE line_item_id = ?
+            `).run(dbItem.id);
+            remainingToDelete -= dbItem.quantity;
+          } else {
+            // 减少数量
+            const newQty = dbItem.quantity - remainingToDelete;
+            console.log(`    ↓ Reducing item ${dbItem.id} qty: ${dbItem.quantity} -> ${newQty}`);
+            await db.prepare(
+              'UPDATE line_items SET quantity = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+            ).run(newQty, dbItem.id);
+            remainingToDelete = 0;
+          }
+        }
+      }
+      
+      // 更新订单的总数量
+      const remainingItems = await db.prepare(
+        'SELECT SUM(quantity) as total FROM line_items WHERE shopify_order_id = ?'
+      ).get(orderId);
+      
+      await db.prepare(
+        'UPDATE orders SET total_quantity = ?, updated_at = CURRENT_TIMESTAMP WHERE shopify_order_id = ?'
+      ).run(remainingItems.total || 0, orderId);
+      
+      console.log(`✓ Refund processed successfully`);
+      return { success: true };
+    } catch (error) {
+      console.error('Error handling refund created:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Handle order edits complete
   static async handleOrderEditsComplete(editData) {
     try {
       console.log(`\n=== Order Edits Complete Webhook ===`);
       console.log('Full webhook data:', JSON.stringify(editData, null, 2));
       
-      const orderId = editData.order_id || editData.admin_graphql_api_order_id;
+      // 🆕 修复：从正确的位置获取 order_id
+      const orderId = editData.order_edit?.order_id || editData.order_id || editData.admin_graphql_api_order_id;
       
       if (!orderId) {
         console.error('No order_id found in Order Edits webhook data');
@@ -377,8 +494,17 @@ class OrderWebhookHandler {
         return { success: false, error: 'No order_id in webhook data' };
       }
       
-      console.log(`Edit ID: ${editData.id || editData.admin_graphql_api_id}`);
+      // 🆕 检查 edit 是否被 committed
+      const committed = editData.order_edit?.committed_at;
+      
+      if (!committed) {
+        console.log('⚠️  Order edit was not committed, skipping');
+        return { success: true, message: 'Edit not committed' };
+      }
+      
+      console.log(`Edit ID: ${editData.order_edit?.id || editData.id || editData.admin_graphql_api_id}`);
       console.log(`Order ID: ${orderId}`);
+      console.log(`✓ Order edit committed at: ${committed}`);
       
       // 从 Shopify 获取最新的订单数据
       console.log('Fetching latest order data from Shopify API...');
@@ -387,7 +513,7 @@ class OrderWebhookHandler {
       console.log(`✓ Got fresh data for order ${orderData.name}`);
       console.log(`Line items count: ${orderData.line_items.length}`);
       
-      // ⚠️ 关键：先标记为 edited
+      // 标记为 edited
       await db.prepare(`
         UPDATE orders SET 
           is_edited = TRUE,
