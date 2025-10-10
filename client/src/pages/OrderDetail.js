@@ -1,15 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import axios from '../api/axios';
 import {
   Page,
   Layout,
   Card,
-  ResourceList,
-  ResourceItem,
   Thumbnail,
   Text,
-  Badge,
   Button,
   Modal,
   Banner,
@@ -36,81 +33,15 @@ const OrderDetail = () => {
   const [selectedImage, setSelectedImage] = useState(null);
   const [activeInput, setActiveInput] = useState('boxType');
 
-  // Touch gesture support
-  const touchStartX = useRef(0);
-  const touchEndX = useRef(0);
-  const touchStartY = useRef(0);
-  const touchEndY = useRef(0);
-  const pageRef = useRef(null);
-  const isNavigatingRef = useRef(false);
-
   useEffect(() => {
     fetchAllOrders();
   }, []);
 
   useEffect(() => {
-    if (shopifyOrderId && !isNavigatingRef.current) {
+    if (shopifyOrderId) {
       fetchOrderDetail();
     }
   }, [shopifyOrderId]);
-
-  // Add touch event listeners
-  useEffect(() => {
-    const handleTouchStart = (e) => {
-      // 忽略modal内的touch事件
-      if (weightModal || completeModal || selectedImage) {
-        return;
-      }
-      touchStartX.current = e.touches[0].clientX;
-      touchStartY.current = e.touches[0].clientY;
-    };
-
-    const handleTouchMove = (e) => {
-      if (weightModal || completeModal || selectedImage) {
-        return;
-      }
-      touchEndX.current = e.touches[0].clientX;
-      touchEndY.current = e.touches[0].clientY;
-    };
-
-    const handleTouchEnd = () => {
-      if (weightModal || completeModal || selectedImage) {
-        return;
-      }
-
-      const swipeDistanceX = touchStartX.current - touchEndX.current;
-      const swipeDistanceY = Math.abs(touchStartY.current - touchEndY.current);
-      const minSwipeDistance = 100; // 增加最小滑动距离
-      const maxVerticalDistance = 50; // 垂直滑动不能超过这个距离
-
-      // 只有在水平滑动明显大于垂直滑动时才触发导航
-      if (Math.abs(swipeDistanceX) > minSwipeDistance && swipeDistanceY < maxVerticalDistance) {
-        if (swipeDistanceX > 0) {
-          handleNextOrder();
-        } else {
-          handlePreviousOrder();
-        }
-      }
-
-      touchStartX.current = 0;
-      touchEndX.current = 0;
-      touchStartY.current = 0;
-      touchEndY.current = 0;
-    };
-
-    const element = pageRef.current;
-    if (element) {
-      element.addEventListener('touchstart', handleTouchStart, { passive: true });
-      element.addEventListener('touchmove', handleTouchMove, { passive: true });
-      element.addEventListener('touchend', handleTouchEnd, { passive: true });
-
-      return () => {
-        element.removeEventListener('touchstart', handleTouchStart);
-        element.removeEventListener('touchmove', handleTouchMove);
-        element.removeEventListener('touchend', handleTouchEnd);
-      };
-    }
-  }, [allOrders, weightModal, completeModal, selectedImage, order]);
 
   const fetchAllOrders = async () => {
     try {
@@ -121,6 +52,7 @@ const OrderDetail = () => {
         const numB = parseInt(b.order_number) || 0;
         return numA - numB;
       });
+      console.log('All orders sorted:', sorted.map(o => o.order_number));
       setAllOrders(sorted);
     } catch (error) {
       console.error('Error fetching all orders:', error);
@@ -130,6 +62,7 @@ const OrderDetail = () => {
   const fetchOrderDetail = async () => {
     try {
       const response = await axios.get(`/api/packer/orders/${shopifyOrderId}`);
+      console.log('Current order:', response.data.order_number);
       setOrder(response.data);
       setLineItems(response.data.lineItems);
       await fetchBoxTypes();
@@ -148,53 +81,55 @@ const OrderDetail = () => {
   };
 
   // 根据订单号查找上一个和下一个订单
-  const getCurrentOrderNumber = () => {
-    return order ? parseInt(order.order_number) : 0;
-  };
-
   const findPreviousOrder = () => {
-    const currentNum = getCurrentOrderNumber();
+    if (!order || allOrders.length === 0) return null;
+    
+    const currentNum = parseInt(order.order_number);
+    console.log('Finding previous order, current:', currentNum);
+    
     // 找到订单号小于当前订单的最大订单号
     for (let i = allOrders.length - 1; i >= 0; i--) {
       const orderNum = parseInt(allOrders[i].order_number) || 0;
       if (orderNum < currentNum) {
+        console.log('Found previous order:', allOrders[i].order_number);
         return allOrders[i];
       }
     }
+    console.log('No previous order found');
     return null;
   };
 
   const findNextOrder = () => {
-    const currentNum = getCurrentOrderNumber();
+    if (!order || allOrders.length === 0) return null;
+    
+    const currentNum = parseInt(order.order_number);
+    console.log('Finding next order, current:', currentNum);
+    
     // 找到订单号大于当前订单的最小订单号
     for (let i = 0; i < allOrders.length; i++) {
       const orderNum = parseInt(allOrders[i].order_number) || 0;
       if (orderNum > currentNum) {
+        console.log('Found next order:', allOrders[i].order_number);
         return allOrders[i];
       }
     }
+    console.log('No next order found');
     return null;
   };
 
   const handlePreviousOrder = () => {
     const prevOrder = findPreviousOrder();
     if (prevOrder) {
-      isNavigatingRef.current = true;
+      console.log('Navigating to previous order:', prevOrder.shopify_order_id);
       navigate(`/packer/${prevOrder.shopify_order_id}`);
-      setTimeout(() => {
-        isNavigatingRef.current = false;
-      }, 100);
     }
   };
 
   const handleNextOrder = () => {
     const nextOrder = findNextOrder();
     if (nextOrder) {
-      isNavigatingRef.current = true;
+      console.log('Navigating to next order:', nextOrder.shopify_order_id);
       navigate(`/packer/${nextOrder.shopify_order_id}`);
-      setTimeout(() => {
-        isNavigatingRef.current = false;
-      }, 100);
     }
   };
 
@@ -233,11 +168,6 @@ const OrderDetail = () => {
   };
 
   const handleItemClick = async (item) => {
-    // 防止在modal打开时点击item
-    if (weightModal || completeModal || selectedImage) {
-      return;
-    }
-
     const newStatus = item.packer_status === 'ready' ? 'packing' : 'ready';
     
     try {
@@ -338,25 +268,28 @@ const OrderDetail = () => {
     }
 
     try {
+      console.log('Completing order:', shopifyOrderId);
       await axios.post(`/api/packer/orders/${shopifyOrderId}/complete`, {
         boxType,
         weight: orderWeight || null
       });
       
+      console.log('Order completed, closing modal');
       setCompleteModal(false);
       
-      // 查找下一个packing状态的订单
+      // 重新获取所有订单以确保数据最新
+      await fetchAllOrders();
+      
+      // 查找下一个订单
       const nextOrder = findNextOrder();
       
+      console.log('Next order:', nextOrder);
+      
       if (nextOrder) {
-        // 如果找到下一个订单，跳转到该订单
-        isNavigatingRef.current = true;
+        console.log('Jumping to next order:', nextOrder.shopify_order_id);
         navigate(`/packer/${nextOrder.shopify_order_id}`);
-        setTimeout(() => {
-          isNavigatingRef.current = false;
-        }, 100);
       } else {
-        // 如果没有下一个订单，返回列表
+        console.log('No next order, returning to list');
         navigate('/packer');
       }
     } catch (error) {
@@ -543,159 +476,180 @@ const OrderDetail = () => {
   ];
 
   return (
-    <div ref={pageRef} style={{ touchAction: 'pan-y' }}>
-      <Page
-        title={`Order ${order.name}`}
-        subtitle={`${new Date(order.created_at).toLocaleDateString()} • $${order.subtotal_price} • ${order.total_quantity} items`}
-        backAction={{ content: 'Back to Packer', onAction: () => navigate('/packer') }}
-        secondaryActions={secondaryActions}
+    <Page
+      title={`Order ${order.name}`}
+      subtitle={`${new Date(order.created_at).toLocaleDateString()} • $${order.subtotal_price} • ${order.total_quantity} items`}
+      backAction={{ content: 'Back to Packer', onAction: () => navigate('/packer') }}
+      secondaryActions={secondaryActions}
+    >
+      {message && (
+        <div style={{ 
+          padding: '12px', 
+          marginBottom: '16px', 
+          backgroundColor: '#d4edda', 
+          borderRadius: '4px' 
+        }}>
+          {message}
+        </div>
+      )}
+
+      <Layout>
+        <Layout.Section>
+          <Card>
+            <div style={{ padding: '16px' }}>
+              <Text variant="headingSm" as="h3">Shipping Address</Text>
+              <div style={{ marginTop: '12px' }}>
+                <BlockStack gap="1">
+                  <Text as="p">{order.shipping_name}</Text>
+                  <Text as="p">{order.shipping_address1}</Text>
+                  {order.shipping_address2 && <Text as="p">{order.shipping_address2}</Text>}
+                  <Text as="p">
+                    {order.shipping_city}, {order.shipping_province} {order.shipping_zip}
+                  </Text>
+                  <Text as="p">{order.shipping_country}</Text>
+                </BlockStack>
+              </div>
+            </div>
+          </Card>
+        </Layout.Section>
+
+        <Layout.Section>
+          <Card>
+            <div>
+              {lineItems.map(item => (
+                <div key={item.id}>
+                  {renderLineItem(item)}
+                </div>
+              ))}
+            </div>
+          </Card>
+        </Layout.Section>
+      </Layout>
+
+      {/* Image Modal */}
+      <Modal
+        open={selectedImage !== null}
+        onClose={() => setSelectedImage(null)}
+        title={selectedImage?.title || 'Product Image'}
       >
-        {message && (
-          <div style={{ 
-            padding: '12px', 
-            marginBottom: '16px', 
-            backgroundColor: '#d4edda', 
-            borderRadius: '4px' 
-          }}>
-            {message}
-          </div>
-        )}
+        <Modal.Section>
+          {selectedImage && (
+            <BlockStack gap="4">
+              <img 
+                src={selectedImage.url} 
+                alt="Product" 
+                style={{ width: '100%', maxHeight: '500px', objectFit: 'contain' }} 
+              />
+              <Button 
+                url={selectedImage.link} 
+                external
+                variant="primary"
+                fullWidth
+              >
+                View Product on Website
+              </Button>
+            </BlockStack>
+          )}
+        </Modal.Section>
+      </Modal>
 
-        <Layout>
-          <Layout.Section>
-            <Card>
-              <div style={{ padding: '16px' }}>
-                <Text variant="headingSm" as="h3">Shipping Address</Text>
-                <div style={{ marginTop: '12px' }}>
-                  <BlockStack gap="1">
-                    <Text as="p">{order.shipping_name}</Text>
-                    <Text as="p">{order.shipping_address1}</Text>
-                    {order.shipping_address2 && <Text as="p">{order.shipping_address2}</Text>}
-                    <Text as="p">
-                      {order.shipping_city}, {order.shipping_province} {order.shipping_zip}
-                    </Text>
-                    <Text as="p">{order.shipping_country}</Text>
-                  </BlockStack>
-                </div>
-              </div>
-            </Card>
-          </Layout.Section>
-
-          <Layout.Section>
-            <Card>
-              <div>
-                {lineItems.map(item => (
-                  <div key={item.id}>
-                    {renderLineItem(item)}
-                  </div>
-                ))}
-              </div>
-            </Card>
-          </Layout.Section>
-        </Layout>
-
-        {/* Image Modal */}
-        <Modal
-          open={selectedImage !== null}
-          onClose={() => setSelectedImage(null)}
-          title={selectedImage?.title || 'Product Image'}
-        >
-          <Modal.Section>
-            {selectedImage && (
-              <BlockStack gap="4">
-                <img 
-                  src={selectedImage.url} 
-                  alt="Product" 
-                  style={{ width: '100%', maxHeight: '500px', objectFit: 'contain' }} 
-                />
-                <Button 
-                  url={selectedImage.link} 
-                  external
-                  variant="primary"
-                  fullWidth
-                >
-                  View Product on Website
-                </Button>
-              </BlockStack>
-            )}
-          </Modal.Section>
-        </Modal>
-
-        {/* Weight Modal */}
-        <Modal
-          open={weightModal !== null}
-          onClose={() => setWeightModal(null)}
-          title={weightModal ? `Update Weight` : ''}
-        >
-          <Modal.Section>
-            {weightModal && (
-              <>
-                <Text>{weightModal.brand} {weightModal.title}</Text>
-                <div style={{ marginTop: '12px' }}>
-                  <Text variant="bodySm" as="p">Weight (g):</Text>
-                  <div style={{
-                    border: '2px solid #c4cdd5',
-                    borderRadius: '8px',
-                    padding: '12px 16px',
-                    fontSize: '24px',
-                    fontWeight: 'bold',
-                    textAlign: 'center',
-                    backgroundColor: '#ffffff',
-                    minHeight: '50px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    marginTop: '8px'
-                  }}>
-                    {weightValue || '0'} g
-                  </div>
-                </div>
-                <div style={{ 
-                  marginTop: '20px',
-                  display: 'flex',
-                  gap: '12px',
-                  justifyContent: 'flex-end'
-                }}>
-                  <Button onClick={() => setWeightModal(null)}>
-                    Cancel
-                  </Button>
-                  <Button variant="primary" onClick={handleWeightSubmit}>
-                    Update
-                  </Button>
-                </div>
-              </>
-            )}
-          </Modal.Section>
-        </Modal>
-
-        {/* Weight Modal Numeric Keypad */}
-        {weightModal && (
-          <div style={{
-            position: 'fixed',
-            bottom: '20px',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            zIndex: 1000
-          }}>
-            <NumericKeypad
-              onNumberClick={handleWeightNumberClick}
-              onBackspace={handleWeightBackspace}
-            />
-          </div>
-        )}
-
-        {/* Complete Order Modal */}
-        <Modal
-          open={completeModal}
-          onClose={() => setCompleteModal(false)}
-          title={`Complete Order ${order.name}`}
-        >
-          <Modal.Section>
+      {/* Weight Modal */}
+      <Modal
+        open={weightModal !== null}
+        onClose={() => setWeightModal(null)}
+        title={weightModal ? `Update Weight` : ''}
+      >
+        <Modal.Section>
+          {weightModal && (
             <>
-              <div style={{ marginBottom: '16px' }} onClick={() => setActiveInput('boxType')}>
-                <Text variant="bodySm" as="p">Box Type:</Text>
+              <Text>{weightModal.brand} {weightModal.title}</Text>
+              <div style={{ marginTop: '12px' }}>
+                <Text variant="bodySm" as="p">Weight (g):</Text>
                 <div style={{
-                  border: activeInput === 'boxType' ? '2px solid #008060' : '2px solid #c4cdd5',
+                  border: '2px solid #c4cdd5',
+                  borderRadius: '8px',
+                  padding: '12px 16px',
+                  fontSize: '24px',
+                  fontWeight: 'bold',
+                  textAlign: 'center',
+                  backgroundColor: '#ffffff',
+                  minHeight: '50px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  marginTop: '8px'
+                }}>
+                  {weightValue || '0'} g
+                </div>
+              </div>
+              <div style={{ 
+                marginTop: '20px',
+                display: 'flex',
+                gap: '12px',
+                justifyContent: 'flex-end'
+              }}>
+                <Button onClick={() => setWeightModal(null)}>
+                  Cancel
+                </Button>
+                <Button variant="primary" onClick={handleWeightSubmit}>
+                  Update
+                </Button>
+              </div>
+            </>
+          )}
+        </Modal.Section>
+      </Modal>
+
+      {/* Weight Modal Numeric Keypad */}
+      {weightModal && (
+        <div style={{
+          position: 'fixed',
+          bottom: '20px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 1000
+        }}>
+          <NumericKeypad
+            onNumberClick={handleWeightNumberClick}
+            onBackspace={handleWeightBackspace}
+          />
+        </div>
+      )}
+
+      {/* Complete Order Modal */}
+      <Modal
+        open={completeModal}
+        onClose={() => setCompleteModal(false)}
+        title={`Complete Order ${order.name}`}
+      >
+        <Modal.Section>
+          <>
+            <div style={{ marginBottom: '16px' }} onClick={() => setActiveInput('boxType')}>
+              <Text variant="bodySm" as="p">Box Type:</Text>
+              <div style={{
+                border: activeInput === 'boxType' ? '2px solid #008060' : '2px solid #c4cdd5',
+                borderRadius: '8px',
+                padding: '12px 16px',
+                fontSize: '24px',
+                fontWeight: 'bold',
+                textAlign: 'center',
+                backgroundColor: '#ffffff',
+                minHeight: '50px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginTop: '8px',
+                cursor: 'pointer'
+              }}>
+                {boxType || 'Select box type'}
+              </div>
+            </div>
+
+            {hasWeightWarning && (
+              <div style={{ marginBottom: '16px' }} onClick={() => setActiveInput('weight')}>
+                <Text variant="bodySm" as="p">Total Weight (g):</Text>
+                <div style={{
+                  border: activeInput === 'weight' ? '2px solid #008060' : '2px solid #c4cdd5',
                   borderRadius: '8px',
                   padding: '12px 16px',
                   fontSize: '24px',
@@ -709,83 +663,60 @@ const OrderDetail = () => {
                   marginTop: '8px',
                   cursor: 'pointer'
                 }}>
-                  {boxType || 'Select box type'}
+                  {orderWeight || '0'} g
                 </div>
               </div>
+            )}
 
-              {hasWeightWarning && (
-                <div style={{ marginBottom: '16px' }} onClick={() => setActiveInput('weight')}>
-                  <Text variant="bodySm" as="p">Total Weight (g):</Text>
-                  <div style={{
-                    border: activeInput === 'weight' ? '2px solid #008060' : '2px solid #c4cdd5',
-                    borderRadius: '8px',
-                    padding: '12px 16px',
-                    fontSize: '24px',
-                    fontWeight: 'bold',
-                    textAlign: 'center',
-                    backgroundColor: '#ffffff',
-                    minHeight: '50px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    marginTop: '8px',
-                    cursor: 'pointer'
-                  }}>
-                    {orderWeight || '0'} g
-                  </div>
-                </div>
-              )}
+            <div style={{ 
+              marginTop: '20px',
+              display: 'flex',
+              gap: '12px',
+              justifyContent: 'flex-end'
+            }}>
+              <Button onClick={() => setCompleteModal(false)}>
+                Cancel
+              </Button>
+              <Button variant="primary" onClick={handleOrderComplete}>
+                Complete
+              </Button>
+            </div>
+          </>
+        </Modal.Section>
+      </Modal>
 
-              <div style={{ 
-                marginTop: '20px',
-                display: 'flex',
-                gap: '12px',
-                justifyContent: 'flex-end'
-              }}>
-                <Button onClick={() => setCompleteModal(false)}>
-                  Cancel
-                </Button>
-                <Button variant="primary" onClick={handleOrderComplete}>
-                  Complete
-                </Button>
-              </div>
-            </>
-          </Modal.Section>
-        </Modal>
+      {/* Complete Modal Keypads */}
+      {completeModal && activeInput === 'boxType' && (
+        <div style={{
+          position: 'fixed',
+          bottom: '20px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 1000
+        }}>
+          <BoxTypeKeypad
+            boxTypes={boxTypes}
+            onBoxTypeClick={handleBoxTypeClick}
+            onBackspace={handleBoxTypeBackspace}
+          />
+        </div>
+      )}
 
-        {/* Complete Modal Keypads */}
-        {completeModal && activeInput === 'boxType' && (
-          <div style={{
-            position: 'fixed',
-            bottom: '20px',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            zIndex: 1000
-          }}>
-            <BoxTypeKeypad
-              boxTypes={boxTypes}
-              onBoxTypeClick={handleBoxTypeClick}
-              onBackspace={handleBoxTypeBackspace}
-            />
-          </div>
-        )}
-
-        {completeModal && activeInput === 'weight' && hasWeightWarning && (
-          <div style={{
-            position: 'fixed',
-            bottom: '20px',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            zIndex: 1000
-          }}>
-            <NumericKeypad
-              onNumberClick={handleOrderWeightNumberClick}
-              onBackspace={handleOrderWeightBackspace}
-            />
-          </div>
-        )}
-      </Page>
-    </div>
+      {completeModal && activeInput === 'weight' && hasWeightWarning && (
+        <div style={{
+          position: 'fixed',
+          bottom: '20px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 1000
+        }}>
+          <NumericKeypad
+            onNumberClick={handleOrderWeightNumberClick}
+            onBackspace={handleOrderWeightBackspace}
+          />
+        </div>
+      )}
+    </Page>
   );
 };
 
