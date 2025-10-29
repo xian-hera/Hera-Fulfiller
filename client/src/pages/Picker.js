@@ -25,27 +25,63 @@ const Picker = () => {
   const navigate = useNavigate();
   const [items, setItems] = useState([]);
   const [filteredItems, setFilteredItems] = useState([]);
-  const [isSorted, setIsSorted] = useState(false);
+  const [isSorted, setIsSorted] = useState(() => {
+    // 🆕 从 localStorage 恢复排序状态
+    return localStorage.getItem('pickerSortEnabled') === 'true';
+  });
   const [statusFilter, setStatusFilter] = useState(['picking', 'missing', 'picked']);
   const [selectedImage, setSelectedImage] = useState(null);
   const [quantityModal, setQuantityModal] = useState(null);
   const [pickedQuantity, setPickedQuantity] = useState('');
 
+  // 🆕 计算每个状态的实时数量（按 quantity 累加）
+  const getStatusCounts = useCallback(() => {
+    return {
+      picking: items
+        .filter(item => item.picker_status === 'picking')
+        .reduce((sum, item) => sum + item.quantity, 0),
+      missing: items
+        .filter(item => item.picker_status === 'missing')
+        .reduce((sum, item) => sum + item.quantity, 0),
+      picked: items
+        .filter(item => item.picker_status === 'picked')
+        .reduce((sum, item) => sum + item.quantity, 0)
+    };
+  }, [items]);
+
+  // 🆕 增强的排序函数：先按 type，再按 SKU 数字
+  const sortItems = useCallback((itemsToSort) => {
+    return [...itemsToSort].sort((a, b) => {
+      // 1. 先按 type 排序
+      const typeA = (a.sort_type || '').toLowerCase();
+      const typeB = (b.sort_type || '').toLowerCase();
+      const typeCompare = typeA.localeCompare(typeB);
+      
+      if (typeCompare !== 0) return typeCompare;
+      
+      // 2. 相同 type 内按 SKU 数字排序
+      const skuA = a.sku || '';
+      const skuB = b.sku || '';
+      
+      // 提取 SKU 中的数字部分
+      const numA = parseInt(skuA.match(/\d+/)?.[0] || '0');
+      const numB = parseInt(skuB.match(/\d+/)?.[0] || '0');
+      
+      return numA - numB;
+    });
+  }, []);
+
   // 修复：applyFilters 现在会保持排序状态
   const applyFilters = useCallback(() => {
     let filtered = items.filter(item => statusFilter.includes(item.picker_status));
     
-    // 如果当前是排序状态，保持排序
+    // 🆕 如果当前是排序状态，应用排序（忽略状态，对所有 item 排序）
     if (isSorted) {
-      filtered = filtered.sort((a, b) => {
-        const typeA = a.sort_type || '';
-        const typeB = b.sort_type || '';
-        return typeA.localeCompare(typeB);
-      });
+      filtered = sortItems(filtered);
     }
     
     setFilteredItems(filtered);
-  }, [items, statusFilter, isSorted]);
+  }, [items, statusFilter, isSorted, sortItems]);
 
   useEffect(() => {
     fetchItems();
@@ -64,20 +100,21 @@ const Picker = () => {
     }
   };
 
+  // 🆕 改进的排序切换函数
   const handleSort = () => {
-    if (!isSorted) {
+    const newSortState = !isSorted;
+    setIsSorted(newSortState);
+    
+    // 🆕 持久化到 localStorage
+    localStorage.setItem('pickerSortEnabled', newSortState.toString());
+    
+    if (newSortState) {
       // 启用排序
-      const sorted = [...filteredItems].sort((a, b) => {
-        const typeA = a.sort_type || '';
-        const typeB = b.sort_type || '';
-        return typeA.localeCompare(typeB);
-      });
+      const sorted = sortItems(filteredItems);
       setFilteredItems(sorted);
-      setIsSorted(true);
     } else {
-      // 取消排序
-      setIsSorted(false);
-      applyFilters(); // 重新应用过滤，不排序
+      // 取消排序 - 重新应用过滤，不排序
+      applyFilters();
     }
   };
 
@@ -347,6 +384,9 @@ const Picker = () => {
     );
   };
 
+  // 🆕 获取实时数量
+  const statusCounts = getStatusCounts();
+
   return (
     <>
       <style>{`
@@ -565,9 +605,9 @@ const Picker = () => {
                 <ChoiceList
                   title="Show items"
                   choices={[
-                    { label: 'Picking', value: 'picking' },
-                    { label: 'Missing', value: 'missing' },
-                    { label: 'Picked', value: 'picked' }
+                    { label: `Picking (${statusCounts.picking})`, value: 'picking' },
+                    { label: `Missing (${statusCounts.missing})`, value: 'missing' },
+                    { label: `Picked (${statusCounts.picked})`, value: 'picked' }
                   ]}
                   selected={statusFilter}
                   onChange={setStatusFilter}

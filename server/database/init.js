@@ -57,6 +57,7 @@ const initDatabase = async () => {
           sku TEXT,
           url_handle TEXT,
           product_type TEXT,
+          wig_number TEXT,
           has_weight_warning INTEGER DEFAULT 0,
           variant_title TEXT,
           picker_status TEXT DEFAULT 'picking',

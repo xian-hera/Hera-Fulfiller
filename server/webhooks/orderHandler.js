@@ -35,7 +35,7 @@ class OrderWebhookHandler {
         shipping_country: orderData.shipping_address?.country || ''
       };
 
-      // Insert order - PostgreSQL compatible
+      // Insert order
       const insertOrder = db.prepare(`
         INSERT INTO orders (
           shopify_order_id, order_number, name, fulfillment_status, 
@@ -68,10 +68,13 @@ class OrderWebhookHandler {
         let imageUrl = '';
         let urlHandle = '';
         let productType = item.product_type || '';
+        let wigNumber = '';
+        let customName = ''; // 🆕 新增：存储 custom_name
         
         let weight = item.grams || 0;
         let weightUnit = 'g';
         
+        // 获取 variant 信息（weight + custom_name）
         if (item.variant_id) {
           try {
             const variant = await shopifyClient.getProductVariant(item.variant_id);
@@ -79,6 +82,16 @@ class OrderWebhookHandler {
               weight = variant.weight || 0;
               weightUnit = variant.weight_unit || 'g';
               console.log(`Variant ${item.variant_id}: weight=${weight}${weightUnit}`);
+            }
+            
+            // 🆕 获取 custom.name metafield（variant 层级）
+            try {
+              customName = await shopifyClient.getVariantMetafield(item.variant_id, 'custom', 'name');
+              if (customName) {
+                console.log(`Variant ${item.variant_id}: custom.name=${customName}`);
+              }
+            } catch (err) {
+              console.error(`Failed to fetch custom.name for variant ${item.variant_id}:`, err.message);
             }
           } catch (err) {
             console.error(`Failed to fetch variant ${item.variant_id}:`, err.message);
@@ -93,6 +106,18 @@ class OrderWebhookHandler {
             imageUrl = product.images?.[0]?.src || '';
             urlHandle = product.handle || '';
             productType = product.product_type || productType;
+            
+            // 如果是 WIG 类型，获取 custom.wig_number metafield（product 层级）
+            if (productType.toUpperCase() === 'WIG') {
+              try {
+                wigNumber = await shopifyClient.getProductMetafield(item.product_id, 'custom', 'wig_number');
+                if (wigNumber) {
+                  console.log(`Product ${item.product_id}: wig_number=${wigNumber}`);
+                }
+              } catch (err) {
+                console.error(`Failed to fetch wig_number for product ${item.product_id}:`, err.message);
+              }
+            }
           }
         }
         
@@ -100,9 +125,9 @@ class OrderWebhookHandler {
           INSERT INTO line_items (
             shopify_order_id, order_number, shopify_line_item_id, quantity,
             image_url, title, name, brand, size, weight, weight_unit, sku,
-            url_handle, product_type, has_weight_warning, variant_title,
+            url_handle, product_type, wig_number, custom_name, has_weight_warning, variant_title,
             picker_status, packer_status
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT (shopify_line_item_id) DO UPDATE SET
             quantity = EXCLUDED.quantity,
             updated_at = CURRENT_TIMESTAMP
@@ -123,6 +148,8 @@ class OrderWebhookHandler {
           item.sku,
           urlHandle,
           productType,
+          wigNumber,
+          customName, // 🆕 添加 custom_name
           hasWeightWarning,
           item.variant_title || '',
           'picking',
@@ -148,8 +175,8 @@ class OrderWebhookHandler {
         return await this.handleOrderCreated(orderData);
       }
 
-      // 🆕 获取所有退款记录，构建已退款 items 的 Map
-      const refundedItems = new Map(); // line_item_id -> 已退款数量
+      // 获取所有退款记录，构建已退款 items 的 Map
+      const refundedItems = new Map();
       
       if (orderData.refunds && Array.isArray(orderData.refunds)) {
         console.log(`\n📋 Checking refunds: ${orderData.refunds.length} refund records`);
@@ -167,7 +194,7 @@ class OrderWebhookHandler {
         });
       }
 
-      // 🆕 过滤掉完全退款的 items，调整部分退款的数量
+      // 过滤掉完全退款的 items，调整部分退款的数量
       const activeLineItems = [];
       orderData.line_items.forEach(item => {
         const itemId = item.id.toString();
@@ -175,7 +202,6 @@ class OrderWebhookHandler {
         const activeQty = item.quantity - refundedQty;
         
         if (activeQty > 0) {
-          // 只保留有效数量的 items
           activeLineItems.push({
             ...item,
             quantity: activeQty,
@@ -223,7 +249,6 @@ class OrderWebhookHandler {
         console.log(`  - ${baseId}: ${group.length} entries, total qty=${total}`);
       });
 
-      // 🆕 使用 activeLineItems 而不是 orderData.line_items
       for (const item of activeLineItems) {
         const itemId = item.id.toString();
         currentItemIds.add(itemId);
@@ -240,16 +265,29 @@ class OrderWebhookHandler {
         let imageUrl = '';
         let urlHandle = '';
         let productType = item.product_type || '';
+        let wigNumber = '';
+        let customName = ''; // 🆕 新增
         
         let weight = item.grams || 0;
         let weightUnit = 'g';
         
+        // 获取 variant 信息（weight + custom_name）
         if (item.variant_id) {
           try {
             const variant = await shopifyClient.getProductVariant(item.variant_id);
             if (variant) {
               weight = variant.weight || 0;
               weightUnit = variant.weight_unit || 'g';
+            }
+            
+            // 🆕 获取 custom.name metafield（variant 层级）
+            try {
+              customName = await shopifyClient.getVariantMetafield(item.variant_id, 'custom', 'name');
+              if (customName) {
+                console.log(`Variant ${item.variant_id}: custom.name=${customName}`);
+              }
+            } catch (err) {
+              console.error(`Failed to fetch custom.name for variant ${item.variant_id}:`, err.message);
             }
           } catch (err) {
             console.error(`Failed to fetch variant ${item.variant_id}:`, err.message);
@@ -264,6 +302,18 @@ class OrderWebhookHandler {
             imageUrl = product.images?.[0]?.src || '';
             urlHandle = product.handle || '';
             productType = product.product_type || productType;
+            
+            // 如果是 WIG 类型，获取 custom.wig_number metafield
+            if (productType.toUpperCase() === 'WIG') {
+              try {
+                wigNumber = await shopifyClient.getProductMetafield(item.product_id, 'custom', 'wig_number');
+                if (wigNumber) {
+                  console.log(`Product ${item.product_id}: wig_number=${wigNumber}`);
+                }
+              } catch (err) {
+                console.error(`Failed to fetch wig_number for product ${item.product_id}:`, err.message);
+              }
+            }
           }
         }
 
@@ -273,9 +323,9 @@ class OrderWebhookHandler {
             INSERT INTO line_items (
               shopify_order_id, order_number, shopify_line_item_id, quantity,
               image_url, title, name, brand, size, weight, weight_unit, sku,
-              url_handle, product_type, has_weight_warning, variant_title,
+              url_handle, product_type, wig_number, custom_name, has_weight_warning, variant_title,
               picker_status, packer_status, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
           `);
 
           await insertLineItem.run(
@@ -293,6 +343,8 @@ class OrderWebhookHandler {
             item.sku,
             urlHandle,
             productType,
+            wigNumber,
+            customName, // 🆕 添加 custom_name
             hasWeightWarning,
             item.variant_title || '',
             'picking',
@@ -306,9 +358,9 @@ class OrderWebhookHandler {
             INSERT INTO line_items (
               shopify_order_id, order_number, shopify_line_item_id, quantity,
               image_url, title, name, brand, size, weight, weight_unit, sku,
-              url_handle, product_type, has_weight_warning, variant_title,
+              url_handle, product_type, wig_number, custom_name, has_weight_warning, variant_title,
               picker_status, packer_status, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
           `);
 
           await insertLineItem.run(
@@ -326,6 +378,8 @@ class OrderWebhookHandler {
             item.sku,
             urlHandle,
             productType,
+            wigNumber,
+            customName, // 🆕 添加 custom_name
             hasWeightWarning,
             item.variant_title || '',
             'picking',
@@ -384,8 +438,7 @@ class OrderWebhookHandler {
         }
       }
 
-      // 更新订单信息（不设置 is_edited）
-      // 🆕 使用 activeLineItems 计算总数量
+      // 更新订单信息
       await db.prepare(`
         UPDATE orders SET 
           total_quantity = ?,
@@ -406,7 +459,7 @@ class OrderWebhookHandler {
     }
   }
 
-  // 🆕 Handle refund created
+  // Handle refund created
   static async handleRefundCreated(refundData) {
     try {
       console.log('\n=== Refund Created Webhook ===');
@@ -415,7 +468,6 @@ class OrderWebhookHandler {
       
       const orderId = refundData.order_id.toString();
       
-      // 获取退款的 line items
       const refundLineItems = refundData.refund_line_items || [];
       console.log(`Refunded items: ${refundLineItems.length}`);
       
@@ -425,7 +477,6 @@ class OrderWebhookHandler {
         
         console.log(`  💰 Refunding line_item ${lineItemId}, qty: ${quantity}`);
         
-        // 查找数据库中的 line_items（可能有多个，因为可能被 split 过）
         const dbItems = await db.prepare(
           `SELECT * FROM line_items 
            WHERE shopify_order_id = ? 
@@ -437,12 +488,10 @@ class OrderWebhookHandler {
         
         let remainingToDelete = quantity;
         
-        // 从最新的开始删除
         for (const dbItem of dbItems.reverse()) {
           if (remainingToDelete <= 0) break;
           
           if (dbItem.quantity <= remainingToDelete) {
-            // 完全删除这个 item
             console.log(`    ✗ Deleting item ${dbItem.id} (qty: ${dbItem.quantity})`);
             await db.prepare('DELETE FROM line_items WHERE id = ?').run(dbItem.id);
             await db.prepare(`
@@ -451,7 +500,6 @@ class OrderWebhookHandler {
             `).run(dbItem.id);
             remainingToDelete -= dbItem.quantity;
           } else {
-            // 减少数量
             const newQty = dbItem.quantity - remainingToDelete;
             console.log(`    ↓ Reducing item ${dbItem.id} qty: ${dbItem.quantity} -> ${newQty}`);
             await db.prepare(
@@ -462,7 +510,6 @@ class OrderWebhookHandler {
         }
       }
       
-      // 更新订单的总数量
       const remainingItems = await db.prepare(
         'SELECT SUM(quantity) as total FROM line_items WHERE shopify_order_id = ?'
       ).get(orderId);
@@ -485,7 +532,6 @@ class OrderWebhookHandler {
       console.log(`\n=== Order Edits Complete Webhook ===`);
       console.log('Full webhook data:', JSON.stringify(editData, null, 2));
       
-      // 🆕 修复：从正确的位置获取 order_id
       const orderId = editData.order_edit?.order_id || editData.order_id || editData.admin_graphql_api_order_id;
       
       if (!orderId) {
@@ -494,7 +540,6 @@ class OrderWebhookHandler {
         return { success: false, error: 'No order_id in webhook data' };
       }
       
-      // 🆕 检查 edit 是否被 committed
       const committed = editData.order_edit?.committed_at;
       
       if (!committed) {
@@ -506,14 +551,12 @@ class OrderWebhookHandler {
       console.log(`Order ID: ${orderId}`);
       console.log(`✓ Order edit committed at: ${committed}`);
       
-      // 从 Shopify 获取最新的订单数据
       console.log('Fetching latest order data from Shopify API...');
       const orderData = await shopifyClient.getOrder(orderId);
       
       console.log(`✓ Got fresh data for order ${orderData.name}`);
       console.log(`Line items count: ${orderData.line_items.length}`);
       
-      // 标记为 edited
       await db.prepare(`
         UPDATE orders SET 
           is_edited = TRUE,
@@ -523,7 +566,6 @@ class OrderWebhookHandler {
       
       console.log(`✓ Marked order ${orderData.name} as edited`);
       
-      // 然后调用 handleOrderUpdated 处理内容变化
       return await this.handleOrderUpdated(orderData);
     } catch (error) {
       console.error('Error handling order edits complete:', error.message);
@@ -531,23 +573,24 @@ class OrderWebhookHandler {
     }
   }
 
-  // Handle order cancelled
+  // Handle order cancelled (🆕 也会删除订单)
   static async handleOrderCancelled(orderData) {
     try {
       const shopifyOrderId = orderData.id.toString();
       
-      await db.prepare('DELETE FROM orders WHERE shopify_order_id = ?')
+      // 删除 transfer_items
+      await db.prepare('DELETE FROM transfer_items WHERE shopify_order_id = ?')
         .run(shopifyOrderId);
       
+      // 删除 line_items
       await db.prepare('DELETE FROM line_items WHERE shopify_order_id = ?')
         .run(shopifyOrderId);
       
-      await db.prepare(`
-        DELETE FROM transfer_items 
-        WHERE shopify_order_id = ? AND status = 'transferring'
-      `).run(shopifyOrderId);
+      // 删除 order
+      await db.prepare('DELETE FROM orders WHERE shopify_order_id = ?')
+        .run(shopifyOrderId);
       
-      console.log(`Order ${orderData.name} cancelled - removed order, line_items, and transferring transfer_items (kept waiting)`);
+      console.log(`Order ${orderData.name} cancelled - removed completely from APP`);
       return { success: true, order_number: orderData.name };
     } catch (error) {
       console.error('Error handling order cancelled:', error);
@@ -555,17 +598,24 @@ class OrderWebhookHandler {
     }
   }
 
-  // Handle order fulfilled
+  // Handle order fulfilled (🆕 也会删除订单)
   static async handleOrderFulfilled(orderData) {
     try {
-      await db.prepare(`
-        UPDATE orders SET 
-          fulfillment_status = ?,
-          updated_at = CURRENT_TIMESTAMP
-        WHERE shopify_order_id = ?
-      `).run('fulfilled', orderData.id.toString());
+      const shopifyOrderId = orderData.id.toString();
+      
+      // 删除 transfer_items
+      await db.prepare('DELETE FROM transfer_items WHERE shopify_order_id = ?')
+        .run(shopifyOrderId);
+      
+      // 删除 line_items
+      await db.prepare('DELETE FROM line_items WHERE shopify_order_id = ?')
+        .run(shopifyOrderId);
+      
+      // 删除 order
+      await db.prepare('DELETE FROM orders WHERE shopify_order_id = ?')
+        .run(shopifyOrderId);
 
-      console.log(`Order ${orderData.name} fulfilled`);
+      console.log(`Order ${orderData.name} fulfilled - removed completely from APP`);
       return { success: true, order_number: orderData.name };
     } catch (error) {
       console.error('Error handling order fulfilled:', error);

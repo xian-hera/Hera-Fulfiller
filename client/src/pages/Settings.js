@@ -1,15 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import axios from '../api/axios';  // 使用正确的 axios
-import { Page, Layout, Card, TextField, Button, Text, BlockStack, InlineStack, Badge } from '@shopify/polaris';
+import axios from '../api/axios';
+import { Page, Layout, Card, TextField, Button, Text, BlockStack, InlineStack } from '@shopify/polaris';
 
 const Settings = () => {
   const navigate = useNavigate();
-  const [transferColumn, setTransferColumn] = useState('E');
-  const [pickerColumn, setPickerColumn] = useState('E');
-  const [skuColumn, setSkuColumn] = useState('A');
   const [boxTypes, setBoxTypes] = useState([]);
-  const [lastUpload, setLastUpload] = useState('');
   const [newBoxCode, setNewBoxCode] = useState('');
   const [newBoxDimensions, setNewBoxDimensions] = useState('');
   const [message, setMessage] = useState('');
@@ -31,11 +27,7 @@ const Settings = () => {
   const fetchSettings = async () => {
     try {
       const response = await axios.get('/api/settings');
-      setTransferColumn(response.data.settings.transfer_csv_column || 'E');
-      setPickerColumn(response.data.settings.picker_wig_column || 'E');
-      setSkuColumn(response.data.settings.sku_column || 'A');
       setBoxTypes(response.data.boxTypes || []);
-      setLastUpload(response.data.settings.csv_uploaded_at || '');
     } catch (error) {
       console.error('Error:', error);
       showMessage('Error loading settings');
@@ -98,7 +90,7 @@ const Settings = () => {
       
       // 刷新统计数据
       await fetchDbStats();
-      setCleanupPreview(null); // 清除预览
+      setCleanupPreview(null);
     } catch (error) {
       console.error('Error clearing data:', error);
       showMessage('Failed to clear data: ' + (error.response?.data?.error || error.message));
@@ -109,38 +101,6 @@ const Settings = () => {
 
   const handleCancelClear = () => {
     setShowClearConfirm(false);
-  };
-
-  const handleSave = async () => {
-    try {
-      await axios.post('/api/settings/update', {
-        transferCsvColumn: transferColumn,
-        pickerWigColumn: pickerColumn,
-        skuColumn: skuColumn
-      });
-      showMessage('Settings saved successfully!');
-    } catch (error) {
-      showMessage('Error saving settings');
-    }
-  };
-
-  const handleFileChange = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    const formData = new FormData();
-    formData.append('file', file);
-
-    try {
-      const res = await axios.post('/api/settings/upload-csv', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      });
-      setLastUpload(res.data.uploadedAt);
-      showMessage(`CSV uploaded! ${res.data.rowsImported} rows imported`);
-      e.target.value = '';
-    } catch (err) {
-      showMessage('Upload failed');
-    }
   };
 
   const handleAddBox = async () => {
@@ -199,7 +159,6 @@ const Settings = () => {
     <Page
       title="Settings"
       backAction={{ content: 'Dashboard', onAction: () => navigate('/') }}
-      primaryAction={{ content: 'Save', onAction: handleSave }}
     >
       {message && (
         <div style={{ 
@@ -357,8 +316,7 @@ const Settings = () => {
                 <Text variant="headingSm" as="h3">⚠️ Danger Zone</Text>
                 <div style={{ marginTop: '12px' }}>
                   <Text variant="bodySm" tone="critical">
-                    This will permanently delete ALL orders, line items, and transfer items from the database. 
-                    CSV data and settings will NOT be affected.
+                    This will permanently delete ALL orders, line items, and transfer items from the database.
                   </Text>
                 </div>
                 
@@ -409,67 +367,6 @@ const Settings = () => {
                 </div>
               </div>
             </BlockStack>
-          </Card>
-        </Layout.Section>
-
-        <Layout.Section>
-          <Card title="CSV Upload" sectioned>
-            <input
-              type="file"
-              accept=".csv"
-              onChange={handleFileChange}
-              style={{
-                padding: '8px',
-                border: '1px solid #c9cccf',
-                borderRadius: '4px',
-                width: '100%',
-                marginBottom: '8px'
-              }}
-            />
-            {lastUpload && (
-              <p style={{ fontSize: '14px', color: '#666', marginTop: '8px' }}>
-                Last upload: {new Date(lastUpload).toLocaleString()}
-              </p>
-            )}
-          </Card>
-        </Layout.Section>
-
-        <Layout.Section>
-          <Card title="CSV SKU Column" sectioned>
-            <TextField
-              label="SKU Column"
-              value={skuColumn}
-              onChange={setSkuColumn}
-              maxLength={2}
-              autoComplete="off"
-              helpText="Column letter where SKU is located (e.g., A)"
-            />
-          </Card>
-        </Layout.Section>
-
-        <Layout.Section>
-          <Card title="Transfer CSV Column" sectioned>
-            <TextField
-              label="Transfer Column"
-              value={transferColumn}
-              onChange={setTransferColumn}
-              maxLength={2}
-              autoComplete="off"
-              helpText="Column for transfer copy text (e.g., H)"
-            />
-          </Card>
-        </Layout.Section>
-
-        <Layout.Section>
-          <Card title="Picker WIG Column" sectioned>
-            <TextField
-              label="WIG Column"
-              value={pickerColumn}
-              onChange={setPickerColumn}
-              maxLength={2}
-              autoComplete="off"
-              helpText="Column for WIG product number (e.g., E)"
-            />
           </Card>
         </Layout.Section>
 
@@ -551,7 +448,7 @@ const Settings = () => {
 
         <Layout.Section>
           <p style={{ padding: '16px', backgroundColor: '#e3f2fd', borderRadius: '4px' }}>
-            Settings should be configured on desktop/PC. Click Save after making changes.
+            Settings should be configured on desktop/PC.
           </p>
         </Layout.Section>
       </Layout>

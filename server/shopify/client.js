@@ -41,6 +41,52 @@ class ShopifyClient {
     }
   }
 
+  // 🆕 Get product metafield (product level)
+  async getProductMetafield(productId, namespace, key) {
+    try {
+      console.log(`Fetching product metafield: product=${productId}, namespace=${namespace}, key=${key}`);
+      
+      const response = await this.client.get(`/products/${productId}/metafields.json`);
+      const metafields = response.data.metafields || [];
+      
+      const metafield = metafields.find(m => m.namespace === namespace && m.key === key);
+      
+      if (metafield) {
+        console.log(`✓ Found metafield value: ${metafield.value}`);
+        return metafield.value;
+      }
+      
+      console.log(`✗ Metafield not found`);
+      return '';
+    } catch (error) {
+      console.error(`Error fetching product metafield:`, error.message);
+      return ''; // 失败时返回空字符串，不抛出错误
+    }
+  }
+
+  // 🆕 Get variant metafield (variant level)
+  async getVariantMetafield(variantId, namespace, key) {
+    try {
+      console.log(`Fetching variant metafield: variant=${variantId}, namespace=${namespace}, key=${key}`);
+      
+      const response = await this.client.get(`/variants/${variantId}/metafields.json`);
+      const metafields = response.data.metafields || [];
+      
+      const metafield = metafields.find(m => m.namespace === namespace && m.key === key);
+      
+      if (metafield) {
+        console.log(`✓ Found metafield value: ${metafield.value}`);
+        return metafield.value;
+      }
+      
+      console.log(`✗ Metafield not found`);
+      return '';
+    } catch (error) {
+      console.error(`Error fetching variant metafield:`, error.message);
+      return ''; // 失败时返回空字符串，不抛出错误
+    }
+  }
+
   // Update product variant weight
   async updateVariantWeight(variantId, weightInGrams) {
     try {

@@ -15,7 +15,8 @@ import {
   BlockStack,
   Banner,
   Toast,
-  Frame
+  Frame,
+  Checkbox
 } from '@shopify/polaris';
 import { ImageIcon } from '@shopify/polaris-icons';
 
@@ -26,6 +27,11 @@ const Transfer = () => {
   const [clearMode, setClearMode] = useState(false);
   const [selectedItems, setSelectedItems] = useState([]);
   const [statusFilter, setStatusFilter] = useState(['transferring', 'waiting', 'received']);
+  const [previousStatusFilter, setPreviousStatusFilter] = useState(['transferring', 'waiting', 'received']); // 🆕 保存之前的状态
+  const [receivingEnabled, setReceivingEnabled] = useState(false); // 🆕 Receiving 筛选开关
+  const [receivingFromFilter, setReceivingFromFilter] = useState([]); // 🆕 transfer_from 筛选
+  const [receivingDateFilter, setReceivingDateFilter] = useState([]); // 🆕 transfer_date 筛选
+  const [receivingOptions, setReceivingOptions] = useState({ transferFroms: [], transferDates: [] }); // 🆕 筛选选项
   const [transferModal, setTransferModal] = useState(null);
   const [transferData, setTransferData] = useState({
     transferQuantity: '',
@@ -36,23 +42,72 @@ const Transfer = () => {
   const [toastActive, setToastActive] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
 
+  // 🆕 计算每个状态的实时数量（按 quantity 累加）
+  const getStatusCounts = useCallback(() => {
+    return {
+      transferring: items
+        .filter(item => item.status === 'transferring')
+        .reduce((sum, item) => sum + item.quantity, 0),
+      waiting: items
+        .filter(item => item.status === 'waiting')
+        .reduce((sum, item) => sum + item.quantity, 0),
+      received: items
+        .filter(item => item.status === 'received' || item.status === 'found')
+        .reduce((sum, item) => sum + item.quantity, 0)
+    };
+  }, [items]);
+
   const applyFilters = useCallback(() => {
-    const filtered = items.filter(item => {
+    let filtered = items.filter(item => {
+      // 状态筛选
       if (item.status === 'transferring' && !statusFilter.includes('transferring')) return false;
       if (item.status === 'waiting' && !statusFilter.includes('waiting')) return false;
       if ((item.status === 'received' || item.status === 'found') && !statusFilter.includes('received')) return false;
+      
+      // 🆕 Receiving 筛选（只在启用时生效）
+      if (receivingEnabled) {
+        // transfer_from 筛选
+        if (receivingFromFilter.length > 0 && !receivingFromFilter.includes(item.transfer_from)) {
+          return false;
+        }
+        
+        // transfer_date 筛选
+        if (receivingDateFilter.length > 0 && !receivingDateFilter.includes(item.transfer_date)) {
+          return false;
+        }
+      }
+      
       return true;
     });
+    
+    // 🆕 如果 Receiving 启用，按 transfer_from 升序 → transfer_date 升序排序
+    if (receivingEnabled) {
+      filtered = filtered.sort((a, b) => {
+        // 先按 transfer_from 排序
+        const fromA = a.transfer_from || '';
+        const fromB = b.transfer_from || '';
+        if (fromA !== fromB) {
+          return fromA.localeCompare(fromB);
+        }
+        
+        // 相同 transfer_from，按 transfer_date 排序（早的在前）
+        const dateA = a.transfer_date || '';
+        const dateB = b.transfer_date || '';
+        return dateA.localeCompare(dateB);
+      });
+    }
+    
     setFilteredItems(filtered);
-  }, [items, statusFilter]);
+  }, [items, statusFilter, receivingEnabled, receivingFromFilter, receivingDateFilter]);
 
   useEffect(() => {
     fetchItems();
+    fetchReceivingOptions(); // 🆕 获取筛选选项
   }, []);
 
   useEffect(() => {
     applyFilters();
-  }, [items, statusFilter, applyFilters]);
+  }, [items, statusFilter, receivingEnabled, receivingFromFilter, receivingDateFilter, applyFilters]);
 
   const fetchItems = async () => {
     try {
@@ -61,6 +116,31 @@ const Transfer = () => {
     } catch (error) {
       console.error('Error fetching transfer items:', error);
     }
+  };
+
+  // 🆕 获取 Receiving 筛选选项
+  const fetchReceivingOptions = async () => {
+    try {
+      const response = await axios.get('/api/transfer/receiving-options');
+      setReceivingOptions(response.data);
+    } catch (error) {
+      console.error('Error fetching receiving options:', error);
+    }
+  };
+
+  // 🆕 Receiving 开关切换
+  const handleReceivingToggle = (checked) => {
+    if (checked) {
+      // 开启：保存当前状态，设置为 waiting + received
+      setPreviousStatusFilter(statusFilter);
+      setStatusFilter(['waiting', 'received']);
+    } else {
+      // 关闭：恢复之前的状态
+      setStatusFilter(previousStatusFilter);
+      setReceivingFromFilter([]);
+      setReceivingDateFilter([]);
+    }
+    setReceivingEnabled(checked);
   };
 
   const handleCopy = async (itemId) => {
@@ -132,6 +212,17 @@ const Transfer = () => {
     });
   };
 
+  // 🆕 点击 Waiting 标签打开编辑 modal（预填充数据）
+  const handleWaitingBadgeClick = (item) => {
+    const currentDate = new Date();
+    setTransferModal(item);
+    setTransferData({
+      transferQuantity: item.quantity.toString(),
+      transferFrom: item.transfer_from || '',
+      estimateDay: item.estimate_day ? item.estimate_day.toString() : currentDate.getDate().toString()
+    });
+  };
+
   const handleTransferSubmit = async () => {
     const currentDate = new Date();
     const currentMonth = currentDate.getMonth() + 1;
@@ -165,6 +256,7 @@ const Transfer = () => {
         });
       }
       await fetchItems();
+      await fetchReceivingOptions(); // 🆕 刷新筛选选项
       setTransferModal(null);
     } catch (error) {
       console.error('Error updating transfer:', error);
@@ -175,16 +267,27 @@ const Transfer = () => {
     if (item.image_url) {
       setSelectedImage({
         url: item.image_url,
-        link: `https://herabeauty.ca/products/${item.name?.toLowerCase().replace(/\s+/g, '-')}`,
+        link: `https://herabeauty.ca/products/${item.url_handle}`,
         title: `${item.brand} ${item.title}`
       });
     }
   };
 
-  const getItemBadge = (status) => {
+  const getItemBadge = (status, item, onBadgeClick) => {
     switch (status) {
       case 'waiting':
-        return <Badge tone="info">Waiting</Badge>;
+        // 🆕 Waiting 标签可点击
+        return (
+          <span 
+            onClick={(e) => {
+              e.stopPropagation();
+              onBadgeClick(item);
+            }}
+            style={{ cursor: 'pointer' }}
+          >
+            <Badge tone="info">Waiting</Badge>
+          </span>
+        );
       case 'received':
       case 'found':
         return <Badge tone="success">Received</Badge>;
@@ -305,14 +408,15 @@ const Transfer = () => {
             />
           ) : (
             <>
-              {/* Transfer info 和状态标签同行（waiting 状态）*/}
+              {/* Transfer info 和状态标签同行 */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                {status === 'waiting' && transfer_from && (
+                {/* 🆕 waiting 和 received/found 都显示 transfer info */}
+                {(status === 'waiting' || status === 'received' || status === 'found') && transfer_from && (
                   <Text variant="bodySm" fontWeight="bold" as="span" tone="info">
                     {transfer_from}, {formatDate(estimate_month, estimate_day)}
                   </Text>
                 )}
-                {getItemBadge(status)}
+                {getItemBadge(status, item, handleWaitingBadgeClick)}
               </div>
               
               {/* 主按钮 */}
@@ -402,6 +506,9 @@ const Transfer = () => {
 
   // Get current month for display
   const currentMonth = new Date().getMonth() + 1;
+  
+  // 🆕 获取实时数量
+  const statusCounts = getStatusCounts();
 
   return (
     <Frame>
@@ -431,17 +538,59 @@ const Transfer = () => {
           <Layout.Section>
             <Card>
               <div style={{ padding: '16px' }}>
-                <ChoiceList
-                  title="Show items"
-                  choices={[
-                    { label: 'Transferring', value: 'transferring' },
-                    { label: 'Waiting', value: 'waiting' },
-                    { label: 'Received/Found', value: 'received' }
-                  ]}
-                  selected={statusFilter}
-                  onChange={setStatusFilter}
-                  allowMultiple
-                />
+                <BlockStack gap="4">
+                  <ChoiceList
+                    title="Show items"
+                    choices={[
+                      { label: `Transferring (${statusCounts.transferring})`, value: 'transferring' },
+                      { label: `Waiting (${statusCounts.waiting})`, value: 'waiting' },
+                      { label: `Received/Found (${statusCounts.received})`, value: 'received' }
+                    ]}
+                    selected={statusFilter}
+                    onChange={setStatusFilter}
+                    allowMultiple
+                  />
+                  
+                  {/* 🆕 Receiving 筛选 */}
+                  <div style={{ 
+                    paddingTop: '12px', 
+                    borderTop: '1px solid #e1e3e5'
+                  }}>
+                    <div style={{ marginBottom: '12px' }}>
+                      <Checkbox
+                        label="Receiving"
+                        checked={receivingEnabled}
+                        onChange={handleReceivingToggle}
+                      />
+                    </div>
+                    
+                    {receivingEnabled && (
+                      <BlockStack gap="3">
+                        <ChoiceList
+                          title="Transfer From"
+                          choices={receivingOptions.transferFroms.map(from => ({
+                            label: from,
+                            value: from
+                          }))}
+                          selected={receivingFromFilter}
+                          onChange={setReceivingFromFilter}
+                          allowMultiple
+                        />
+                        
+                        <ChoiceList
+                          title="Transfer Date"
+                          choices={receivingOptions.transferDates.map(date => ({
+                            label: date,
+                            value: date
+                          }))}
+                          selected={receivingDateFilter}
+                          onChange={setReceivingDateFilter}
+                          allowMultiple
+                        />
+                      </BlockStack>
+                    )}
+                  </div>
+                </BlockStack>
               </div>
             </Card>
           </Layout.Section>

@@ -10,7 +10,8 @@ import {
   Button,
   Modal,
   Banner,
-  BlockStack
+  BlockStack,
+  TextField
 } from '@shopify/polaris';
 import { ImageIcon, ChevronLeftIcon, ChevronRightIcon } from '@shopify/polaris-icons';
 import NumericKeypad from '../components/NumericKeypad';
@@ -32,6 +33,10 @@ const OrderDetail = () => {
   const [message, setMessage] = useState('');
   const [selectedImage, setSelectedImage] = useState(null);
   const [activeInput, setActiveInput] = useState('boxType');
+  
+  // 🆕 Note 功能状态
+  const [noteModal, setNoteModal] = useState(false);
+  const [noteValue, setNoteValue] = useState('');
 
   useEffect(() => {
     fetchAllOrders();
@@ -65,6 +70,7 @@ const OrderDetail = () => {
       console.log('Current order:', response.data.order_number);
       setOrder(response.data);
       setLineItems(response.data.lineItems);
+      setNoteValue(response.data.packer_note || ''); // 🆕 加载 note
       await fetchBoxTypes();
     } catch (error) {
       console.error('Error fetching order details:', error);
@@ -77,6 +83,61 @@ const OrderDetail = () => {
       setBoxTypes(response.data);
     } catch (error) {
       console.error('Error fetching box types:', error);
+    }
+  };
+
+  // 🆕 保存 Note
+  const handleNoteSave = async () => {
+    if (noteValue.length > 50) {
+      setMessage('Note must be 50 characters or less');
+      return;
+    }
+
+    try {
+      await axios.patch(`/api/packer/orders/${shopifyOrderId}/note`, {
+        note: noteValue
+      });
+      await fetchOrderDetail();
+      setNoteModal(false);
+      setMessage('Note saved successfully');
+      setTimeout(() => setMessage(''), 3000);
+    } catch (error) {
+      console.error('Error saving note:', error);
+      setMessage('Error saving note');
+    }
+  };
+
+  // 🆕 删除 Note
+  const handleNoteDelete = async () => {
+    try {
+      await axios.patch(`/api/packer/orders/${shopifyOrderId}/note`, {
+        note: ''
+      });
+      setNoteValue('');
+      await fetchOrderDetail();
+      setMessage('Note deleted successfully');
+      setTimeout(() => setMessage(''), 3000);
+    } catch (error) {
+      console.error('Error deleting note:', error);
+      setMessage('Error deleting note');
+    }
+  };
+
+  // 🆕 删除订单
+  const handleDeleteOrder = async () => {
+    if (!window.confirm(`Are you sure you want to delete order ${order.name}? This action cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      await axios.delete(`/api/packer/orders/${shopifyOrderId}`);
+      setMessage('Order deleted successfully');
+      setTimeout(() => {
+        navigate('/packer');
+      }, 1000);
+    } catch (error) {
+      console.error('Error deleting order:', error);
+      setMessage('Error deleting order');
     }
   };
 
@@ -472,14 +533,30 @@ const OrderDetail = () => {
     {
       content: isSorted ? 'Unsort' : 'Sort',
       onAction: handleSort
+    },
+    // 🆕 Delete 按钮
+    {
+      content: 'Delete',
+      destructive: true,
+      onAction: handleDeleteOrder
     }
   ];
+
+  // 🆕 Add Note 按钮
+  const primaryAction = {
+    content: order.packer_note ? 'Edit Note' : 'Add Note',
+    onAction: () => {
+      setNoteValue(order.packer_note || '');
+      setNoteModal(true);
+    }
+  };
 
   return (
     <Page
       title={`Order ${order.name}`}
       subtitle={`${new Date(order.created_at).toLocaleDateString()} • $${order.subtotal_price} • ${order.total_quantity} items`}
       backAction={{ content: 'Back to Packer', onAction: () => navigate('/packer') }}
+      primaryAction={primaryAction}
       secondaryActions={secondaryActions}
     >
       {message && (
@@ -496,7 +573,28 @@ const OrderDetail = () => {
       <Layout>
         <Layout.Section>
           <Card>
-            <div style={{ padding: '16px' }}>
+            <div style={{ padding: '16px', position: 'relative' }}>
+              {/* 🆕 Holding 标签在右上角 */}
+              {order.status === 'holding' && (
+                <div style={{
+                  position: 'absolute',
+                  top: '16px',
+                  right: '16px'
+                }}>
+                  <span style={{
+                    display: 'inline-block',
+                    padding: '4px 12px',
+                    borderRadius: '6px',
+                    backgroundColor: '#9c6ade',
+                    color: 'white',
+                    fontSize: '14px',
+                    fontWeight: '500'
+                  }}>
+                    Holding
+                  </span>
+                </div>
+              )}
+
               <Text variant="headingSm" as="h3">Shipping Address</Text>
               <div style={{ marginTop: '12px' }}>
                 <BlockStack gap="1">
@@ -509,6 +607,40 @@ const OrderDetail = () => {
                   <Text as="p">{order.shipping_country}</Text>
                 </BlockStack>
               </div>
+
+              {/* 🆕 Note 显示区域 */}
+              {order.packer_note && (
+                <div style={{ 
+                  marginTop: '16px', 
+                  paddingTop: '16px', 
+                  borderTop: '1px solid #e1e3e5' 
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text variant="headingSm" as="h3">Note</Text>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <Button 
+                        size="slim" 
+                        onClick={() => {
+                          setNoteValue(order.packer_note);
+                          setNoteModal(true);
+                        }}
+                      >
+                        Edit
+                      </Button>
+                      <Button 
+                        size="slim" 
+                        destructive 
+                        onClick={handleNoteDelete}
+                      >
+                        Delete
+                      </Button>
+                    </div>
+                  </div>
+                  <div style={{ marginTop: '8px' }}>
+                    <Text as="p">{order.packer_note}</Text>
+                  </div>
+                </div>
+              )}
             </div>
           </Card>
         </Layout.Section>
@@ -525,6 +657,35 @@ const OrderDetail = () => {
           </Card>
         </Layout.Section>
       </Layout>
+
+      {/* 🆕 Note Modal */}
+      <Modal
+        open={noteModal}
+        onClose={() => setNoteModal(false)}
+        title="Order Note"
+        primaryAction={{
+          content: 'Save',
+          onAction: handleNoteSave
+        }}
+        secondaryActions={[
+          {
+            content: 'Cancel',
+            onAction: () => setNoteModal(false)
+          }
+        ]}
+      >
+        <Modal.Section>
+          <TextField
+            label="Note (max 50 characters)"
+            value={noteValue}
+            onChange={setNoteValue}
+            maxLength={50}
+            autoComplete="off"
+            placeholder="Enter a note for this order"
+            showCharacterCount
+          />
+        </Modal.Section>
+      </Modal>
 
       {/* Image Modal */}
       <Modal

@@ -16,35 +16,20 @@ router.get('/items', async (req, res) => {
       ORDER BY li.created_at DESC
     `).all();
 
-    // Get CSV data for WIG products - preload into Map
-    const csvData = await db.prepare('SELECT sku, data FROM csv_data').all();
-    const csvMap = new Map(csvData.map(row => [row.sku, JSON.parse(row.data || '{}')]));
-    
-    console.log(`Loaded ${csvMap.size} SKUs from CSV data`);
-
-    const settings = await db.prepare('SELECT * FROM settings').all();
-    const wigColumn = settings.find(s => s.key === 'picker_wig_column')?.value || 'E';
-
-    console.log(`Using WIG column: ${wigColumn}`);
-
-    // Process items with WIG type
+    // 🆕 处理 WIG 类型的显示
     const processedItems = items.map(item => {
       let displayType = item.product_type;
       
-      if (item.product_type === 'WIG' && item.sku) {
-        const csvRow = csvMap.get(item.sku);
-        if (csvRow && csvRow[wigColumn]) {
-          displayType = csvRow[wigColumn];
-          console.log(`Replaced WIG with ${displayType} for SKU ${item.sku}`);
-        } else {
-          console.log(`No CSV data found for WIG SKU: ${item.sku}`);
-        }
+      // 如果是 WIG 类型且有 wig_number，用 wig_number 替换显示
+      if (item.product_type && item.product_type.toUpperCase() === 'WIG' && item.wig_number) {
+        displayType = item.wig_number;
+        console.log(`Replaced WIG with ${displayType} for item ${item.id}`);
       }
 
       return {
         ...item,
         display_type: displayType,
-        sort_type: item.product_type
+        sort_type: item.product_type // 排序时仍使用原始的 product_type
       };
     });
 
@@ -73,9 +58,15 @@ router.patch('/items/:id/status', async (req, res) => {
       
       await db.prepare(`
         INSERT INTO transfer_items (
-          line_item_id, shopify_order_id, order_number, quantity, sku, status
-        ) VALUES (?, ?, ?, ?, ?, 'transferring')
-      `).run(item.id, item.shopify_order_id, item.order_number, item.quantity, item.sku);
+          line_item_id, shopify_order_id, order_number, quantity, sku, 
+          image_url, title, name, brand, size, weight, weight_unit,
+          url_handle, product_type, variant_title, custom_name, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'transferring')
+      `).run(
+        item.id, item.shopify_order_id, item.order_number, item.quantity, item.sku,
+        item.image_url, item.title, item.name, item.brand, item.size, item.weight, item.weight_unit,
+        item.url_handle, item.product_type, item.variant_title, item.custom_name
+      );
     }
 
     // If status changes from 'missing' to 'picked', remove from transfer
@@ -116,8 +107,9 @@ router.post('/items/:id/split', async (req, res) => {
       INSERT INTO line_items (
         shopify_order_id, order_number, shopify_line_item_id, quantity,
         image_url, title, name, brand, size, weight, weight_unit, sku,
-        url_handle, product_type, picker_status, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'missing', CURRENT_TIMESTAMP)
+        url_handle, product_type, wig_number, custom_name, has_weight_warning, 
+        variant_title, picker_status, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'missing', CURRENT_TIMESTAMP)
       RETURNING id
     `).get(
       item.shopify_order_id,
@@ -133,15 +125,25 @@ router.post('/items/:id/split', async (req, res) => {
       item.weight_unit,
       item.sku,
       item.url_handle,
-      item.product_type
+      item.product_type,
+      item.wig_number,
+      item.custom_name,
+      item.has_weight_warning,
+      item.variant_title
     );
 
     // Create transfer item for missing quantity
     await db.prepare(`
       INSERT INTO transfer_items (
-        line_item_id, shopify_order_id, order_number, quantity, sku, status
-      ) VALUES (?, ?, ?, ?, ?, 'transferring')
-    `).run(newItem.id, item.shopify_order_id, item.order_number, missingQuantity, item.sku);
+        line_item_id, shopify_order_id, order_number, quantity, sku,
+        image_url, title, name, brand, size, weight, weight_unit,
+        url_handle, product_type, variant_title, custom_name, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'transferring')
+    `).run(
+      newItem.id, item.shopify_order_id, item.order_number, missingQuantity, item.sku,
+      item.image_url, item.title, item.name, item.brand, item.size, item.weight, item.weight_unit,
+      item.url_handle, item.product_type, item.variant_title, item.custom_name
+    );
 
     res.json({ success: true, newItemId: newItem.id });
   } catch (error) {

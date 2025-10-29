@@ -144,6 +144,7 @@ router.get('/orders/:shopifyOrderId', async (req, res) => {
   }
 });
 
+// Update order status (holding/packing)
 router.patch('/orders/:shopifyOrderId', async (req, res) => {
   try {
     const { shopifyOrderId } = req.params;
@@ -185,6 +186,59 @@ router.patch('/orders/:shopifyOrderId/status', async (req, res) => {
   } catch (error) {
     console.error('Error updating order status:', error);
     res.status(500).json({ error: 'Failed to update order status: ' + error.message });
+  }
+});
+
+// 🆕 Add or update note
+router.patch('/orders/:shopifyOrderId/note', async (req, res) => {
+  try {
+    const { shopifyOrderId } = req.params;
+    const { note } = req.body;
+
+    // Note 可以为空字符串（删除 note）
+    if (note === undefined) {
+      return res.status(400).json({ error: 'Note is required' });
+    }
+
+    // 限制 50 字符
+    if (note.length > 50) {
+      return res.status(400).json({ error: 'Note must be 50 characters or less' });
+    }
+
+    await db.prepare(`
+      UPDATE orders 
+      SET packer_note = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE shopify_order_id = ?
+    `).run(note, shopifyOrderId);
+
+    res.json({ success: true, note });
+  } catch (error) {
+    console.error('Error updating note:', error);
+    res.status(500).json({ error: 'Failed to update note: ' + error.message });
+  }
+});
+
+// 🆕 Delete order (完全从 APP 中删除订单)
+router.delete('/orders/:shopifyOrderId', async (req, res) => {
+  try {
+    const { shopifyOrderId } = req.params;
+
+    console.log(`Deleting order ${shopifyOrderId} from APP`);
+
+    // 1. 删除 transfer_items
+    await db.prepare('DELETE FROM transfer_items WHERE shopify_order_id = ?').run(shopifyOrderId);
+    
+    // 2. 删除 line_items
+    await db.prepare('DELETE FROM line_items WHERE shopify_order_id = ?').run(shopifyOrderId);
+    
+    // 3. 删除 order
+    await db.prepare('DELETE FROM orders WHERE shopify_order_id = ?').run(shopifyOrderId);
+
+    console.log(`✓ Order ${shopifyOrderId} deleted successfully`);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting order:', error);
+    res.status(500).json({ error: 'Failed to delete order: ' + error.message });
   }
 });
 

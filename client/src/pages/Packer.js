@@ -12,8 +12,7 @@ import {
   Button,
   ChoiceList,
   BlockStack,
-  Banner,
-  InlineStack
+  Banner
 } from '@shopify/polaris';
 import { SortIcon } from '@shopify/polaris-icons';
 
@@ -21,9 +20,28 @@ const Packer = () => {
   const navigate = useNavigate();
   const [orders, setOrders] = useState([]);
   const [filteredOrders, setFilteredOrders] = useState([]);
-  const [statusFilter, setStatusFilter] = useState(['packing', 'waiting', 'holding', 'ready']);
-  const [showEditedOnly, setShowEditedOnly] = useState(false);
+  
+  // 🆕 从 localStorage 恢复筛选设置
+  const [statusFilter, setStatusFilter] = useState(() => {
+    const saved = localStorage.getItem('packerStatusFilter');
+    return saved ? JSON.parse(saved) : ['packing', 'waiting', 'holding', 'ready'];
+  });
+  
+  const [showEditedOnly, setShowEditedOnly] = useState(() => {
+    const saved = localStorage.getItem('packerShowEditedOnly');
+    return saved === 'true';
+  });
+  
   const [isSorted, setIsSorted] = useState(false);
+
+  // 🆕 保存筛选设置到 localStorage
+  useEffect(() => {
+    localStorage.setItem('packerStatusFilter', JSON.stringify(statusFilter));
+  }, [statusFilter]);
+
+  useEffect(() => {
+    localStorage.setItem('packerShowEditedOnly', showEditedOnly.toString());
+  }, [showEditedOnly]);
 
   const applyFilters = useCallback(() => {
     let filtered = orders.filter(order => statusFilter.includes(order.orderStatus));
@@ -163,7 +181,8 @@ const Packer = () => {
       weight, 
       hasWeightWarning,
       transferInfo,
-      is_edited
+      is_edited,
+      packer_note // 🆕 note 字段
     } = order;
 
     return (
@@ -175,9 +194,17 @@ const Packer = () => {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
           <div style={{ flex: 1 }}>
             <BlockStack gap="2">
-              <Text variant="bodyMd" as="h3" fontWeight="semibold">
-                {name}
-              </Text>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+                <Text variant="bodyMd" as="h3" fontWeight="semibold">
+                  {name}
+                </Text>
+                {/* 🆕 显示 note（小字，灰色）*/}
+                {packer_note && (
+                  <Text variant="bodySm" tone="subdued">
+                    {packer_note}
+                  </Text>
+                )}
+              </div>
               <Text variant="bodySm" color="subdued">
                 Items: {total_quantity}
               </Text>
