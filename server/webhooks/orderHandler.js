@@ -168,6 +168,16 @@ class OrderWebhookHandler {
   // Handle order updated
   static async handleOrderUpdated(orderData) {
     try {
+      if (orderData.cancelled_at) {
+      console.log(`Order ${orderData.name} is cancelled, deleting from APP`);
+      return await this.handleOrderCancelled(orderData);
+    }
+    
+    if (orderData.fulfillment_status === 'fulfilled') {
+      console.log(`Order ${orderData.name} is fulfilled, deleting from APP`);
+      return await this.handleOrderFulfilled(orderData);
+    }
+      
       const existingOrder = await db.prepare('SELECT * FROM orders WHERE shopify_order_id = ?')
         .get(orderData.id.toString());
 
