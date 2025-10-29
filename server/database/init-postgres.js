@@ -36,6 +36,7 @@ async function initPostgres() {
       box_type TEXT,
       weight NUMERIC,
       is_edited BOOLEAN DEFAULT FALSE,
+      packer_note TEXT,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
@@ -58,6 +59,8 @@ async function initPostgres() {
       sku TEXT,
       url_handle TEXT,
       product_type TEXT,
+      wig_number TEXT,
+      custom_name TEXT,
       has_weight_warning INTEGER DEFAULT 0,
       variant_title TEXT,
       picker_status TEXT DEFAULT 'picking',
@@ -86,7 +89,9 @@ async function initPostgres() {
       url_handle TEXT,
       product_type TEXT,
       variant_title TEXT,
+      custom_name TEXT,
       transfer_from TEXT,
+      transfer_date TEXT,
       estimate_month INTEGER,
       estimate_day INTEGER,
       status TEXT DEFAULT 'transferring',
@@ -124,6 +129,61 @@ async function initPostgres() {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
+
+  // 🆕 Add new columns to existing tables (migrations)
+  console.log('Running database migrations...');
+
+  try {
+    // Add packer_note to orders
+    await client.query(`
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS packer_note TEXT
+    `);
+    console.log('✓ Added packer_note column to orders');
+  } catch (error) {
+    console.log('✓ Column packer_note already exists in orders');
+  }
+
+  try {
+    // Add wig_number to line_items
+    await client.query(`
+      ALTER TABLE line_items ADD COLUMN IF NOT EXISTS wig_number TEXT
+    `);
+    console.log('✓ Added wig_number column to line_items');
+  } catch (error) {
+    console.log('✓ Column wig_number already exists in line_items');
+  }
+
+  try {
+    // Add custom_name to line_items
+    await client.query(`
+      ALTER TABLE line_items ADD COLUMN IF NOT EXISTS custom_name TEXT
+    `);
+    console.log('✓ Added custom_name column to line_items');
+  } catch (error) {
+    console.log('✓ Column custom_name already exists in line_items');
+  }
+
+  try {
+    // Add custom_name to transfer_items
+    await client.query(`
+      ALTER TABLE transfer_items ADD COLUMN IF NOT EXISTS custom_name TEXT
+    `);
+    console.log('✓ Added custom_name column to transfer_items');
+  } catch (error) {
+    console.log('✓ Column custom_name already exists in transfer_items');
+  }
+
+  try {
+    // Add transfer_date to transfer_items
+    await client.query(`
+      ALTER TABLE transfer_items ADD COLUMN IF NOT EXISTS transfer_date TEXT
+    `);
+    console.log('✓ Added transfer_date column to transfer_items');
+  } catch (error) {
+    console.log('✓ Column transfer_date already exists in transfer_items');
+  }
+
+  console.log('Migrations completed!');
 
   // Insert default box types
   const boxTypes = [
