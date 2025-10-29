@@ -63,7 +63,7 @@ const OrderDetail = () => {
         const numB = parseInt(b.order_number) || 0;
         return numA - numB;
       });
-      console.log('All orders sorted:', sorted.map(o => o.order_number));
+      console.log('All orders sorted:', sorted.map(o => `${o.order_number}(${o.orderStatus})`));
       setAllOrders(sorted);
     } catch (error) {
       console.error('Error fetching all orders:', error);
@@ -78,12 +78,17 @@ const OrderDetail = () => {
       const statusFilter = savedFilters ? JSON.parse(savedFilters) : ['packing', 'waiting', 'holding', 'ready'];
       
       console.log('Applying Packer filters:', statusFilter);
+      console.log('All orders:', allOrders.map(o => `${o.order_number}: ${o.orderStatus || o.status}`));
       
-      // 根据筛选状态过滤订单
+      // 🆕 直接使用后端返回的 orderStatus
       const filtered = allOrders.filter(order => {
-        return statusFilter.includes(order.status);
+        const status = order.orderStatus || order.status;
+        const match = statusFilter.includes(status);
+        console.log(`Order ${order.order_number}: orderStatus=${status}, match=${match}`);
+        return match;
       });
       
+      console.log('Filtered orders:', filtered.map(o => `${o.order_number}(${o.orderStatus || o.status})`));
       console.log('Filtered orders count:', filtered.length);
       setFilteredOrders(filtered);
     } catch (error) {
