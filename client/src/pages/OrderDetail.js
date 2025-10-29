@@ -23,6 +23,7 @@ const OrderDetail = () => {
   const [order, setOrder] = useState(null);
   const [lineItems, setLineItems] = useState([]);
   const [allOrders, setAllOrders] = useState([]);
+  const [filteredOrders, setFilteredOrders] = useState([]); // 🆕 根据筛选过滤的订单
   const [isSorted, setIsSorted] = useState(false);
   const [weightModal, setWeightModal] = useState(null);
   const [weightValue, setWeightValue] = useState('');
@@ -34,7 +35,7 @@ const OrderDetail = () => {
   const [selectedImage, setSelectedImage] = useState(null);
   const [activeInput, setActiveInput] = useState('boxType');
   
-  // 🆕 Note 功能状态
+  // Note 功能状态
   const [noteModal, setNoteModal] = useState(false);
   const [noteValue, setNoteValue] = useState('');
 
@@ -47,6 +48,11 @@ const OrderDetail = () => {
       fetchOrderDetail();
     }
   }, [shopifyOrderId]);
+
+  // 🆕 当 allOrders 变化时，应用筛选
+  useEffect(() => {
+    applyPackerFilters();
+  }, [allOrders]);
 
   const fetchAllOrders = async () => {
     try {
@@ -64,13 +70,36 @@ const OrderDetail = () => {
     }
   };
 
+  // 🆕 根据 Packer 页面的筛选状态过滤订单
+  const applyPackerFilters = () => {
+    try {
+      // 从 localStorage 读取 Packer 的筛选设置
+      const savedFilters = localStorage.getItem('packerStatusFilter');
+      const statusFilter = savedFilters ? JSON.parse(savedFilters) : ['packing', 'waiting', 'holding', 'ready'];
+      
+      console.log('Applying Packer filters:', statusFilter);
+      
+      // 根据筛选状态过滤订单
+      const filtered = allOrders.filter(order => {
+        return statusFilter.includes(order.status);
+      });
+      
+      console.log('Filtered orders count:', filtered.length);
+      setFilteredOrders(filtered);
+    } catch (error) {
+      console.error('Error applying packer filters:', error);
+      // 如果出错，使用所有订单
+      setFilteredOrders(allOrders);
+    }
+  };
+
   const fetchOrderDetail = async () => {
     try {
       const response = await axios.get(`/api/packer/orders/${shopifyOrderId}`);
       console.log('Current order:', response.data.order_number);
       setOrder(response.data);
       setLineItems(response.data.lineItems);
-      setNoteValue(response.data.packer_note || ''); // 🆕 加载 note
+      setNoteValue(response.data.packer_note || '');
       await fetchBoxTypes();
     } catch (error) {
       console.error('Error fetching order details:', error);
@@ -86,7 +115,7 @@ const OrderDetail = () => {
     }
   };
 
-  // 🆕 保存 Note
+  // 保存 Note
   const handleNoteSave = async () => {
     if (noteValue.length > 50) {
       setMessage('Note must be 50 characters or less');
@@ -107,7 +136,7 @@ const OrderDetail = () => {
     }
   };
 
-  // 🆕 删除 Note
+  // 删除 Note
   const handleNoteDelete = async () => {
     try {
       await axios.patch(`/api/packer/orders/${shopifyOrderId}/note`, {
@@ -123,7 +152,7 @@ const OrderDetail = () => {
     }
   };
 
-  // 🆕 删除订单
+  // 删除订单
   const handleDeleteOrder = async () => {
     if (!window.confirm(`Are you sure you want to delete order ${order.name}? This action cannot be undone.`)) {
       return;
@@ -141,40 +170,43 @@ const OrderDetail = () => {
     }
   };
 
-  // 根据订单号查找上一个和下一个订单
+  // 🆕 根据订单号查找上一个订单（在筛选后的订单中）
   const findPreviousOrder = () => {
-    if (!order || allOrders.length === 0) return null;
+    if (!order || filteredOrders.length === 0) return null;
     
     const currentNum = parseInt(order.order_number);
-    console.log('Finding previous order, current:', currentNum);
+    console.log('Finding previous order in filtered list, current:', currentNum);
+    console.log('Filtered orders:', filteredOrders.map(o => o.order_number));
     
     // 找到订单号小于当前订单的最大订单号
-    for (let i = allOrders.length - 1; i >= 0; i--) {
-      const orderNum = parseInt(allOrders[i].order_number) || 0;
+    for (let i = filteredOrders.length - 1; i >= 0; i--) {
+      const orderNum = parseInt(filteredOrders[i].order_number) || 0;
       if (orderNum < currentNum) {
-        console.log('Found previous order:', allOrders[i].order_number);
-        return allOrders[i];
+        console.log('Found previous order:', filteredOrders[i].order_number);
+        return filteredOrders[i];
       }
     }
-    console.log('No previous order found');
+    console.log('No previous order found in filtered list');
     return null;
   };
 
+  // 🆕 根据订单号查找下一个订单（在筛选后的订单中）
   const findNextOrder = () => {
-    if (!order || allOrders.length === 0) return null;
+    if (!order || filteredOrders.length === 0) return null;
     
     const currentNum = parseInt(order.order_number);
-    console.log('Finding next order, current:', currentNum);
+    console.log('Finding next order in filtered list, current:', currentNum);
+    console.log('Filtered orders:', filteredOrders.map(o => o.order_number));
     
     // 找到订单号大于当前订单的最小订单号
-    for (let i = 0; i < allOrders.length; i++) {
-      const orderNum = parseInt(allOrders[i].order_number) || 0;
+    for (let i = 0; i < filteredOrders.length; i++) {
+      const orderNum = parseInt(filteredOrders[i].order_number) || 0;
       if (orderNum > currentNum) {
-        console.log('Found next order:', allOrders[i].order_number);
-        return allOrders[i];
+        console.log('Found next order:', filteredOrders[i].order_number);
+        return filteredOrders[i];
       }
     }
-    console.log('No next order found');
+    console.log('No next order found in filtered list');
     return null;
   };
 
@@ -534,7 +566,6 @@ const OrderDetail = () => {
       content: isSorted ? 'Unsort' : 'Sort',
       onAction: handleSort
     },
-    // 🆕 Delete 按钮
     {
       content: 'Delete',
       destructive: true,
@@ -542,7 +573,6 @@ const OrderDetail = () => {
     }
   ];
 
-  // 🆕 Add Note 按钮
   const primaryAction = {
     content: order.packer_note ? 'Edit Note' : 'Add Note',
     onAction: () => {
@@ -574,7 +604,7 @@ const OrderDetail = () => {
         <Layout.Section>
           <Card>
             <div style={{ padding: '16px', position: 'relative' }}>
-              {/* 🆕 Holding 标签在右上角 */}
+              {/* Holding 标签在右上角 */}
               {order.status === 'holding' && (
                 <div style={{
                   position: 'absolute',
@@ -608,7 +638,7 @@ const OrderDetail = () => {
                 </BlockStack>
               </div>
 
-              {/* 🆕 Note 显示区域 */}
+              {/* Note 显示区域 */}
               {order.packer_note && (
                 <div style={{ 
                   marginTop: '16px', 
@@ -658,7 +688,7 @@ const OrderDetail = () => {
         </Layout.Section>
       </Layout>
 
-      {/* 🆕 Note Modal */}
+      {/* Note Modal */}
       <Modal
         open={noteModal}
         onClose={() => setNoteModal(false)}

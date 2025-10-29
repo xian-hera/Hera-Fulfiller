@@ -223,6 +223,18 @@ const Transfer = () => {
     });
   };
 
+  // 🆕 点击 Received 标签撤销状态
+  const handleReceivedUndo = async (item) => {
+    try {
+      await axios.patch(`/api/transfer/items/${item.id}`, { status: 'transferring' });
+      setItems(items.map(i => i.id === item.id ? { ...i, status: 'transferring' } : i));
+      showToast('Status changed to Transferring');
+    } catch (error) {
+      console.error('Error undoing received status:', error);
+      showToast('Error updating status');
+    }
+  };
+
   const handleTransferSubmit = async () => {
     const currentDate = new Date();
     const currentMonth = currentDate.getMonth() + 1;
@@ -276,7 +288,7 @@ const Transfer = () => {
   const getItemBadge = (status, item, onBadgeClick) => {
     switch (status) {
       case 'waiting':
-        // 🆕 Waiting 标签可点击
+        // Waiting 标签可点击编辑
         return (
           <span 
             onClick={(e) => {
@@ -290,7 +302,18 @@ const Transfer = () => {
         );
       case 'received':
       case 'found':
-        return <Badge tone="success">Received</Badge>;
+        // 🆕 Received 标签可点击撤销
+        return (
+          <span 
+            onClick={(e) => {
+              e.stopPropagation();
+              handleReceivedUndo(item);
+            }}
+            style={{ cursor: 'pointer' }}
+          >
+            <Badge tone="success">Received</Badge>
+          </span>
+        );
       default:
         return <Badge>Transferring</Badge>;
     }
