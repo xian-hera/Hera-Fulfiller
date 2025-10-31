@@ -219,11 +219,11 @@ const Packer = () => {
                 )}
                 
                 {box_type && (
-                  <Badge tone="info">Box: {box_type}</Badge>
+                  <Badge tone="warning">{box_type}</Badge>
                 )}
                 
                 {weight && (
-                  <Badge>Weight: {weight}g</Badge>
+                  <Badge>{weight}g</Badge>
                 )}
                 
                 {!hasWeightWarning && shipping_title && (
@@ -243,7 +243,7 @@ const Packer = () => {
             )}
             
             {hasWeightWarning && (
-              <Badge tone="warning">⚠️ Weight</Badge>
+              <Badge tone="critical">⚠️ Weight</Badge>
             )}
             
             {getStatusBadge(orderStatus)}
