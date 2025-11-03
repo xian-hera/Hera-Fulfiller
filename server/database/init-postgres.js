@@ -185,24 +185,34 @@ async function initPostgres() {
 
   console.log('Migrations completed!');
 
-  // Insert default box types
-  const boxTypes = [
-    ['A', '5x20x5'],
-    ['B', '18x10x4'],
-    ['BB', ''],
-    ['C', '18x10x5'],
-    ['D', '18x12x4'],
-    ['E', '18x12x8'],
-    ['F', '18x14x5'],
-    ['G', '26x8x8'],
-    ['H', '12x6x6']
-  ];
+  // Insert default box types ONLY if table is empty
+  const boxTypeCountResult = await client.query('SELECT COUNT(*) as count FROM box_types');
+  const boxTypeCount = parseInt(boxTypeCountResult.rows[0].count);
 
-  for (const [code, dimensions] of boxTypes) {
-    await client.query(
-      'INSERT INTO box_types (code, dimensions) VALUES ($1, $2) ON CONFLICT (code) DO NOTHING',
-      [code, dimensions]
-    );
+  if (boxTypeCount === 0) {
+    console.log('Box types table is empty, inserting default values...');
+    
+    const boxTypes = [
+      ['A', '5x20x5'],
+      ['B', '18x10x4'],
+      ['C', '18x10x5'],
+      ['D', '18x12x4'],
+      ['E', '18x12x8'],
+      ['F', '18x14x5'],
+      ['G', '26x8x8'],
+      ['H', '12x6x6']
+    ];
+
+    for (const [code, dimensions] of boxTypes) {
+      await client.query(
+        'INSERT INTO box_types (code, dimensions) VALUES ($1, $2)',
+        [code, dimensions]
+      );
+    }
+    
+    console.log('✓ Default box types inserted');
+  } else {
+    console.log(`✓ Box types table already has ${boxTypeCount} entries, skipping defaults`);
   }
 
   // Insert default settings

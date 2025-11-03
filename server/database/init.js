@@ -125,20 +125,29 @@ const initDatabase = async () => {
         )
       `);
 
-      // Insert default box types
-      const insertBoxType = db.db.prepare(`
-        INSERT OR IGNORE INTO box_types (code, dimensions) VALUES (?, ?)
-      `);
+      // Insert default box types ONLY if table is empty
+      const boxTypeCount = db.db.prepare('SELECT COUNT(*) as count FROM box_types').get();
 
-      insertBoxType.run('A', '5x20x5');
-      insertBoxType.run('B', '18x10x4');
-      insertBoxType.run('BB', '');
-      insertBoxType.run('C', '18x10x5');
-      insertBoxType.run('D', '18x12x4');
-      insertBoxType.run('E', '18x12x8');
-      insertBoxType.run('F', '18x14x5');
-      insertBoxType.run('G', '26x8x8');
-      insertBoxType.run('H', '12x6x6');
+      if (boxTypeCount.count === 0) {
+        console.log('Box types table is empty, inserting default values...');
+        
+        const insertBoxType = db.db.prepare(`
+          INSERT INTO box_types (code, dimensions) VALUES (?, ?)
+        `);
+
+        insertBoxType.run('A', '5x20x5');
+        insertBoxType.run('B', '18x10x4');
+        insertBoxType.run('C', '18x10x5');
+        insertBoxType.run('D', '18x12x4');
+        insertBoxType.run('E', '18x12x8');
+        insertBoxType.run('F', '18x14x5');
+        insertBoxType.run('G', '26x8x8');
+        insertBoxType.run('H', '12x6x6');
+        
+        console.log('✓ Default box types inserted');
+      } else {
+        console.log(`✓ Box types table already has ${boxTypeCount.count} entries, skipping defaults`);
+      }
 
       // Insert default settings
       const insertSetting = db.db.prepare(`
