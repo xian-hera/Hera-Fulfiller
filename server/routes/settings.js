@@ -228,8 +228,8 @@ router.post('/box-types', async (req, res) => {
     }
 
     await db.prepare(`
-      INSERT INTO box_types (code, dimensions)
-      VALUES (?, ?)
+      INSERT INTO box_types (code, dimensions, usage_count)
+      VALUES (?, ?, 0)
     `).run(code.toUpperCase().trim(), dimensions || '');
 
     res.json({ success: true });
@@ -357,12 +357,16 @@ router.post('/clear-all-data', async (req, res) => {
     
     await db.prepare('DELETE FROM orders').run();
     console.log('✓ Cleared orders');
+
+    // 🆕 重置 box type 统计
+    await db.prepare('UPDATE box_types SET usage_count = 0').run();
+    console.log('✓ Reset box type usage counts');
     
     console.log('✓ All order data cleared successfully');
     
     res.json({ 
       success: true, 
-      message: 'All orders, line items, and transfer items have been deleted. CSV data and settings were preserved.'
+      message: 'All orders, line items, and transfer items have been deleted. Box type statistics have been reset. CSV data and settings were preserved.'
     });
   } catch (error) {
     console.error('Error clearing data:', error);

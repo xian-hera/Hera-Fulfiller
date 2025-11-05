@@ -68,6 +68,7 @@ const Settings = () => {
       showMessage(response.data.message);
       await fetchCleanupPreview();
       await fetchDbStats();
+      await fetchSettings(); // 🆕 刷新 box types 统计
     } catch (error) {
       console.error('Error running cleanup:', error);
       showMessage('Cleanup failed');
@@ -88,8 +89,9 @@ const Settings = () => {
       showMessage(response.data.message);
       setShowClearConfirm(false);
       
-      // 刷新统计数据
+      // 刷新统计数据和 box types
       await fetchDbStats();
+      await fetchSettings(); // 🆕 刷新 box types 统计
       setCleanupPreview(null);
     } catch (error) {
       console.error('Error clearing data:', error);
@@ -155,6 +157,14 @@ const Settings = () => {
     return new Date(dateString).toLocaleString();
   };
 
+  // 🆕 按使用次数和字母排序 box types
+  const sortedBoxTypes = [...boxTypes].sort((a, b) => {
+    if (b.usage_count !== a.usage_count) {
+      return b.usage_count - a.usage_count;
+    }
+    return a.code.localeCompare(b.code);
+  });
+
   return (
     <Page
       title="Settings"
@@ -177,17 +187,23 @@ const Settings = () => {
         <Layout.Section>
           <Card title="Database Management" sectioned>
             <BlockStack gap="4">
-              {/* 数据库统计 */}
+              {/* 🆕 数据库统计 + Box Type 统计 */}
               <div>
                 <Text variant="headingSm" as="h3">Database Statistics</Text>
                 {dbStats && (
                   <div style={{ marginTop: '12px' }}>
-                    <InlineStack gap="4" wrap>
+                    <div style={{ 
+                      display: 'flex', 
+                      flexWrap: 'wrap', 
+                      gap: '8px'
+                    }}>
+                      {/* 原有的统计 */}
                       <div style={{ 
                         padding: '12px', 
                         backgroundColor: '#f6f6f7', 
                         borderRadius: '8px',
-                        minWidth: '150px'
+                        minWidth: '100px',
+                        flex: '0 0 auto'
                       }}>
                         <Text variant="bodySm" tone="subdued">Total Orders</Text>
                         <Text variant="headingMd" as="p">{dbStats.orders?.count || 0}</Text>
@@ -196,7 +212,8 @@ const Settings = () => {
                         padding: '12px', 
                         backgroundColor: '#f6f6f7', 
                         borderRadius: '8px',
-                        minWidth: '150px'
+                        minWidth: '100px',
+                        flex: '0 0 auto'
                       }}>
                         <Text variant="bodySm" tone="subdued">Total Line Items</Text>
                         <Text variant="headingMd" as="p">{dbStats.lineItems?.count || 0}</Text>
@@ -205,12 +222,37 @@ const Settings = () => {
                         padding: '12px', 
                         backgroundColor: '#f6f6f7', 
                         borderRadius: '8px',
-                        minWidth: '150px'
+                        minWidth: '100px',
+                        flex: '0 0 auto'
                       }}>
                         <Text variant="bodySm" tone="subdued">Transfer Items</Text>
                         <Text variant="headingMd" as="p">{dbStats.transferItems?.count || 0}</Text>
                       </div>
-                    </InlineStack>
+
+                      {/* 🆕 Box Type 统计 */}
+                      {sortedBoxTypes.map((box) => (
+                        <div 
+                          key={box.id}
+                          style={{ 
+                            padding: '12px', 
+                            backgroundColor: '#f6f6f7', 
+                            borderRadius: '8px',
+                            minWidth: '90px',
+                            flex: '0 0 auto'
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+                            <Text variant="bodySm" fontWeight="medium">{box.code}</Text>
+                            {box.dimensions && (
+                              <Text variant="bodySm" tone="subdued" as="span" style={{ fontSize: '11px' }}>
+                                {box.dimensions}
+                              </Text>
+                            )}
+                          </div>
+                          <Text variant="headingMd" as="p">{box.usage_count || 0}</Text>
+                        </div>
+                      ))}
+                    </div>
                     <div style={{ marginTop: '12px' }}>
                       <Text variant="bodySm" tone="subdued">
                         Oldest order: {formatDate(dbStats.oldestOrder?.created_at)}

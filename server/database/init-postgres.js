@@ -126,6 +126,7 @@ async function initPostgres() {
       id SERIAL PRIMARY KEY,
       code TEXT UNIQUE NOT NULL,
       dimensions TEXT,
+      usage_count INTEGER DEFAULT 0,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
@@ -183,6 +184,16 @@ async function initPostgres() {
     console.log('✓ Column transfer_date already exists in transfer_items');
   }
 
+  try {
+    // 🆕 Add usage_count to box_types
+    await client.query(`
+      ALTER TABLE box_types ADD COLUMN IF NOT EXISTS usage_count INTEGER DEFAULT 0
+    `);
+    console.log('✓ Added usage_count column to box_types');
+  } catch (error) {
+    console.log('✓ Column usage_count already exists in box_types');
+  }
+
   console.log('Migrations completed!');
 
   // Insert default box types ONLY if table is empty
@@ -205,7 +216,7 @@ async function initPostgres() {
 
     for (const [code, dimensions] of boxTypes) {
       await client.query(
-        'INSERT INTO box_types (code, dimensions) VALUES ($1, $2)',
+        'INSERT INTO box_types (code, dimensions, usage_count) VALUES ($1, $2, 0)',
         [code, dimensions]
       );
     }

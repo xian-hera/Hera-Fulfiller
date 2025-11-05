@@ -273,11 +273,21 @@ router.post('/orders/:shopifyOrderId/complete', async (req, res) => {
       return res.status(400).json({ error: 'Box type is required' });
     }
 
+    // 更新订单状态
     await db.prepare(`
       UPDATE orders 
       SET box_type = ?, weight = ?, status = 'ready', updated_at = CURRENT_TIMESTAMP
       WHERE shopify_order_id = ?
     `).run(boxType, weight || null, shopifyOrderId);
+
+    // 🆕 更新 box type 使用统计
+    await db.prepare(`
+      UPDATE box_types 
+      SET usage_count = usage_count + 1 
+      WHERE code = ?
+    `).run(boxType);
+
+    console.log(`✓ Box type ${boxType} usage count updated`);
 
     res.json({ success: true });
   } catch (error) {
