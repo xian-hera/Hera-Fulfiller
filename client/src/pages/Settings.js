@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from '../api/axios';
-import { Page, Layout, Card, TextField, Button, Text, BlockStack, InlineStack } from '@shopify/polaris';
+import { Page, Layout, Card, TextField, Button, Text, BlockStack } from '@shopify/polaris';
 
 const Settings = () => {
   const navigate = useNavigate();
@@ -18,6 +18,9 @@ const Settings = () => {
   // 清空所有数据相关状态
   const [isClearingData, setIsClearingData] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  
+  // 🆕 Box 统计开始日期
+  const [boxStatsStartDate, setBoxStatsStartDate] = useState(null);
 
   useEffect(() => {
     fetchSettings();
@@ -28,6 +31,12 @@ const Settings = () => {
     try {
       const response = await axios.get('/api/settings');
       setBoxTypes(response.data.boxTypes || []);
+      
+      // 🆕 获取 box stats start date
+      const startDate = response.data.settings?.box_stats_start_date;
+      if (startDate) {
+        setBoxStatsStartDate(startDate);
+      }
     } catch (error) {
       console.error('Error:', error);
       showMessage('Error loading settings');
@@ -104,6 +113,29 @@ const Settings = () => {
     setShowClearConfirm(false);
   };
 
+  // 🆕 重置 Box 使用统计
+  const handleResetBoxUsage = async () => {
+    if (!window.confirm('Are you sure you want to reset all box usage statistics? This will clear usage counts and quantities for all boxes.')) {
+      return;
+    }
+
+    try {
+      const response = await axios.post('/api/settings/reset-box-usage');
+      showMessage(response.data.message);
+      
+      // 🆕 更新 box stats start date
+      if (response.data.startDate) {
+        setBoxStatsStartDate(response.data.startDate);
+      }
+      
+      await fetchSettings();
+      await fetchDbStats();
+    } catch (error) {
+      console.error('Error resetting box usage:', error);
+      showMessage('Failed to reset box usage: ' + (error.response?.data?.error || error.message));
+    }
+  };
+
   const handleAddBox = async () => {
     if (!newBoxCode) {
       showMessage('Please enter a box code');
@@ -128,7 +160,7 @@ const Settings = () => {
     try {
       await axios.delete(`/api/settings/box-types/${id}`);
       await fetchSettings();
-      await fetchDbStats(); // 🆕 刷新统计
+      await fetchDbStats();
       showMessage('Box type deleted!');
     } catch (error) {
       showMessage('Error deleting box type');
@@ -144,7 +176,7 @@ const Settings = () => {
         quantity: box.quantity
       });
       await fetchSettings();
-      await fetchDbStats(); // 🆕 刷新统计
+      await fetchDbStats();
       showMessage('Box type saved!');
     } catch (error) {
       showMessage(error.response?.data?.error || 'Error saving box type');
@@ -196,12 +228,24 @@ const Settings = () => {
                 <Text variant="headingSm" as="h3">Database Statistics</Text>
                 {dbStats && (
                   <div style={{ marginTop: '12px' }}>
+                    {/* 🆕 日期信息移到顶部 */}
+                    <div style={{ marginBottom: '16px' }}>
+                      <Text variant="bodySm" tone="subdued">
+                        Oldest order: {formatDate(dbStats.oldestOrder?.created_at)}
+                      </Text>
+                      <br />
+                      <Text variant="bodySm" tone="subdued">
+                        Newest order: {formatDate(dbStats.newestOrder?.created_at)}
+                      </Text>
+                    </div>
+
+                    {/* Orders 统计 */}
                     <div style={{ 
                       display: 'flex', 
                       flexWrap: 'wrap', 
-                      gap: '8px'
+                      gap: '8px',
+                      marginBottom: '16px'
                     }}>
-                      {/* 原有的统计 */}
                       <div style={{ 
                         padding: '12px', 
                         backgroundColor: '#f6f6f7', 
@@ -232,11 +276,24 @@ const Settings = () => {
                         <Text variant="bodySm" tone="subdued">Transfer Items</Text>
                         <Text variant="headingMd" as="p">{dbStats.transferItems?.count || 0}</Text>
                       </div>
+                    </div>
 
-                      {/* 🆕 Box Type 统计 */}
+                    {/* 🆕 Box 统计开始日期 */}
+                    <div style={{ marginBottom: '12px' }}>
+                      <Text variant="bodySm" tone="subdued">
+                        Box from {boxStatsStartDate ? formatDate(boxStatsStartDate) : 'N/A'}
+                      </Text>
+                    </div>
+
+                    {/* 🆕 Box Type 统计（新行） */}
+                    <div style={{ 
+                      display: 'flex', 
+                      flexWrap: 'wrap', 
+                      gap: '8px'
+                    }}>
                       {sortedBoxTypes.map((box) => {
-                        const remaining = (box.quantity || 0) - (box.usage_count || 0);
-                        const remainingDisplay = box.quantity > 0 ? remaining : 'null';
+                        // 🆕 quantity 就是剩余数量
+                        const remainingDisplay = (box.quantity !== undefined && box.quantity !== null) ? box.quantity : 'null';
                         
                         return (
                           <div 
@@ -264,15 +321,6 @@ const Settings = () => {
                           </div>
                         );
                       })}
-                    </div>
-                    <div style={{ marginTop: '12px' }}>
-                      <Text variant="bodySm" tone="subdued">
-                        Oldest order: {formatDate(dbStats.oldestOrder?.created_at)}
-                      </Text>
-                      <br />
-                      <Text variant="bodySm" tone="subdued">
-                        Newest order: {formatDate(dbStats.newestOrder?.created_at)}
-                      </Text>
                     </div>
                   </div>
                 )}
@@ -351,11 +399,12 @@ const Settings = () => {
                 >
                   Run Cleanup Now
                 </Button>
+                {/* 🆕 Reset Box Usage 按钮 */}
                 <Button 
-                  onClick={fetchDbStats}
-                  plain
+                  onClick={handleResetBoxUsage}
+                  tone="critical"
                 >
-                  Refresh Stats
+                  Reset Box Usage
                 </Button>
               </div>
 

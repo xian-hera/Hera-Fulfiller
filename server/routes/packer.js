@@ -264,6 +264,7 @@ router.patch('/items/:id/packer-status', async (req, res) => {
   }
 });
 
+// 🆕 Complete 订单时同时减少 box quantity
 router.post('/orders/:shopifyOrderId/complete', async (req, res) => {
   try {
     const { shopifyOrderId } = req.params;
@@ -280,14 +281,15 @@ router.post('/orders/:shopifyOrderId/complete', async (req, res) => {
       WHERE shopify_order_id = ?
     `).run(boxType, weight || null, shopifyOrderId);
 
-    // 🆕 更新 box type 使用统计
+    // 🆕 更新 box type 使用统计，同时减少剩余数量
     await db.prepare(`
       UPDATE box_types 
-      SET usage_count = usage_count + 1 
+      SET usage_count = usage_count + 1,
+          quantity = CASE WHEN quantity > 0 THEN quantity - 1 ELSE quantity END
       WHERE code = ?
     `).run(boxType);
 
-    console.log(`✓ Box type ${boxType} usage count updated`);
+    console.log(`✓ Box type ${boxType} usage count updated and quantity decreased`);
 
     res.json({ success: true });
   } catch (error) {

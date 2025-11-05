@@ -392,4 +392,38 @@ router.post('/clear-all-data', async (req, res) => {
   }
 });
 
+// 🆕 Reset box usage statistics
+router.post('/reset-box-usage', async (req, res) => {
+  try {
+    console.log('⚠️  RESETTING BOX USAGE STATISTICS');
+    
+    // 重置所有 box types 的使用统计和剩余数量
+    await db.prepare('UPDATE box_types SET usage_count = 0, quantity = 0').run();
+    console.log('✓ Reset all box usage counts and quantities');
+    
+    // 🆕 更新 box_stats_start_date 设置
+    const now = new Date().toISOString();
+    await db.prepare(`
+      INSERT INTO settings (key, value, updated_at)
+      VALUES ('box_stats_start_date', ?, CURRENT_TIMESTAMP)
+      ON CONFLICT (key) DO UPDATE SET
+        value = EXCLUDED.value,
+        updated_at = CURRENT_TIMESTAMP
+    `).run(now);
+    console.log('✓ Updated box stats start date');
+    
+    res.json({ 
+      success: true, 
+      message: 'Box usage statistics have been reset.',
+      startDate: now
+    });
+  } catch (error) {
+    console.error('Error resetting box usage:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to reset box usage: ' + error.message 
+    });
+  }
+});
+
 module.exports = router;
