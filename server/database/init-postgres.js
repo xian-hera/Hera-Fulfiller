@@ -127,6 +127,7 @@ async function initPostgres() {
       code TEXT UNIQUE NOT NULL,
       dimensions TEXT,
       usage_count INTEGER DEFAULT 0,
+      quantity INTEGER DEFAULT 0,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
@@ -194,6 +195,16 @@ async function initPostgres() {
     console.log('✓ Column usage_count already exists in box_types');
   }
 
+  try {
+    // 🆕 Add quantity to box_types
+    await client.query(`
+      ALTER TABLE box_types ADD COLUMN IF NOT EXISTS quantity INTEGER DEFAULT 0
+    `);
+    console.log('✓ Added quantity column to box_types');
+  } catch (error) {
+    console.log('✓ Column quantity already exists in box_types');
+  }
+
   console.log('Migrations completed!');
 
   // Insert default box types ONLY if table is empty
@@ -216,7 +227,7 @@ async function initPostgres() {
 
     for (const [code, dimensions] of boxTypes) {
       await client.query(
-        'INSERT INTO box_types (code, dimensions, usage_count) VALUES ($1, $2, 0)',
+        'INSERT INTO box_types (code, dimensions, usage_count, quantity) VALUES ($1, $2, 0, 0)',
         [code, dimensions]
       );
     }

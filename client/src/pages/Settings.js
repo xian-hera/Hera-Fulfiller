@@ -68,7 +68,7 @@ const Settings = () => {
       showMessage(response.data.message);
       await fetchCleanupPreview();
       await fetchDbStats();
-      await fetchSettings(); // 🆕 刷新 box types 统计
+      await fetchSettings();
     } catch (error) {
       console.error('Error running cleanup:', error);
       showMessage('Cleanup failed');
@@ -89,9 +89,8 @@ const Settings = () => {
       showMessage(response.data.message);
       setShowClearConfirm(false);
       
-      // 刷新统计数据和 box types
       await fetchDbStats();
-      await fetchSettings(); // 🆕 刷新 box types 统计
+      await fetchSettings();
       setCleanupPreview(null);
     } catch (error) {
       console.error('Error clearing data:', error);
@@ -129,21 +128,26 @@ const Settings = () => {
     try {
       await axios.delete(`/api/settings/box-types/${id}`);
       await fetchSettings();
+      await fetchDbStats(); // 🆕 刷新统计
       showMessage('Box type deleted!');
     } catch (error) {
       showMessage('Error deleting box type');
     }
   };
 
-  const handleBoxUpdate = async (id, code, dimensions) => {
+  // 🆕 保存单个 box type（包括 quantity）
+  const handleBoxSave = async (box) => {
     try {
-      await axios.patch(`/api/settings/box-types/${id}`, {
-        code: code.toUpperCase(),
-        dimensions
+      await axios.patch(`/api/settings/box-types/${box.id}`, {
+        code: box.code.toUpperCase(),
+        dimensions: box.dimensions,
+        quantity: box.quantity
       });
-      showMessage('Box type updated!');
+      await fetchSettings();
+      await fetchDbStats(); // 🆕 刷新统计
+      showMessage('Box type saved!');
     } catch (error) {
-      showMessage(error.response?.data?.error || 'Error updating box type');
+      showMessage(error.response?.data?.error || 'Error saving box type');
     }
   };
 
@@ -230,28 +234,36 @@ const Settings = () => {
                       </div>
 
                       {/* 🆕 Box Type 统计 */}
-                      {sortedBoxTypes.map((box) => (
-                        <div 
-                          key={box.id}
-                          style={{ 
-                            padding: '12px', 
-                            backgroundColor: '#f6f6f7', 
-                            borderRadius: '8px',
-                            minWidth: '90px',
-                            flex: '0 0 auto'
-                          }}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-                            <Text variant="bodySm" fontWeight="medium">{box.code}</Text>
-                            {box.dimensions && (
-                              <Text variant="bodySm" tone="subdued" as="span" style={{ fontSize: '11px' }}>
-                                {box.dimensions}
-                              </Text>
-                            )}
+                      {sortedBoxTypes.map((box) => {
+                        const remaining = (box.quantity || 0) - (box.usage_count || 0);
+                        const remainingDisplay = box.quantity > 0 ? remaining : 'null';
+                        
+                        return (
+                          <div 
+                            key={box.id}
+                            style={{ 
+                              padding: '12px', 
+                              backgroundColor: '#f6f6f7', 
+                              borderRadius: '8px',
+                              minWidth: '90px',
+                              flex: '0 0 auto'
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px', marginBottom: '4px' }}>
+                              <Text variant="bodySm" fontWeight="medium">{box.code}</Text>
+                              {box.dimensions && (
+                                <Text variant="bodySm" tone="subdued" as="span" style={{ fontSize: '11px' }}>
+                                  {box.dimensions}
+                                </Text>
+                              )}
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
+                              <Text variant="headingMd" as="span">{box.usage_count || 0}</Text>
+                              <Text variant="bodySm" tone="subdued" as="span">{remainingDisplay}</Text>
+                            </div>
                           </div>
-                          <Text variant="headingMd" as="p">{box.usage_count || 0}</Text>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                     <div style={{ marginTop: '12px' }}>
                       <Text variant="bodySm" tone="subdued">
@@ -441,48 +453,86 @@ const Settings = () => {
             {boxTypes.length > 0 && (
               <div>
                 <p style={{ fontWeight: 'bold', marginBottom: '12px' }}>Current Box Types</p>
-                {boxTypes.map((box) => (
-                  <div 
-                    key={box.id} 
-                    style={{ 
-                      padding: '16px', 
-                      border: '1px solid #e1e3e5',
-                      borderRadius: '8px',
-                      marginBottom: '12px',
-                      backgroundColor: '#fafbfb'
-                    }}
-                  >
-                    <div style={{ marginBottom: '8px' }}>
-                      <TextField
-                        label="Code"
-                        value={box.code}
-                        onChange={(value) => {
-                          const updated = boxTypes.map(b => 
-                            b.id === box.id ? { ...b, code: value } : b
-                          );
-                          setBoxTypes(updated);
-                        }}
-                        onBlur={() => handleBoxUpdate(box.id, box.code, box.dimensions)}
-                        autoComplete="off"
-                      />
+                {/* 🆕 3列布局 */}
+                <div style={{ 
+                  display: 'grid', 
+                  gridTemplateColumns: 'repeat(3, 1fr)', 
+                  gap: '16px' 
+                }}>
+                  {boxTypes.map((box) => (
+                    <div 
+                      key={box.id} 
+                      style={{ 
+                        padding: '16px', 
+                        border: '1px solid #e1e3e5',
+                        borderRadius: '8px',
+                        backgroundColor: '#fafbfb'
+                      }}
+                    >
+                      {/* Code */}
+                      <div style={{ marginBottom: '12px' }}>
+                        <TextField
+                          label="Code"
+                          value={box.code}
+                          onChange={(value) => {
+                            const updated = boxTypes.map(b => 
+                              b.id === box.id ? { ...b, code: value } : b
+                            );
+                            setBoxTypes(updated);
+                          }}
+                          autoComplete="off"
+                        />
+                      </div>
+                      
+                      {/* Dimensions */}
+                      <div style={{ marginBottom: '12px' }}>
+                        <TextField
+                          label="Dimensions"
+                          value={box.dimensions || ''}
+                          onChange={(value) => {
+                            const updated = boxTypes.map(b => 
+                              b.id === box.id ? { ...b, dimensions: value } : b
+                            );
+                            setBoxTypes(updated);
+                          }}
+                          autoComplete="off"
+                        />
+                      </div>
+                      
+                      {/* 🆕 Quantity */}
+                      <div style={{ marginBottom: '12px' }}>
+                        <TextField
+                          label="Quantity"
+                          type="number"
+                          value={box.quantity?.toString() || '0'}
+                          onChange={(value) => {
+                            const updated = boxTypes.map(b => 
+                              b.id === box.id ? { ...b, quantity: parseInt(value) || 0 } : b
+                            );
+                            setBoxTypes(updated);
+                          }}
+                          autoComplete="off"
+                        />
+                      </div>
+                      
+                      {/* 🆕 Delete & Save 按钮 */}
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <Button 
+                          onClick={() => handleDeleteBox(box.id)}
+                          tone="critical"
+                        >
+                          Delete
+                        </Button>
+                        <Button 
+                          onClick={() => handleBoxSave(box)}
+                          variant="primary"
+                        >
+                          Save
+                        </Button>
+                      </div>
                     </div>
-                    <div style={{ marginBottom: '8px' }}>
-                      <TextField
-                        label="Dimensions"
-                        value={box.dimensions}
-                        onChange={(value) => {
-                          const updated = boxTypes.map(b => 
-                            b.id === box.id ? { ...b, dimensions: value } : b
-                          );
-                          setBoxTypes(updated);
-                        }}
-                        onBlur={() => handleBoxUpdate(box.id, box.code, box.dimensions)}
-                        autoComplete="off"
-                      />
-                    </div>
-                    <Button onClick={() => handleDeleteBox(box.id)}>Delete</Button>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             )}
           </Card>

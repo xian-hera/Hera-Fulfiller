@@ -207,6 +207,7 @@ router.post('/upload-csv', upload.single('file'), async (req, res) => {
     res.status(500).json({ error: 'Failed to upload CSV: ' + error.message });
   }
 });
+
 // Get box types
 router.get('/box-types', async (req, res) => {
   try {
@@ -228,8 +229,8 @@ router.post('/box-types', async (req, res) => {
     }
 
     await db.prepare(`
-      INSERT INTO box_types (code, dimensions, usage_count)
-      VALUES (?, ?, 0)
+      INSERT INTO box_types (code, dimensions, usage_count, quantity)
+      VALUES (?, ?, 0, 0)
     `).run(code.toUpperCase().trim(), dimensions || '');
 
     res.json({ success: true });
@@ -246,17 +247,31 @@ router.post('/box-types', async (req, res) => {
 router.patch('/box-types/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { code, dimensions } = req.body;
+    const { code, dimensions, quantity } = req.body;
 
     if (!code || code.trim() === '') {
       return res.status(400).json({ error: 'Box code is required' });
     }
 
-    await db.prepare(`
-      UPDATE box_types
-      SET code = ?, dimensions = ?
-      WHERE id = ?
-    `).run(code.toUpperCase().trim(), dimensions || '', id);
+    // 🆕 quantity 可以为 undefined（不更新），但如果提供了必须是有效数字
+    if (quantity !== undefined && (isNaN(quantity) || quantity < 0)) {
+      return res.status(400).json({ error: 'Quantity must be a valid non-negative number' });
+    }
+
+    // 🆕 如果提供了 quantity，也更新它
+    if (quantity !== undefined) {
+      await db.prepare(`
+        UPDATE box_types
+        SET code = ?, dimensions = ?, quantity = ?
+        WHERE id = ?
+      `).run(code.toUpperCase().trim(), dimensions || '', quantity, id);
+    } else {
+      await db.prepare(`
+        UPDATE box_types
+        SET code = ?, dimensions = ?
+        WHERE id = ?
+      `).run(code.toUpperCase().trim(), dimensions || '', id);
+    }
 
     res.json({ success: true });
   } catch (error) {

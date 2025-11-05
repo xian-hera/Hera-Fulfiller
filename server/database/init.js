@@ -122,6 +122,7 @@ const initDatabase = async () => {
           code TEXT UNIQUE NOT NULL,
           dimensions TEXT,
           usage_count INTEGER DEFAULT 0,
+          quantity INTEGER DEFAULT 0,
           created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
       `);
@@ -135,6 +136,15 @@ const initDatabase = async () => {
         console.log('✓ Column usage_count already exists in box_types');
       }
 
+      // 🆕 添加 quantity 列（如果表已存在但没有该列）
+      try {
+        db.db.exec(`ALTER TABLE box_types ADD COLUMN quantity INTEGER DEFAULT 0`);
+        console.log('✓ Added quantity column to box_types');
+      } catch (error) {
+        // 列已存在，忽略错误
+        console.log('✓ Column quantity already exists in box_types');
+      }
+
       // Insert default box types ONLY if table is empty
       const boxTypeCount = db.db.prepare('SELECT COUNT(*) as count FROM box_types').get();
 
@@ -142,7 +152,7 @@ const initDatabase = async () => {
         console.log('Box types table is empty, inserting default values...');
         
         const insertBoxType = db.db.prepare(`
-          INSERT INTO box_types (code, dimensions, usage_count) VALUES (?, ?, 0)
+          INSERT INTO box_types (code, dimensions, usage_count, quantity) VALUES (?, ?, 0, 0)
         `);
 
         insertBoxType.run('A', '5x20x5');
