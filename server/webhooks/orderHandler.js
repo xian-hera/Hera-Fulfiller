@@ -69,7 +69,7 @@ class OrderWebhookHandler {
         let urlHandle = '';
         let productType = item.product_type || '';
         let wigNumber = '';
-        let customName = ''; // 🆕 新增：存储 custom_name
+        let customName = '';
         
         let weight = item.grams || 0;
         let weightUnit = 'g';
@@ -84,7 +84,7 @@ class OrderWebhookHandler {
               console.log(`Variant ${item.variant_id}: weight=${weight}${weightUnit}`);
             }
             
-            // 🆕 获取 custom.name metafield（variant 层级）
+            // 获取 custom.name metafield（variant 层级）
             try {
               customName = await shopifyClient.getVariantMetafield(item.variant_id, 'custom', 'name');
               if (customName) {
@@ -149,7 +149,7 @@ class OrderWebhookHandler {
           urlHandle,
           productType,
           wigNumber,
-          customName, // 🆕 添加 custom_name
+          customName,
           hasWeightWarning,
           item.variant_title || '',
           'picking',
@@ -169,14 +169,14 @@ class OrderWebhookHandler {
   static async handleOrderUpdated(orderData) {
     try {
       if (orderData.cancelled_at) {
-      console.log(`Order ${orderData.name} is cancelled, deleting from APP`);
-      return await this.handleOrderCancelled(orderData);
-    }
-    
-    if (orderData.fulfillment_status === 'fulfilled') {
-      console.log(`Order ${orderData.name} is fulfilled, deleting from APP`);
-      return await this.handleOrderFulfilled(orderData);
-    }
+        console.log(`Order ${orderData.name} is cancelled, deleting from APP`);
+        return await this.handleOrderCancelled(orderData);
+      }
+      
+      if (orderData.fulfillment_status === 'fulfilled') {
+        console.log(`Order ${orderData.name} is fulfilled, deleting from APP`);
+        return await this.handleOrderFulfilled(orderData);
+      }
       
       const existingOrder = await db.prepare('SELECT * FROM orders WHERE shopify_order_id = ?')
         .get(orderData.id.toString());
@@ -276,7 +276,7 @@ class OrderWebhookHandler {
         let urlHandle = '';
         let productType = item.product_type || '';
         let wigNumber = '';
-        let customName = ''; // 🆕 新增
+        let customName = '';
         
         let weight = item.grams || 0;
         let weightUnit = 'g';
@@ -290,7 +290,7 @@ class OrderWebhookHandler {
               weightUnit = variant.weight_unit || 'g';
             }
             
-            // 🆕 获取 custom.name metafield（variant 层级）
+            // 获取 custom.name metafield（variant 层级）
             try {
               customName = await shopifyClient.getVariantMetafield(item.variant_id, 'custom', 'name');
               if (customName) {
@@ -354,7 +354,7 @@ class OrderWebhookHandler {
             urlHandle,
             productType,
             wigNumber,
-            customName, // 🆕 添加 custom_name
+            customName,
             hasWeightWarning,
             item.variant_title || '',
             'picking',
@@ -389,7 +389,7 @@ class OrderWebhookHandler {
             urlHandle,
             productType,
             wigNumber,
-            customName, // 🆕 添加 custom_name
+            customName,
             hasWeightWarning,
             item.variant_title || '',
             'picking',
@@ -408,6 +408,7 @@ class OrderWebhookHandler {
               console.log(`    Deleting line_item ${existingItem.id} (qty: ${existingItem.quantity})`);
               await db.prepare('DELETE FROM line_items WHERE id = ?').run(existingItem.id);
               
+              // 🆕 只删除 transferring 状态的 transfer_items
               await db.prepare(`
                 DELETE FROM transfer_items 
                 WHERE line_item_id = ? AND status = 'transferring'
@@ -440,6 +441,7 @@ class OrderWebhookHandler {
             
             await db.prepare('DELETE FROM line_items WHERE id = ?').run(item.id);
             
+            // 🆕 只删除 transferring 状态的 transfer_items
             await db.prepare(`
               DELETE FROM transfer_items 
               WHERE line_item_id = ? AND status = 'transferring'
@@ -504,10 +506,13 @@ class OrderWebhookHandler {
           if (dbItem.quantity <= remainingToDelete) {
             console.log(`    ✗ Deleting item ${dbItem.id} (qty: ${dbItem.quantity})`);
             await db.prepare('DELETE FROM line_items WHERE id = ?').run(dbItem.id);
+            
+            // 🆕 只删除 transferring 状态的 transfer_items
             await db.prepare(`
               DELETE FROM transfer_items 
-              WHERE line_item_id = ?
+              WHERE line_item_id = ? AND status = 'transferring'
             `).run(dbItem.id);
+            
             remainingToDelete -= dbItem.quantity;
           } else {
             const newQty = dbItem.quantity - remainingToDelete;
@@ -583,14 +588,14 @@ class OrderWebhookHandler {
     }
   }
 
-  // Handle order cancelled (🆕 也会删除订单)
+  // Handle order cancelled (🆕 不删除 transfer_items)
   static async handleOrderCancelled(orderData) {
     try {
       const shopifyOrderId = orderData.id.toString();
       
-      // 删除 transfer_items
-      await db.prepare('DELETE FROM transfer_items WHERE shopify_order_id = ?')
-        .run(shopifyOrderId);
+      // 🆕 不删除 transfer_items！用户需要手动清理
+      // await db.prepare('DELETE FROM transfer_items WHERE shopify_order_id = ?')
+      //   .run(shopifyOrderId);
       
       // 删除 line_items
       await db.prepare('DELETE FROM line_items WHERE shopify_order_id = ?')
@@ -600,7 +605,7 @@ class OrderWebhookHandler {
       await db.prepare('DELETE FROM orders WHERE shopify_order_id = ?')
         .run(shopifyOrderId);
       
-      console.log(`Order ${orderData.name} cancelled - removed completely from APP`);
+      console.log(`Order ${orderData.name} cancelled - order and line_items removed, transfer_items preserved`);
       return { success: true, order_number: orderData.name };
     } catch (error) {
       console.error('Error handling order cancelled:', error);
@@ -608,14 +613,14 @@ class OrderWebhookHandler {
     }
   }
 
-  // Handle order fulfilled (🆕 也会删除订单)
+  // Handle order fulfilled (🆕 修改：保留 transfer_items)
   static async handleOrderFulfilled(orderData) {
     try {
       const shopifyOrderId = orderData.id.toString();
       
-      // 删除 transfer_items
-      await db.prepare('DELETE FROM transfer_items WHERE shopify_order_id = ?')
-        .run(shopifyOrderId);
+      // 🆕 不删除 transfer_items！用户需要手动清理
+      // await db.prepare('DELETE FROM transfer_items WHERE shopify_order_id = ?')
+      //   .run(shopifyOrderId);
       
       // 删除 line_items
       await db.prepare('DELETE FROM line_items WHERE shopify_order_id = ?')
@@ -625,7 +630,7 @@ class OrderWebhookHandler {
       await db.prepare('DELETE FROM orders WHERE shopify_order_id = ?')
         .run(shopifyOrderId);
 
-      console.log(`Order ${orderData.name} fulfilled - removed completely from APP`);
+      console.log(`Order ${orderData.name} fulfilled - order and line_items removed, transfer_items preserved`);
       return { success: true, order_number: orderData.name };
     } catch (error) {
       console.error('Error handling order fulfilled:', error);
