@@ -205,6 +205,16 @@ async function initPostgres() {
     console.log('✓ Column quantity already exists in box_types');
   }
 
+  try {
+    // 🆕 Add out_of_stock to transfer_items
+    await client.query(`
+      ALTER TABLE transfer_items ADD COLUMN IF NOT EXISTS out_of_stock INTEGER DEFAULT 0
+    `);
+    console.log('✓ Added out_of_stock column to transfer_items');
+  } catch (error) {
+    console.log('✓ Column out_of_stock already exists in transfer_items');
+  }
+
   console.log('Migrations completed!');
 
   // Insert default box types ONLY if table is empty
