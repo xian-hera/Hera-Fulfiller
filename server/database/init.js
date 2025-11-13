@@ -89,11 +89,21 @@ const initDatabase = async () => {
           transfer_from TEXT,
           estimate_month INTEGER,
           estimate_day INTEGER,
+          transfer_date TEXT,
+          out_of_stock INTEGER DEFAULT 0,
           status TEXT DEFAULT 'transferring',
           created_at TEXT DEFAULT CURRENT_TIMESTAMP,
           updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
       `);
+
+      // 🆕 添加 out_of_stock 列（如果不存在）
+      try {
+        db.db.exec(`ALTER TABLE transfer_items ADD COLUMN out_of_stock INTEGER DEFAULT 0`);
+        console.log('✓ Added out_of_stock column to transfer_items');
+      } catch (error) {
+        console.log('✓ Column out_of_stock already exists in transfer_items');
+      }
 
       // Settings table
       db.db.exec(`

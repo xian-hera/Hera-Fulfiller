@@ -11,7 +11,8 @@ import {
   Modal,
   Banner,
   BlockStack,
-  TextField
+  TextField,
+  Badge
 } from '@shopify/polaris';
 import { ImageIcon, ChevronLeftIcon, ChevronRightIcon } from '@shopify/polaris-icons';
 import NumericKeypad from '../components/NumericKeypad';
@@ -425,6 +426,7 @@ const OrderDetail = () => {
   const renderLineItem = (item) => {
     const status = getItemStatus(item);
     const hasWarning = item.has_weight_warning === 1;
+    const isOutOfStock = item.outOfStock === true; // 🆕 out of stock 标记
     
     const media = item.image_url ? (
       <div onClick={(e) => handleImageClick(e, item)} style={{ cursor: 'pointer' }}>
@@ -510,8 +512,13 @@ const OrderDetail = () => {
           gap: '12px',
           marginLeft: 'auto'
         }}>
+          {/* 🆕 Out of Stock Badge */}
+          {isOutOfStock && (
+            <Badge tone="critical">Out of Stock</Badge>
+          )}
+          
           {/* Transfer info */}
-          {item.transferInfo && (
+          {item.transferInfo && !isOutOfStock && (
             <Text variant="bodySm" fontWeight="bold" tone="info">
               Transfer: {item.transferInfo.quantity} from {item.transferInfo.transferFrom}, Est: {formatDate(item.transferInfo.estimateMonth, item.transferInfo.estimateDay)}
             </Text>

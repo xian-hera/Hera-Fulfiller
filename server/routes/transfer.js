@@ -115,7 +115,7 @@ router.get('/items/:id/copy-text', async (req, res) => {
 router.patch('/items/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, transfer_from, estimate_month, estimate_day } = req.body;
+    const { status, transfer_from, estimate_month, estimate_day, out_of_stock } = req.body;
 
     const updates = [];
     const values = [];
@@ -135,6 +135,12 @@ router.patch('/items/:id', async (req, res) => {
     if (estimate_day !== undefined) {
       updates.push('estimate_day = ?');
       values.push(estimate_day);
+    }
+
+    // 🆕 处理 out_of_stock 状态
+    if (out_of_stock !== undefined) {
+      updates.push('out_of_stock = ?');
+      values.push(out_of_stock ? 1 : 0);
     }
 
     // 🆕 如果状态变为 waiting，记录 transfer_date（格式：MM/DD）

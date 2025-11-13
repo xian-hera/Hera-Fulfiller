@@ -50,6 +50,9 @@ router.get('/orders', async (req, res) => {
       // 使用永久标记检查 weight warning
       const hasWeightWarning = lineItems.some(item => item.has_weight_warning === 1);
 
+      // 🆕 检查是否有 out_of_stock items
+      const hasOutOfStock = transferItems.some(ti => ti.out_of_stock === 1);
+
       const orderStatus = calculateOrderStatus(order, lineItems, transferItems);
 
       let transferInfo = null;
@@ -83,6 +86,7 @@ router.get('/orders', async (req, res) => {
         ...order,
         lineItems,
         hasWeightWarning,
+        hasOutOfStock, // 🆕 添加 out of stock 标记
         orderStatus,
         hasTransferring: transferringItems.length > 0,
         hasWaiting: waitingItems.length > 0,
@@ -125,6 +129,7 @@ router.get('/orders/:shopifyOrderId', async (req, res) => {
       return {
         ...item,
         transferStatus: transferItem?.status || null,
+        outOfStock: transferItem?.out_of_stock === 1, // 🆕 添加 out of stock 状态
         transferInfo: transferItem ? {
           transferFrom: transferItem.transfer_from,
           estimateMonth: transferItem.estimate_month,
@@ -225,13 +230,13 @@ router.delete('/orders/:shopifyOrderId', async (req, res) => {
 
     console.log(`Deleting order ${shopifyOrderId} from APP`);
 
-    // 1. 删除 transfer_items
-    await db.prepare('DELETE FROM transfer_items WHERE shopify_order_id = ?').run(shopifyOrderId);
+    // ⚠️ 不删除 transfer_items！
+    // await db.prepare('DELETE FROM transfer_items WHERE shopify_order_id = ?').run(shopifyOrderId);
     
-    // 2. 删除 line_items
+    // 删除 line_items
     await db.prepare('DELETE FROM line_items WHERE shopify_order_id = ?').run(shopifyOrderId);
     
-    // 3. 删除 order
+    // 删除 order
     await db.prepare('DELETE FROM orders WHERE shopify_order_id = ?').run(shopifyOrderId);
 
     console.log(`✓ Order ${shopifyOrderId} deleted successfully`);

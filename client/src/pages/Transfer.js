@@ -27,11 +27,11 @@ const Transfer = () => {
   const [clearMode, setClearMode] = useState(false);
   const [selectedItems, setSelectedItems] = useState([]);
   const [statusFilter, setStatusFilter] = useState(['transferring', 'waiting', 'received']);
-  const [previousStatusFilter, setPreviousStatusFilter] = useState(['transferring', 'waiting', 'received']); // 🆕 保存之前的状态
-  const [receivingEnabled, setReceivingEnabled] = useState(false); // 🆕 Receiving 筛选开关
-  const [receivingFromFilter, setReceivingFromFilter] = useState([]); // 🆕 transfer_from 筛选
-  const [receivingDateFilter, setReceivingDateFilter] = useState([]); // 🆕 transfer_date 筛选
-  const [receivingOptions, setReceivingOptions] = useState({ transferFroms: [], transferDates: [] }); // 🆕 筛选选项
+  const [previousStatusFilter, setPreviousStatusFilter] = useState(['transferring', 'waiting', 'received']);
+  const [receivingEnabled, setReceivingEnabled] = useState(false);
+  const [receivingFromFilter, setReceivingFromFilter] = useState([]);
+  const [receivingDateFilter, setReceivingDateFilter] = useState([]);
+  const [receivingOptions, setReceivingOptions] = useState({ transferFroms: [], transferDates: [] });
   const [transferModal, setTransferModal] = useState(null);
   const [transferData, setTransferData] = useState({
     transferQuantity: '',
@@ -42,7 +42,6 @@ const Transfer = () => {
   const [toastActive, setToastActive] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
 
-  // 🆕 计算每个状态的实时数量（按 quantity 累加）
   const getStatusCounts = useCallback(() => {
     return {
       transferring: items
@@ -59,19 +58,15 @@ const Transfer = () => {
 
   const applyFilters = useCallback(() => {
     let filtered = items.filter(item => {
-      // 状态筛选
       if (item.status === 'transferring' && !statusFilter.includes('transferring')) return false;
       if (item.status === 'waiting' && !statusFilter.includes('waiting')) return false;
       if ((item.status === 'received' || item.status === 'found') && !statusFilter.includes('received')) return false;
       
-      // 🆕 Receiving 筛选（只在启用时生效）
       if (receivingEnabled) {
-        // transfer_from 筛选
         if (receivingFromFilter.length > 0 && !receivingFromFilter.includes(item.transfer_from)) {
           return false;
         }
         
-        // transfer_date 筛选
         if (receivingDateFilter.length > 0 && !receivingDateFilter.includes(item.transfer_date)) {
           return false;
         }
@@ -80,17 +75,14 @@ const Transfer = () => {
       return true;
     });
     
-    // 🆕 如果 Receiving 启用，按 transfer_from 升序 → transfer_date 升序排序
     if (receivingEnabled) {
       filtered = filtered.sort((a, b) => {
-        // 先按 transfer_from 排序
         const fromA = a.transfer_from || '';
         const fromB = b.transfer_from || '';
         if (fromA !== fromB) {
           return fromA.localeCompare(fromB);
         }
         
-        // 相同 transfer_from，按 transfer_date 排序（早的在前）
         const dateA = a.transfer_date || '';
         const dateB = b.transfer_date || '';
         return dateA.localeCompare(dateB);
@@ -102,7 +94,7 @@ const Transfer = () => {
 
   useEffect(() => {
     fetchItems();
-    fetchReceivingOptions(); // 🆕 获取筛选选项
+    fetchReceivingOptions();
   }, []);
 
   useEffect(() => {
@@ -118,7 +110,6 @@ const Transfer = () => {
     }
   };
 
-  // 🆕 获取 Receiving 筛选选项
   const fetchReceivingOptions = async () => {
     try {
       const response = await axios.get('/api/transfer/receiving-options');
@@ -128,14 +119,11 @@ const Transfer = () => {
     }
   };
 
-  // 🆕 Receiving 开关切换
   const handleReceivingToggle = (checked) => {
     if (checked) {
-      // 开启：保存当前状态，设置为 waiting + received
       setPreviousStatusFilter(statusFilter);
       setStatusFilter(['waiting', 'received']);
     } else {
-      // 关闭：恢复之前的状态
       setStatusFilter(previousStatusFilter);
       setReceivingFromFilter([]);
       setReceivingDateFilter([]);
@@ -212,7 +200,6 @@ const Transfer = () => {
     });
   };
 
-  // 🆕 点击 Waiting 标签打开编辑 modal（预填充数据）
   const handleWaitingBadgeClick = (item) => {
     const currentDate = new Date();
     setTransferModal(item);
@@ -223,7 +210,6 @@ const Transfer = () => {
     });
   };
 
-  // 🆕 点击 Received 标签撤销状态
   const handleReceivedUndo = async (item) => {
     try {
       await axios.patch(`/api/transfer/items/${item.id}`, { status: 'transferring' });
@@ -231,6 +217,30 @@ const Transfer = () => {
       showToast('Status changed to Transferring');
     } catch (error) {
       console.error('Error undoing received status:', error);
+      showToast('Error updating status');
+    }
+  };
+
+  // 🆕 设置 Out of Stock
+  const handleOutClick = async (item) => {
+    try {
+      await axios.patch(`/api/transfer/items/${item.id}`, { out_of_stock: 1 });
+      setItems(items.map(i => i.id === item.id ? { ...i, out_of_stock: 1 } : i));
+      showToast('Marked as Out of Stock');
+    } catch (error) {
+      console.error('Error setting out of stock:', error);
+      showToast('Error updating status');
+    }
+  };
+
+  // 🆕 撤销 Out of Stock
+  const handleOutUndo = async (item) => {
+    try {
+      await axios.patch(`/api/transfer/items/${item.id}`, { out_of_stock: 0, status: 'transferring' });
+      setItems(items.map(i => i.id === item.id ? { ...i, out_of_stock: 0, status: 'transferring' } : i));
+      showToast('Out of Stock status removed');
+    } catch (error) {
+      console.error('Error removing out of stock:', error);
       showToast('Error updating status');
     }
   };
@@ -268,7 +278,7 @@ const Transfer = () => {
         });
       }
       await fetchItems();
-      await fetchReceivingOptions(); // 🆕 刷新筛选选项
+      await fetchReceivingOptions();
       setTransferModal(null);
     } catch (error) {
       console.error('Error updating transfer:', error);
@@ -286,9 +296,15 @@ const Transfer = () => {
   };
 
   const getItemBadge = (status, item, onBadgeClick) => {
+    // 🆕 Out of Stock 优先显示
+    if (item.out_of_stock === 1) {
+      return (
+        <Badge tone="critical">Out of Stock</Badge>
+      );
+    }
+
     switch (status) {
       case 'waiting':
-        // Waiting 标签可点击编辑
         return (
           <span 
             onClick={(e) => {
@@ -302,7 +318,6 @@ const Transfer = () => {
         );
       case 'received':
       case 'found':
-        // 🆕 Received 标签可点击撤销
         return (
           <span 
             onClick={(e) => {
@@ -319,13 +334,11 @@ const Transfer = () => {
     }
   };
 
-  // 格式化 SKU：每4位加一个空格
   const formatSKU = (sku) => {
     if (!sku) return '';
     return sku.match(/.{1,4}/g)?.join(' ') || sku;
   };
 
-  // 格式化日期：补零
   const formatDate = (month, day) => {
     const m = month.toString().padStart(2, '0');
     const d = day.toString().padStart(2, '0');
@@ -333,7 +346,7 @@ const Transfer = () => {
   };
 
   const renderItem = (item) => {
-    const { id, quantity, image_url, order_number, sku, brand, title, size, status, transfer_from, estimate_month, estimate_day, variant_title } = item;
+    const { id, quantity, image_url, order_number, sku, brand, title, size, status, transfer_from, estimate_month, estimate_day, variant_title, out_of_stock } = item;
     
     const media = image_url ? (
       <div onClick={() => handleImageClick(item)} style={{ cursor: 'pointer' }}>
@@ -350,12 +363,10 @@ const Transfer = () => {
         display: 'flex',
         alignItems: 'center'
       }}>
-        {/* Thumbnail */}
         <div style={{ marginRight: '16px' }}>
           {media}
         </div>
 
-        {/* 数量（38px）*/}
         <div style={{ 
           fontSize: '38px', 
           lineHeight: 1,
@@ -366,10 +377,8 @@ const Transfer = () => {
           {quantity}
         </div>
 
-        {/* 产品信息 */}
         <div style={{ flex: 1, maxWidth: 'calc(100% - 350px)' }}>
           <BlockStack gap="1">
-            {/* Brand + Title（加粗，自动换行）*/}
             <div style={{ 
               wordWrap: 'break-word', 
               overflowWrap: 'break-word',
@@ -380,14 +389,12 @@ const Transfer = () => {
               </Text>
             </div>
             
-            {/* Variant Title */}
             {variant_title && (
               <Text variant="bodyMd">
                 {variant_title}
               </Text>
             )}
             
-            {/* SKU（每4位一个空格，可点击复制）*/}
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <Text variant="bodySm">
                 {formatSKU(sku)}
@@ -407,14 +414,12 @@ const Transfer = () => {
               </button>
             </div>
             
-            {/* Order Number（灰色，添加#）*/}
             <Text variant="bodySm" tone="subdued">
               #{order_number}
             </Text>
           </BlockStack>
         </div>
 
-        {/* 右侧按钮区域（垂直居中，右对齐）*/}
         <div style={{ 
           display: 'flex',
           flexDirection: 'column',
@@ -431,10 +436,8 @@ const Transfer = () => {
             />
           ) : (
             <>
-              {/* Transfer info 和状态标签同行 */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                {/* 🆕 waiting 和 received/found 都显示 transfer info */}
-                {(status === 'waiting' || status === 'received' || status === 'found') && transfer_from && (
+                {(status === 'waiting' || status === 'received' || status === 'found') && transfer_from && out_of_stock !== 1 && (
                   <Text variant="bodySm" fontWeight="bold" as="span" tone="info">
                     {transfer_from}, {formatDate(estimate_month, estimate_day)}
                   </Text>
@@ -442,29 +445,13 @@ const Transfer = () => {
                 {getItemBadge(status, item, handleWaitingBadgeClick)}
               </div>
               
-              {/* 主按钮 */}
-              {status === 'transferring' && (
-                <div style={{ display: 'flex', gap: '12px' }}>
+              {/* 🆕 Out of Stock 状态：只显示 Undo 和 Copy */}
+              {out_of_stock === 1 ? (
+                <>
                   <button
-                    onClick={() => handleBlueClick(item)}
+                    onClick={() => handleOutUndo(item)}
                     style={{
-                      backgroundColor: 'white',
-                      color: '#0080FF',
-                      border: '2px solid #0080FF',
-                      borderRadius: '8px',
-                      padding: '8px 16px',
-                      fontSize: '14px',
-                      cursor: 'pointer',
-                      fontWeight: '500',
-                      minWidth: '80px'
-                    }}
-                  >
-                    Transfer
-                  </button>
-                  <button
-                    onClick={() => handleGreenClick(item)}
-                    style={{
-                      backgroundColor: '#00A047',
+                      backgroundColor: '#0080FF',
                       color: 'white',
                       border: 'none',
                       borderRadius: '8px',
@@ -472,50 +459,140 @@ const Transfer = () => {
                       fontSize: '14px',
                       cursor: 'pointer',
                       fontWeight: '500',
-                      minWidth: '80px'
+                      minWidth: '100px'
                     }}
                   >
-                    Found
+                    Undo
                   </button>
-                </div>
+                  <button
+                    onClick={() => handleCopy(id)}
+                    style={{
+                      backgroundColor: 'white',
+                      color: '#202223',
+                      border: '1px solid #c9cccf',
+                      borderRadius: '6px',
+                      padding: '4px 12px',
+                      fontSize: '13px',
+                      cursor: 'pointer',
+                      fontWeight: '500',
+                      minWidth: '60px'
+                    }}
+                  >
+                    Copy
+                  </button>
+                </>
+              ) : (
+                <>
+                  {status === 'transferring' && (
+                    <div style={{ display: 'flex', gap: '12px' }}>
+                      {/* 🆕 OUT 按钮 */}
+                      <button
+                        onClick={() => handleOutClick(item)}
+                        style={{
+                          backgroundColor: '#D72C0D',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '8px',
+                          padding: '8px 16px',
+                          fontSize: '14px',
+                          cursor: 'pointer',
+                          fontWeight: '500',
+                          minWidth: '80px'
+                        }}
+                      >
+                        OUT
+                      </button>
+                      <button
+                        onClick={() => handleBlueClick(item)}
+                        style={{
+                          backgroundColor: 'white',
+                          color: '#0080FF',
+                          border: '2px solid #0080FF',
+                          borderRadius: '8px',
+                          padding: '8px 16px',
+                          fontSize: '14px',
+                          cursor: 'pointer',
+                          fontWeight: '500',
+                          minWidth: '80px'
+                        }}
+                      >
+                        Transfer
+                      </button>
+                      <button
+                        onClick={() => handleGreenClick(item)}
+                        style={{
+                          backgroundColor: '#00A047',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '8px',
+                          padding: '8px 16px',
+                          fontSize: '14px',
+                          cursor: 'pointer',
+                          fontWeight: '500',
+                          minWidth: '80px'
+                        }}
+                      >
+                        Found
+                      </button>
+                    </div>
+                  )}
+                  
+                  {status === 'waiting' && (
+                    <div style={{ display: 'flex', gap: '12px' }}>
+                      {/* 🆕 OUT 按钮 */}
+                      <button
+                        onClick={() => handleOutClick(item)}
+                        style={{
+                          backgroundColor: '#D72C0D',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '8px',
+                          padding: '8px 16px',
+                          fontSize: '14px',
+                          cursor: 'pointer',
+                          fontWeight: '500',
+                          minWidth: '80px'
+                        }}
+                      >
+                        OUT
+                      </button>
+                      <button
+                        onClick={() => handleGreenClick(item)}
+                        style={{
+                          backgroundColor: '#0080FF',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '8px',
+                          padding: '8px 16px',
+                          fontSize: '14px',
+                          cursor: 'pointer',
+                          fontWeight: '500',
+                          minWidth: '100px'
+                        }}
+                      >
+                        Received
+                      </button>
+                    </div>
+                  )}
+                  
+                  <button
+                    onClick={() => handleCopy(id)}
+                    style={{
+                      backgroundColor: 'white',
+                      color: '#202223',
+                      border: '1px solid #c9cccf',
+                      borderRadius: '6px',
+                      padding: '4px 12px',
+                      fontSize: '13px',
+                      cursor: 'pointer',
+                      fontWeight: '500',
+                      minWidth: '60px'
+                    }}
+                  >
+                    Copy
+                  </button>
+                </>
               )}
-              
-              {status === 'waiting' && (
-                <button
-                  onClick={() => handleGreenClick(item)}
-                  style={{
-                    backgroundColor: '#0080FF',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '8px',
-                    padding: '8px 16px',
-                    fontSize: '14px',
-                    cursor: 'pointer',
-                    fontWeight: '500',
-                    minWidth: '100px'
-                  }}
-                >
-                  Received
-                </button>
-              )}
-              
-              {/* Copy 按钮（最小尺寸，白底黑字）*/}
-              <button
-                onClick={() => handleCopy(id)}
-                style={{
-                  backgroundColor: 'white',
-                  color: '#202223',
-                  border: '1px solid #c9cccf',
-                  borderRadius: '6px',
-                  padding: '4px 12px',
-                  fontSize: '13px',
-                  cursor: 'pointer',
-                  fontWeight: '500',
-                  minWidth: '60px'
-                }}
-              >
-                Copy
-              </button>
             </>
           )}
         </div>
@@ -527,10 +604,7 @@ const Transfer = () => {
     <Toast content={toastMessage} onDismiss={() => setToastActive(false)} />
   ) : null;
 
-  // Get current month for display
   const currentMonth = new Date().getMonth() + 1;
-  
-  // 🆕 获取实时数量
   const statusCounts = getStatusCounts();
 
   return (
@@ -574,7 +648,6 @@ const Transfer = () => {
                     allowMultiple
                   />
                   
-                  {/* 🆕 Receiving 筛选 */}
                   <div style={{ 
                     paddingTop: '12px', 
                     borderTop: '1px solid #e1e3e5'
@@ -635,7 +708,6 @@ const Transfer = () => {
           </Layout.Section>
         </Layout>
 
-        {/* Image Modal */}
         <Modal
           open={selectedImage !== null}
           onClose={() => setSelectedImage(null)}
@@ -662,7 +734,6 @@ const Transfer = () => {
           </Modal.Section>
         </Modal>
 
-        {/* Transfer Modal */}
         <Modal
           open={transferModal !== null}
           onClose={() => setTransferModal(null)}

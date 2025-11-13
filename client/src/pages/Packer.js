@@ -180,9 +180,10 @@ const Packer = () => {
       box_type, 
       weight, 
       hasWeightWarning,
+      hasOutOfStock, // 🆕 out of stock 标记
       transferInfo,
       is_edited,
-      packer_note // 🆕 note 字段
+      packer_note
     } = order;
 
     return (
@@ -198,7 +199,6 @@ const Packer = () => {
                 <Text variant="bodyMd" as="h3" fontWeight="semibold">
                   {name}
                 </Text>
-                {/* 🆕 显示 note（小字，灰色）*/}
                 {packer_note && (
                   <Text variant="bodySm" tone="subdued">
                     {packer_note}
@@ -236,6 +236,11 @@ const Packer = () => {
               <Text variant="bodySm" fontWeight="bold" tone="info">
                 {transferInfo.transferFroms.join(', ')}, {formatDate(transferInfo.estimateMonth, transferInfo.estimateDay)}
               </Text>
+            )}
+            
+            {/* 🆕 Out of Stock 标记 */}
+            {hasOutOfStock && (
+              <Badge tone="critical">Out of Stock</Badge>
             )}
             
             {is_edited && (
