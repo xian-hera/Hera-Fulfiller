@@ -184,7 +184,7 @@ const Transfer = () => {
     const newStatus = item.status === 'transferring' ? 'found' : 'received';
     try {
       await axios.patch(`/api/transfer/items/${item.id}`, { status: newStatus });
-      setItems(items.map(i => i.id === item.id ? { ...i, status: newStatus } : i));
+      await fetchItems();
     } catch (error) {
       console.error('Error updating status:', error);
     }
@@ -213,7 +213,7 @@ const Transfer = () => {
   const handleReceivedUndo = async (item) => {
     try {
       await axios.patch(`/api/transfer/items/${item.id}`, { status: 'transferring' });
-      setItems(items.map(i => i.id === item.id ? { ...i, status: 'transferring' } : i));
+      await fetchItems();
       showToast('Status changed to Transferring');
     } catch (error) {
       console.error('Error undoing received status:', error);
@@ -224,8 +224,10 @@ const Transfer = () => {
   // 🆕 设置 Out of Stock
   const handleOutClick = async (item) => {
     try {
-      await axios.patch(`/api/transfer/items/${item.id}`, { out_of_stock: 1 });
-      setItems(items.map(i => i.id === item.id ? { ...i, out_of_stock: 1 } : i));
+      await axios.patch(`/api/transfer/items/${item.id}`, { 
+        out_of_stock: 1
+      });
+      await fetchItems();
       showToast('Marked as Out of Stock');
     } catch (error) {
       console.error('Error setting out of stock:', error);
@@ -236,8 +238,11 @@ const Transfer = () => {
   // 🆕 撤销 Out of Stock
   const handleOutUndo = async (item) => {
     try {
-      await axios.patch(`/api/transfer/items/${item.id}`, { out_of_stock: 0, status: 'transferring' });
-      setItems(items.map(i => i.id === item.id ? { ...i, out_of_stock: 0, status: 'transferring' } : i));
+      await axios.patch(`/api/transfer/items/${item.id}`, { 
+        out_of_stock: 0, 
+        status: 'transferring' 
+      });
+      await fetchItems();
       showToast('Out of Stock status removed');
     } catch (error) {
       console.error('Error removing out of stock:', error);
@@ -436,6 +441,7 @@ const Transfer = () => {
             />
           ) : (
             <>
+              {/* 第一行：Transfer info 和状态标签 */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                 {(status === 'waiting' || status === 'received' || status === 'found') && transfer_from && out_of_stock !== 1 && (
                   <Text variant="bodySm" fontWeight="bold" as="span" tone="info">
@@ -445,63 +451,11 @@ const Transfer = () => {
                 {getItemBadge(status, item, handleWaitingBadgeClick)}
               </div>
               
-              {/* 🆕 Out of Stock 状态：只显示 Undo 和 Copy */}
-              {out_of_stock === 1 ? (
-                <>
-                  <button
-                    onClick={() => handleOutUndo(item)}
-                    style={{
-                      backgroundColor: '#0080FF',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '8px',
-                      padding: '8px 16px',
-                      fontSize: '14px',
-                      cursor: 'pointer',
-                      fontWeight: '500',
-                      minWidth: '100px'
-                    }}
-                  >
-                    Undo
-                  </button>
-                  <button
-                    onClick={() => handleCopy(id)}
-                    style={{
-                      backgroundColor: 'white',
-                      color: '#202223',
-                      border: '1px solid #c9cccf',
-                      borderRadius: '6px',
-                      padding: '4px 12px',
-                      fontSize: '13px',
-                      cursor: 'pointer',
-                      fontWeight: '500',
-                      minWidth: '60px'
-                    }}
-                  >
-                    Copy
-                  </button>
-                </>
-              ) : (
+              {/* 第二行：主按钮（Transfer/Received/Found/Undo）*/}
+              {out_of_stock !== 1 ? (
                 <>
                   {status === 'transferring' && (
                     <div style={{ display: 'flex', gap: '12px' }}>
-                      {/* 🆕 OUT 按钮 */}
-                      <button
-                        onClick={() => handleOutClick(item)}
-                        style={{
-                          backgroundColor: '#D72C0D',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '8px',
-                          padding: '8px 16px',
-                          fontSize: '14px',
-                          cursor: 'pointer',
-                          fontWeight: '500',
-                          minWidth: '80px'
-                        }}
-                      >
-                        OUT
-                      </button>
                       <button
                         onClick={() => handleBlueClick(item)}
                         style={{
@@ -538,49 +492,53 @@ const Transfer = () => {
                   )}
                   
                   {status === 'waiting' && (
-                    <div style={{ display: 'flex', gap: '12px' }}>
-                      {/* 🆕 OUT 按钮 */}
-                      <button
-                        onClick={() => handleOutClick(item)}
-                        style={{
-                          backgroundColor: '#D72C0D',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '8px',
-                          padding: '8px 16px',
-                          fontSize: '14px',
-                          cursor: 'pointer',
-                          fontWeight: '500',
-                          minWidth: '80px'
-                        }}
-                      >
-                        OUT
-                      </button>
-                      <button
-                        onClick={() => handleGreenClick(item)}
-                        style={{
-                          backgroundColor: '#0080FF',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '8px',
-                          padding: '8px 16px',
-                          fontSize: '14px',
-                          cursor: 'pointer',
-                          fontWeight: '500',
-                          minWidth: '100px'
-                        }}
-                      >
-                        Received
-                      </button>
-                    </div>
+                    <button
+                      onClick={() => handleGreenClick(item)}
+                      style={{
+                        backgroundColor: '#0080FF',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '8px',
+                        padding: '8px 16px',
+                        fontSize: '14px',
+                        cursor: 'pointer',
+                        fontWeight: '500',
+                        minWidth: '100px'
+                      }}
+                    >
+                      Received
+                    </button>
                   )}
-                  
+                </>
+              ) : (
+                <button
+                  onClick={() => handleOutUndo(item)}
+                  style={{
+                    backgroundColor: '#0080FF',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    padding: '8px 16px',
+                    fontSize: '14px',
+                    cursor: 'pointer',
+                    fontWeight: '500',
+                    minWidth: '100px'
+                  }}
+                >
+                  Undo
+                </button>
+              )}
+              
+              {/* 🆕 第三行：OUT + Copy 按钮（小按钮，同一行）*/}
+              <div style={{ display: 'flex', gap: '8px' }}>
+                {/* OUT 按钮：只在非 out_of_stock 状态且是 transferring/waiting 时显示 */}
+                {out_of_stock !== 1 && (status === 'transferring' || status === 'waiting') && (
                   <button
-                    onClick={() => handleCopy(id)}
+                    onClick={() => handleOutClick(item)}
                     style={{
                       backgroundColor: 'white',
-                      color: '#202223',
-                      border: '1px solid #c9cccf',
+                      color: '#D72C0D',
+                      border: '1px solid #D72C0D',
                       borderRadius: '6px',
                       padding: '4px 12px',
                       fontSize: '13px',
@@ -589,10 +547,28 @@ const Transfer = () => {
                       minWidth: '60px'
                     }}
                   >
-                    Copy
+                    OUT
                   </button>
-                </>
-              )}
+                )}
+                
+                {/* Copy 按钮 */}
+                <button
+                  onClick={() => handleCopy(id)}
+                  style={{
+                    backgroundColor: 'white',
+                    color: '#202223',
+                    border: '1px solid #c9cccf',
+                    borderRadius: '6px',
+                    padding: '4px 12px',
+                    fontSize: '13px',
+                    cursor: 'pointer',
+                    fontWeight: '500',
+                    minWidth: '60px'
+                  }}
+                >
+                  Copy
+                </button>
+              </div>
             </>
           )}
         </div>
