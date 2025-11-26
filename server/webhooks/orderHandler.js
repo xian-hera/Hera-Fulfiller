@@ -408,11 +408,8 @@ class OrderWebhookHandler {
               console.log(`    Deleting line_item ${existingItem.id} (qty: ${existingItem.quantity})`);
               await db.prepare('DELETE FROM line_items WHERE id = ?').run(existingItem.id);
               
-              // 🆕 只删除 transferring 状态的 transfer_items
-              await db.prepare(`
-                DELETE FROM transfer_items 
-                WHERE line_item_id = ? AND status = 'transferring'
-              `).run(existingItem.id);
+              // 🆕 完全不删除 transfer_items，无论任何状态
+              // Transfer items 只能通过 Transfer 页面的 Clear Mode 手动删除
               
               remaining -= existingItem.quantity;
             } else {
@@ -441,11 +438,8 @@ class OrderWebhookHandler {
             
             await db.prepare('DELETE FROM line_items WHERE id = ?').run(item.id);
             
-            // 🆕 只删除 transferring 状态的 transfer_items
-            await db.prepare(`
-              DELETE FROM transfer_items 
-              WHERE line_item_id = ? AND status = 'transferring'
-            `).run(item.id);
+            // 🆕 完全不删除 transfer_items，无论任何状态
+            // Transfer items 只能通过 Transfer 页面的 Clear Mode 手动删除
           }
         }
       }
@@ -507,11 +501,8 @@ class OrderWebhookHandler {
             console.log(`    ✗ Deleting item ${dbItem.id} (qty: ${dbItem.quantity})`);
             await db.prepare('DELETE FROM line_items WHERE id = ?').run(dbItem.id);
             
-            // 🆕 只删除 transferring 状态的 transfer_items
-            await db.prepare(`
-              DELETE FROM transfer_items 
-              WHERE line_item_id = ? AND status = 'transferring'
-            `).run(dbItem.id);
+            // 🆕 完全不删除 transfer_items，无论任何状态
+            // Transfer items 只能通过 Transfer 页面的 Clear Mode 手动删除
             
             remainingToDelete -= dbItem.quantity;
           } else {
@@ -588,14 +579,13 @@ class OrderWebhookHandler {
     }
   }
 
-  // Handle order cancelled (🆕 不删除 transfer_items)
+  // Handle order cancelled (🆕 完全不删除 transfer_items)
   static async handleOrderCancelled(orderData) {
     try {
       const shopifyOrderId = orderData.id.toString();
       
-      // 🆕 不删除 transfer_items！用户需要手动清理
-      // await db.prepare('DELETE FROM transfer_items WHERE shopify_order_id = ?')
-      //   .run(shopifyOrderId);
+      // 🆕 完全不删除 transfer_items，只能手动清理
+      // Transfer items 只能通过 Transfer 页面的 Clear Mode 手动删除
       
       // 删除 line_items
       await db.prepare('DELETE FROM line_items WHERE shopify_order_id = ?')
@@ -613,14 +603,13 @@ class OrderWebhookHandler {
     }
   }
 
-  // Handle order fulfilled (🆕 修改：保留 transfer_items)
+  // Handle order fulfilled (🆕 完全不删除 transfer_items)
   static async handleOrderFulfilled(orderData) {
     try {
       const shopifyOrderId = orderData.id.toString();
       
-      // 🆕 不删除 transfer_items！用户需要手动清理
-      // await db.prepare('DELETE FROM transfer_items WHERE shopify_order_id = ?')
-      //   .run(shopifyOrderId);
+      // 🆕 完全不删除 transfer_items，只能手动清理
+      // Transfer items 只能通过 Transfer 页面的 Clear Mode 手动删除
       
       // 删除 line_items
       await db.prepare('DELETE FROM line_items WHERE shopify_order_id = ?')
