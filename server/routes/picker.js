@@ -69,10 +69,11 @@ router.patch('/items/:id/status', async (req, res) => {
       );
     }
 
-    // If status changes from 'missing' to 'picked', remove from transfer
-    if (status === 'picked') {
-      await db.prepare('DELETE FROM transfer_items WHERE line_item_id = ?').run(id);
-    }
+    // 🆕 当状态从 'missing' 改为 'picked' 时，不删除 transfer_items
+    // Transfer items 只能通过 Transfer 页面的 Clear Mode 手动删除
+    // if (status === 'picked') {
+    //   await db.prepare('DELETE FROM transfer_items WHERE line_item_id = ?').run(id);
+    // }
 
     res.json({ success: true });
   } catch (error) {
