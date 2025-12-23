@@ -12,19 +12,10 @@ const EMOJI_MAP = {
 // Get all transfer items
 router.get('/items', async (req, res) => {
   try {
+    // 🔧 FIX: 直接查询 transfer_items，不依赖 line_items（避免订单删除后 transfer items 查询不到）
     const items = await db.prepare(`
-      SELECT 
-        ti.*,
-        li.image_url,
-        li.brand,
-        li.title,
-        li.size,
-        li.name,
-        li.variant_title,
-        li.custom_name
-      FROM transfer_items ti
-      JOIN line_items li ON ti.line_item_id = li.id
-      ORDER BY ti.created_at DESC
+      SELECT * FROM transfer_items
+      ORDER BY created_at DESC
     `).all();
 
     console.log(`Transfer: Found ${items.length} items`);
@@ -66,11 +57,10 @@ router.get('/receiving-options', async (req, res) => {
 router.get('/items/:id/copy-text', async (req, res) => {
   try {
     const { id } = req.params;
+    // 🔧 FIX: 直接查询 transfer_items，不依赖 line_items（避免订单删除后查询失败）
     const item = await db.prepare(`
-      SELECT ti.*, li.sku, li.custom_name, li.title
-      FROM transfer_items ti
-      JOIN line_items li ON ti.line_item_id = li.id
-      WHERE ti.id = ?
+      SELECT * FROM transfer_items
+      WHERE id = ?
     `).get(id);
 
     if (!item) {
