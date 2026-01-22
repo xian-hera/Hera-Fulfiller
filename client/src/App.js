@@ -9,20 +9,23 @@ import Transfer from './pages/Transfer';
 import Packer from './pages/Packer';
 import OrderDetail from './pages/OrderDetail';
 import Settings from './pages/Settings';
+import ErrorBoundary from './components/ErrorBoundary';
 
 function App() {
   return (
     <AppProvider i18n={enTranslations}>
-      <Router>
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/picker" element={<Picker />} />
-          <Route path="/transfer" element={<Transfer />} />
-          <Route path="/packer" element={<Packer />} />
-          <Route path="/packer/:shopifyOrderId" element={<OrderDetail />} />
-          <Route path="/settings" element={<Settings />} />
-        </Routes>
-      </Router>
+      <ErrorBoundary>
+        <Router>
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/picker" element={<Picker />} />
+            <Route path="/transfer" element={<Transfer />} />
+            <Route path="/packer" element={<Packer />} />
+            <Route path="/packer/:shopifyOrderId" element={<OrderDetail />} />
+            <Route path="/settings" element={<Settings />} />
+          </Routes>
+        </Router>
+      </ErrorBoundary>
     </AppProvider>
   );
 }

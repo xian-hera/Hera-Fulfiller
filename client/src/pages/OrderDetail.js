@@ -15,8 +15,8 @@ import {
   Badge
 } from '@shopify/polaris';
 import { ImageIcon, ChevronLeftIcon, ChevronRightIcon } from '@shopify/polaris-icons';
-import NumericKeypad from '../components/NumericKeypad';
-import BoxTypeKeypad from '../components/BoxTypeKeypad';
+import WeightInputModal from '../components/WeightInputModal';
+import CompleteOrderModal from '../components/CompleteOrderModal';
 
 const OrderDetail = () => {
   const navigate = useNavigate();
@@ -26,15 +26,13 @@ const OrderDetail = () => {
   const [allOrders, setAllOrders] = useState([]);
   const [filteredOrders, setFilteredOrders] = useState([]); // 🆕 根据筛选过滤的订单
   const [isSorted, setIsSorted] = useState(false);
+  
+  // Modal 状态
   const [weightModal, setWeightModal] = useState(null);
-  const [weightValue, setWeightValue] = useState('');
   const [completeModal, setCompleteModal] = useState(false);
-  const [boxType, setBoxType] = useState('');
-  const [orderWeight, setOrderWeight] = useState('');
   const [boxTypes, setBoxTypes] = useState([]);
   const [message, setMessage] = useState('');
   const [selectedImage, setSelectedImage] = useState(null);
-  const [activeInput, setActiveInput] = useState('boxType');
   
   // Note 功能状态
   const [noteModal, setNoteModal] = useState(false);
@@ -266,16 +264,25 @@ const OrderDetail = () => {
     return 'packing';
   };
 
+  // 🔧 FIX: 优化后的 handleItemClick - 添加防抖
   const handleItemClick = async (item) => {
+    // 防止重复点击
+    if (item._updating) return;
+    
     const newStatus = item.packer_status === 'ready' ? 'packing' : 'ready';
     
     try {
+      // 标记为更新中
+      setLineItems(prev => prev.map(li => 
+        li.id === item.id ? { ...li, _updating: true } : li
+      ));
+
       await axios.patch(`/api/packer/items/${item.id}/packer-status`, {
         status: newStatus
       });
       
       const updatedItems = lineItems.map(li => 
-        li.id === item.id ? { ...li, packer_status: newStatus } : li
+        li.id === item.id ? { ...li, packer_status: newStatus, _updating: false } : li
       );
       setLineItems(updatedItems);
 
@@ -283,12 +290,15 @@ const OrderDetail = () => {
       
       if (allReady && newStatus === 'ready') {
         setCompleteModal(true);
-        setBoxType('');
-        setOrderWeight('');
-        setActiveInput('boxType');
       }
     } catch (error) {
       console.error('Error updating item status:', error);
+      // 恢复状态
+      setLineItems(prev => prev.map(li => 
+        li.id === item.id ? { ...li, _updating: false } : li
+      ));
+      setMessage('Error updating item status');
+      setTimeout(() => setMessage(''), 3000);
     }
   };
 
@@ -303,21 +313,9 @@ const OrderDetail = () => {
     }
   };
 
-  // Weight Modal handlers
-  const handleWeightNumberClick = (number) => {
-    setWeightValue(prev => prev + number);
-  };
-
-  const handleWeightBackspace = () => {
-    setWeightValue(prev => prev.slice(0, -1));
-  };
-
-  const handleWeightSubmit = async () => {
-    const weight = parseFloat(weightValue);
-    if (!weight || weight <= 0) {
-      setMessage('Please enter a valid weight');
-      return;
-    }
+  // 🆕 Weight Modal 提交处理
+  const handleWeightSubmit = async (weight) => {
+    if (!weightModal) return;
 
     try {
       await axios.patch(`/api/packer/items/${weightModal.id}/update-weight`, {
@@ -325,52 +323,22 @@ const OrderDetail = () => {
       });
       await fetchOrderDetail();
       setWeightModal(null);
-      setWeightValue('');
       setMessage('Weight updated successfully');
       setTimeout(() => setMessage(''), 3000);
     } catch (error) {
       console.error('Error updating weight:', error);
       setMessage('Error updating weight');
+      setTimeout(() => setMessage(''), 3000);
     }
   };
 
-  // Complete Modal handlers
-  const handleBoxTypeClick = (code) => {
-    setBoxType(code);
-  };
-
-  const handleBoxTypeBackspace = () => {
-    setBoxType('');
-  };
-
-  const handleOrderWeightNumberClick = (number) => {
-    setOrderWeight(prev => prev + number);
-  };
-
-  const handleOrderWeightBackspace = () => {
-    setOrderWeight(prev => prev.slice(0, -1));
-  };
-
-  const handleOrderComplete = async () => {
-    if (!boxType) {
-      setMessage('Please select a box type');
-      return;
-    }
-
-    const hasWeightWarning = lineItems.some(item => 
-      item.has_weight_warning === 1
-    );
-
-    if (hasWeightWarning && !orderWeight) {
-      setMessage('Please enter the order weight');
-      return;
-    }
-
+  // 🆕 Complete Order 提交处理
+  const handleOrderComplete = async ({ boxType, weight }) => {
     try {
       console.log('Completing order:', shopifyOrderId);
       await axios.post(`/api/packer/orders/${shopifyOrderId}/complete`, {
         boxType,
-        weight: orderWeight || null
+        weight
       });
       
       console.log('Order completed, closing modal');
@@ -394,6 +362,7 @@ const OrderDetail = () => {
     } catch (error) {
       console.error('Error completing order:', error);
       setMessage('Error completing order');
+      setTimeout(() => setMessage(''), 3000);
     }
   };
 
@@ -427,6 +396,7 @@ const OrderDetail = () => {
     const status = getItemStatus(item);
     const hasWarning = item.has_weight_warning === 1;
     const isOutOfStock = item.outOfStock === true; // 🆕 out of stock 标记
+    const isUpdating = item._updating; // 🔧 FIX: 显示更新中状态
     
     const media = item.image_url ? (
       <div onClick={(e) => handleImageClick(e, item)} style={{ cursor: 'pointer' }}>
@@ -441,7 +411,10 @@ const OrderDetail = () => {
         padding: '22px 16px', 
         borderBottom: '1px solid #e1e3e5',
         display: 'flex',
-        alignItems: 'center'
+        alignItems: 'center',
+        opacity: isUpdating ? 0.6 : 1, // 🔧 FIX: 更新时显示半透明
+        pointerEvents: isUpdating ? 'none' : 'auto', // 🔧 FIX: 更新时禁止点击
+        transition: 'opacity 0.2s ease'
       }}>
         {/* Thumbnail */}
         <div style={{ marginRight: '16px' }}>
@@ -490,7 +463,6 @@ const OrderDetail = () => {
                   onClick={(e) => {
                     e.stopPropagation();
                     setWeightModal(item);
-                    setWeightValue('');
                   }}
                 >
                   ⚠️
@@ -524,8 +496,22 @@ const OrderDetail = () => {
             </Text>
           )}
           
-          {/* 状态按钮 */}
-          <div onClick={() => handleItemClick(item)} style={{ cursor: 'pointer', padding: '8px' }}>
+          {/* 状态按钮 - 🔧 FIX: 使用 onTouchStart 提高响应速度 */}
+          <div 
+            onTouchStart={(e) => {
+              e.preventDefault();
+              if (!isUpdating) handleItemClick(item);
+            }}
+            onClick={(e) => {
+              if (!isUpdating) handleItemClick(item);
+            }}
+            style={{ 
+              cursor: isUpdating ? 'not-allowed' : 'pointer', 
+              padding: '8px',
+              WebkitTapHighlightColor: 'transparent', // 🔧 FIX: 移除 iOS 点击高亮
+              userSelect: 'none'
+            }}
+          >
             {item.packer_status === 'ready' ? (
               <span style={{ fontSize: '32px', color: '#00a047' }}>✓</span>
             ) : (
@@ -605,8 +591,9 @@ const OrderDetail = () => {
         <div style={{ 
           padding: '12px', 
           marginBottom: '16px', 
-          backgroundColor: '#d4edda', 
-          borderRadius: '4px' 
+          backgroundColor: message.includes('Error') || message.includes('error') ? '#fef1f2' : '#d4edda', 
+          borderRadius: '4px',
+          color: message.includes('Error') || message.includes('error') ? '#d72c0d' : '#1a7f37'
         }}>
           {message}
         </div>
@@ -756,169 +743,23 @@ const OrderDetail = () => {
         </Modal.Section>
       </Modal>
 
-      {/* Weight Modal */}
-      <Modal
+      {/* 🆕 使用新的 Weight Input Modal */}
+      <WeightInputModal
         open={weightModal !== null}
+        item={weightModal}
         onClose={() => setWeightModal(null)}
-        title={weightModal ? `Update Weight` : ''}
-      >
-        <Modal.Section>
-          {weightModal && (
-            <>
-              <Text>{weightModal.brand} {weightModal.title}</Text>
-              <div style={{ marginTop: '12px' }}>
-                <Text variant="bodySm" as="p">Weight (g):</Text>
-                <div style={{
-                  border: '2px solid #c4cdd5',
-                  borderRadius: '8px',
-                  padding: '12px 16px',
-                  fontSize: '24px',
-                  fontWeight: 'bold',
-                  textAlign: 'center',
-                  backgroundColor: '#ffffff',
-                  minHeight: '50px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  marginTop: '8px'
-                }}>
-                  {weightValue || '0'} g
-                </div>
-              </div>
-              <div style={{ 
-                marginTop: '20px',
-                display: 'flex',
-                gap: '12px',
-                justifyContent: 'flex-end'
-              }}>
-                <Button onClick={() => setWeightModal(null)}>
-                  Cancel
-                </Button>
-                <Button variant="primary" onClick={handleWeightSubmit}>
-                  Update
-                </Button>
-              </div>
-            </>
-          )}
-        </Modal.Section>
-      </Modal>
+        onSubmit={handleWeightSubmit}
+      />
 
-      {/* Weight Modal Numeric Keypad */}
-      {weightModal && (
-        <div style={{
-          position: 'fixed',
-          bottom: '20px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          zIndex: 1000
-        }}>
-          <NumericKeypad
-            onNumberClick={handleWeightNumberClick}
-            onBackspace={handleWeightBackspace}
-          />
-        </div>
-      )}
-
-      {/* Complete Order Modal */}
-      <Modal
+      {/* 🆕 使用新的 Complete Order Modal */}
+      <CompleteOrderModal
         open={completeModal}
+        orderName={order.name}
+        hasWeightWarning={hasWeightWarning}
+        boxTypes={boxTypes}
         onClose={() => setCompleteModal(false)}
-        title={`Complete Order ${order.name}`}
-      >
-        <Modal.Section>
-          <>
-            <div style={{ marginBottom: '16px' }} onClick={() => setActiveInput('boxType')}>
-              <Text variant="bodySm" as="p">Box Type:</Text>
-              <div style={{
-                border: activeInput === 'boxType' ? '2px solid #008060' : '2px solid #c4cdd5',
-                borderRadius: '8px',
-                padding: '12px 16px',
-                fontSize: '24px',
-                fontWeight: 'bold',
-                textAlign: 'center',
-                backgroundColor: '#ffffff',
-                minHeight: '50px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginTop: '8px',
-                cursor: 'pointer'
-              }}>
-                {boxType || 'Select box type'}
-              </div>
-            </div>
-
-            {hasWeightWarning && (
-              <div style={{ marginBottom: '16px' }} onClick={() => setActiveInput('weight')}>
-                <Text variant="bodySm" as="p">Total Weight (g):</Text>
-                <div style={{
-                  border: activeInput === 'weight' ? '2px solid #008060' : '2px solid #c4cdd5',
-                  borderRadius: '8px',
-                  padding: '12px 16px',
-                  fontSize: '24px',
-                  fontWeight: 'bold',
-                  textAlign: 'center',
-                  backgroundColor: '#ffffff',
-                  minHeight: '50px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  marginTop: '8px',
-                  cursor: 'pointer'
-                }}>
-                  {orderWeight || '0'} g
-                </div>
-              </div>
-            )}
-
-            <div style={{ 
-              marginTop: '20px',
-              display: 'flex',
-              gap: '12px',
-              justifyContent: 'flex-end'
-            }}>
-              <Button onClick={() => setCompleteModal(false)}>
-                Cancel
-              </Button>
-              <Button variant="primary" onClick={handleOrderComplete}>
-                Complete
-              </Button>
-            </div>
-          </>
-        </Modal.Section>
-      </Modal>
-
-      {/* Complete Modal Keypads */}
-      {completeModal && activeInput === 'boxType' && (
-        <div style={{
-          position: 'fixed',
-          bottom: '20px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          zIndex: 1000
-        }}>
-          <BoxTypeKeypad
-            boxTypes={boxTypes}
-            onBoxTypeClick={handleBoxTypeClick}
-            onBackspace={handleBoxTypeBackspace}
-          />
-        </div>
-      )}
-
-      {completeModal && activeInput === 'weight' && hasWeightWarning && (
-        <div style={{
-          position: 'fixed',
-          bottom: '20px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          zIndex: 1000
-        }}>
-          <NumericKeypad
-            onNumberClick={handleOrderWeightNumberClick}
-            onBackspace={handleOrderWeightBackspace}
-          />
-        </div>
-      )}
+        onComplete={handleOrderComplete}
+      />
     </Page>
   );
 };
