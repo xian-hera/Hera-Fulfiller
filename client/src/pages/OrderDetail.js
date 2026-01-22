@@ -24,7 +24,7 @@ const OrderDetail = () => {
   const [order, setOrder] = useState(null);
   const [lineItems, setLineItems] = useState([]);
   const [allOrders, setAllOrders] = useState([]);
-  const [filteredOrders, setFilteredOrders] = useState([]); // 🆕 根据筛选过滤的订单
+  const [filteredOrders, setFilteredOrders] = useState([]);
   const [isSorted, setIsSorted] = useState(false);
   
   // Modal 状态
@@ -48,7 +48,6 @@ const OrderDetail = () => {
     }
   }, [shopifyOrderId]);
 
-  // 🆕 当 allOrders 变化时，应用筛选
   useEffect(() => {
     applyPackerFilters();
   }, [allOrders]);
@@ -56,7 +55,6 @@ const OrderDetail = () => {
   const fetchAllOrders = async () => {
     try {
       const response = await axios.get('/api/packer/orders');
-      // 按订单号排序
       const sorted = response.data.sort((a, b) => {
         const numA = parseInt(a.order_number) || 0;
         const numB = parseInt(b.order_number) || 0;
@@ -69,17 +67,14 @@ const OrderDetail = () => {
     }
   };
 
-  // 🆕 根据 Packer 页面的筛选状态过滤订单
   const applyPackerFilters = () => {
     try {
-      // 从 localStorage 读取 Packer 的筛选设置
       const savedFilters = localStorage.getItem('packerStatusFilter');
       const statusFilter = savedFilters ? JSON.parse(savedFilters) : ['packing', 'waiting', 'holding', 'ready'];
       
       console.log('Applying Packer filters:', statusFilter);
       console.log('All orders:', allOrders.map(o => `${o.order_number}: ${o.orderStatus || o.status}`));
       
-      // 🆕 直接使用后端返回的 orderStatus
       const filtered = allOrders.filter(order => {
         const status = order.orderStatus || order.status;
         const match = statusFilter.includes(status);
@@ -92,7 +87,6 @@ const OrderDetail = () => {
       setFilteredOrders(filtered);
     } catch (error) {
       console.error('Error applying packer filters:', error);
-      // 如果出错，使用所有订单
       setFilteredOrders(allOrders);
     }
   };
@@ -119,7 +113,6 @@ const OrderDetail = () => {
     }
   };
 
-  // 保存 Note
   const handleNoteSave = async () => {
     if (noteValue.length > 50) {
       setMessage('Note must be 50 characters or less');
@@ -140,7 +133,6 @@ const OrderDetail = () => {
     }
   };
 
-  // 删除 Note
   const handleNoteDelete = async () => {
     try {
       await axios.patch(`/api/packer/orders/${shopifyOrderId}/note`, {
@@ -156,7 +148,6 @@ const OrderDetail = () => {
     }
   };
 
-  // 删除订单
   const handleDeleteOrder = async () => {
     if (!window.confirm(`Are you sure you want to delete order ${order.name}? This action cannot be undone.`)) {
       return;
@@ -174,7 +165,6 @@ const OrderDetail = () => {
     }
   };
 
-  // 🆕 根据订单号查找上一个订单（在筛选后的订单中）
   const findPreviousOrder = () => {
     if (!order || filteredOrders.length === 0) return null;
     
@@ -182,7 +172,6 @@ const OrderDetail = () => {
     console.log('Finding previous order in filtered list, current:', currentNum);
     console.log('Filtered orders:', filteredOrders.map(o => o.order_number));
     
-    // 找到订单号小于当前订单的最大订单号
     for (let i = filteredOrders.length - 1; i >= 0; i--) {
       const orderNum = parseInt(filteredOrders[i].order_number) || 0;
       if (orderNum < currentNum) {
@@ -194,7 +183,6 @@ const OrderDetail = () => {
     return null;
   };
 
-  // 🆕 根据订单号查找下一个订单（在筛选后的订单中）
   const findNextOrder = () => {
     if (!order || filteredOrders.length === 0) return null;
     
@@ -202,7 +190,6 @@ const OrderDetail = () => {
     console.log('Finding next order in filtered list, current:', currentNum);
     console.log('Filtered orders:', filteredOrders.map(o => o.order_number));
     
-    // 找到订单号大于当前订单的最小订单号
     for (let i = 0; i < filteredOrders.length; i++) {
       const orderNum = parseInt(filteredOrders[i].order_number) || 0;
       if (orderNum > currentNum) {
@@ -264,15 +251,12 @@ const OrderDetail = () => {
     return 'packing';
   };
 
-  // 🔧 FIX: 优化后的 handleItemClick - 添加防抖
   const handleItemClick = async (item) => {
-    // 防止重复点击
     if (item._updating) return;
     
     const newStatus = item.packer_status === 'ready' ? 'packing' : 'ready';
     
     try {
-      // 标记为更新中
       setLineItems(prev => prev.map(li => 
         li.id === item.id ? { ...li, _updating: true } : li
       ));
@@ -293,7 +277,6 @@ const OrderDetail = () => {
       }
     } catch (error) {
       console.error('Error updating item status:', error);
-      // 恢复状态
       setLineItems(prev => prev.map(li => 
         li.id === item.id ? { ...li, _updating: false } : li
       ));
@@ -313,7 +296,6 @@ const OrderDetail = () => {
     }
   };
 
-  // 🆕 Weight Modal 提交处理
   const handleWeightSubmit = async (weight) => {
     if (!weightModal) return;
 
@@ -332,7 +314,6 @@ const OrderDetail = () => {
     }
   };
 
-  // 🆕 Complete Order 提交处理
   const handleOrderComplete = async ({ boxType, weight }) => {
     try {
       console.log('Completing order:', shopifyOrderId);
@@ -344,13 +325,9 @@ const OrderDetail = () => {
       console.log('Order completed, closing modal');
       setCompleteModal(false);
       
-      // 重新获取所有订单以确保数据最新
       await fetchAllOrders();
       
-      // 查找下一个订单
       const nextOrder = findNextOrder();
-      
-      console.log('Next order:', nextOrder);
       
       if (nextOrder) {
         console.log('Jumping to next order:', nextOrder.shopify_order_id);
@@ -366,13 +343,11 @@ const OrderDetail = () => {
     }
   };
 
-  // 格式化 SKU：每4位加一个空格
   const formatSKU = (sku) => {
     if (!sku) return '';
     return sku.match(/.{1,4}/g)?.join(' ') || sku;
   };
 
-  // 格式化日期：补零
   const formatDate = (month, day) => {
     if (!month || !day) return '';
     const m = month.toString().padStart(2, '0');
@@ -395,8 +370,8 @@ const OrderDetail = () => {
   const renderLineItem = (item) => {
     const status = getItemStatus(item);
     const hasWarning = item.has_weight_warning === 1;
-    const isOutOfStock = item.outOfStock === true; // 🆕 out of stock 标记
-    const isUpdating = item._updating; // 🔧 FIX: 显示更新中状态
+    const isOutOfStock = item.outOfStock === true;
+    const isUpdating = item._updating;
     
     const media = item.image_url ? (
       <div onClick={(e) => handleImageClick(e, item)} style={{ cursor: 'pointer' }}>
@@ -408,140 +383,184 @@ const OrderDetail = () => {
 
     return (
       <div style={{ 
-        padding: '22px 16px', 
+        padding: '16px',
         borderBottom: '1px solid #e1e3e5',
         display: 'flex',
-        alignItems: 'center',
-        opacity: isUpdating ? 0.6 : 1, // 🔧 FIX: 更新时显示半透明
-        pointerEvents: isUpdating ? 'none' : 'auto', // 🔧 FIX: 更新时禁止点击
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: '12px',
+        opacity: isUpdating ? 0.6 : 1,
+        pointerEvents: isUpdating ? 'none' : 'auto',
         transition: 'opacity 0.2s ease'
       }}>
         {/* Thumbnail */}
-        <div style={{ marginRight: '16px' }}>
+        <div style={{ 
+          flexShrink: 0,
+          width: '60px',
+          height: '60px'
+        }}>
           {media}
         </div>
 
-        {/* 数量（30px）*/}
+        {/* Quantity */}
         <div style={{ 
-          fontSize: '30px', 
+          fontSize: '24px',
           lineHeight: 1,
-          marginRight: '20px',
-          marginTop: '5px',
-          minWidth: '50px'
+          flexShrink: 0,
+          minWidth: '30px',
+          alignSelf: 'center'
         }}>
           {item.quantity}
         </div>
 
-        {/* 产品信息 */}
-        <div style={{ flex: 1, maxWidth: 'calc(100% - 350px)' }}>
-          <BlockStack gap="1">
-            {/* 第1行：Brand */}
-            <Text variant="bodySm">
-              {item.brand}
-            </Text>
-            
-            {/* 第2行：Title（加粗）*/}
-            <Text variant="bodyMd" fontWeight="bold">
-              {item.title} {item.size}
-            </Text>
-            
-            {/* 第3行：Variant Title */}
-            {item.variant_title && (
-              <Text variant="bodySm">
-                {item.variant_title}
-              </Text>
-            )}
-            
-            {/* 第4行：Weight + Warning */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Text variant="bodySm" tone={hasWarning ? 'critical' : 'subdued'}>
-                {item.weight}{item.weight_unit}
-              </Text>
-              {hasWarning && (
-                <Button
-                  plain
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setWeightModal(item);
-                  }}
-                >
-                  ⚠️
-                </Button>
-              )}
-            </div>
-            
-            {/* 第5行：SKU（加粗，每4位加空格）*/}
-            <Text variant="bodySm" fontWeight="bold">
-              {formatSKU(item.sku)}
-            </Text>
-          </BlockStack>
-        </div>
-
-        {/* 右侧区域：Transfer info 和状态按钮 */}
+        {/* Product Info */}
         <div style={{ 
-          display: 'flex',
-          alignItems: 'center',
-          gap: '12px',
-          marginLeft: 'auto'
+          flex: 1,
+          minWidth: 0,
+          overflow: 'hidden'
         }}>
-          {/* 🆕 Out of Stock Badge */}
-          {isOutOfStock && (
-            <Badge tone="critical">Out of Stock</Badge>
+          {/* Brand */}
+          <div style={{ 
+            fontSize: '12px',
+            color: '#6d7175',
+            marginBottom: '4px',
+            wordBreak: 'break-word',
+            whiteSpace: 'normal'
+          }}>
+            {item.brand}
+          </div>
+          
+          {/* Title */}
+          <div style={{ 
+            fontSize: '14px',
+            fontWeight: '600',
+            marginBottom: '4px',
+            wordBreak: 'break-word',
+            whiteSpace: 'normal',
+            lineHeight: '1.4'
+          }}>
+            {item.title} {item.size}
+          </div>
+          
+          {/* Variant Title */}
+          {item.variant_title && (
+            <div style={{ 
+              fontSize: '12px',
+              color: '#6d7175',
+              marginBottom: '4px',
+              wordBreak: 'break-word',
+              whiteSpace: 'normal'
+            }}>
+              {item.variant_title}
+            </div>
           )}
           
-          {/* Transfer info */}
-          {item.transferInfo && !isOutOfStock && (
-            <Text variant="bodySm" fontWeight="bold" tone="info">
-              Transfer: {item.transferInfo.quantity} from {item.transferInfo.transferFrom}, Est: {formatDate(item.transferInfo.estimateMonth, item.transferInfo.estimateDay)}
-            </Text>
-          )}
-          
-          {/* 状态按钮 - 🔧 FIX: 使用 onTouchStart 提高响应速度 */}
-          <div 
-            onTouchStart={(e) => {
-              e.preventDefault();
-              if (!isUpdating) handleItemClick(item);
-            }}
-            onClick={(e) => {
-              if (!isUpdating) handleItemClick(item);
-            }}
-            style={{ 
-              cursor: isUpdating ? 'not-allowed' : 'pointer', 
-              padding: '8px',
-              WebkitTapHighlightColor: 'transparent', // 🔧 FIX: 移除 iOS 点击高亮
-              userSelect: 'none'
-            }}
-          >
-            {item.packer_status === 'ready' ? (
-              <span style={{ fontSize: '32px', color: '#00a047' }}>✓</span>
-            ) : (
-              <div style={{ width: '32px', height: '32px', border: '2px solid #00A0AC', borderRadius: '50%', position: 'relative' }}>
-                {status === 'transferring' && (
-                  <div style={{
-                    position: 'absolute',
-                    top: '-4px',
-                    right: '-4px',
-                    width: '14px',
-                    height: '14px',
-                    border: '2px solid #0080FF',
-                    borderRadius: '50%',
-                    background: 'white'
-                  }} />
-                )}
-                {status === 'waiting' && (
-                  <div style={{
-                    position: 'absolute',
-                    top: '-4px',
-                    right: '-4px',
-                    width: '10px',
-                    height: '10px',
-                    background: '#0080FF',
-                    borderRadius: '50%'
-                  }} />
-                )}
-              </div>
+          {/* Weight + Warning */}
+          <div style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '8px',
+            marginBottom: '4px',
+            flexWrap: 'wrap'
+          }}>
+            <span style={{ 
+              fontSize: '12px',
+              color: hasWarning ? '#d72c0d' : '#6d7175'
+            }}>
+              {item.weight}{item.weight_unit}
+            </span>
+            {hasWarning && (
+              <Button
+                plain
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setWeightModal(item);
+                }}
+              >
+                ⚠️
+              </Button>
             )}
           </div>
+          
+          {/* SKU */}
+          <div style={{ 
+            fontSize: '12px',
+            fontWeight: '600',
+            marginBottom: '8px',
+            wordBreak: 'break-all',
+            whiteSpace: 'normal'
+          }}>
+            {formatSKU(item.sku)}
+          </div>
+
+          {/* Transfer info - 移动端显示在下方 */}
+          {item.transferInfo && !isOutOfStock && (
+            <div style={{ 
+              fontSize: '12px',
+              color: '#0080FF',
+              fontWeight: '600',
+              marginBottom: '8px',
+              wordBreak: 'break-word',
+              whiteSpace: 'normal'
+            }}>
+              Transfer: {item.transferInfo.quantity} from {item.transferInfo.transferFrom}, Est: {formatDate(item.transferInfo.estimateMonth, item.transferInfo.estimateDay)}
+            </div>
+          )}
+
+          {/* Out of Stock Badge - 移动端显示在下方 */}
+          {isOutOfStock && (
+            <div style={{ marginBottom: '8px' }}>
+              <Badge tone="critical">Out of Stock</Badge>
+            </div>
+          )}
+        </div>
+
+        {/* Status Button */}
+        <div 
+          onTouchStart={(e) => {
+            e.preventDefault();
+            if (!isUpdating) handleItemClick(item);
+          }}
+          onClick={(e) => {
+            if (!isUpdating) handleItemClick(item);
+          }}
+          style={{ 
+            cursor: isUpdating ? 'not-allowed' : 'pointer',
+            flexShrink: 0,
+            WebkitTapHighlightColor: 'transparent',
+            userSelect: 'none',
+            alignSelf: 'center'
+          }}
+        >
+          {item.packer_status === 'ready' ? (
+            <span style={{ fontSize: '32px', color: '#00a047' }}>✓</span>
+          ) : (
+            <div style={{ width: '32px', height: '32px', border: '2px solid #00A0AC', borderRadius: '50%', position: 'relative' }}>
+              {status === 'transferring' && (
+                <div style={{
+                  position: 'absolute',
+                  top: '-4px',
+                  right: '-4px',
+                  width: '14px',
+                  height: '14px',
+                  border: '2px solid #0080FF',
+                  borderRadius: '50%',
+                  background: 'white'
+                }} />
+              )}
+              {status === 'waiting' && (
+                <div style={{
+                  position: 'absolute',
+                  top: '-4px',
+                  right: '-4px',
+                  width: '10px',
+                  height: '10px',
+                  background: '#0080FF',
+                  borderRadius: '50%'
+                }} />
+              )}
+            </div>
+          )}
         </div>
       </div>
     );
@@ -603,7 +622,6 @@ const OrderDetail = () => {
         <Layout.Section>
           <Card>
             <div style={{ padding: '16px', position: 'relative' }}>
-              {/* Holding 标签在右上角 */}
               {order.status === 'holding' && (
                 <div style={{
                   position: 'absolute',
@@ -637,7 +655,6 @@ const OrderDetail = () => {
                 </BlockStack>
               </div>
 
-              {/* Note 显示区域 */}
               {order.packer_note && (
                 <div style={{ 
                   marginTop: '16px', 
@@ -743,7 +760,7 @@ const OrderDetail = () => {
         </Modal.Section>
       </Modal>
 
-      {/* 🆕 使用新的 Weight Input Modal */}
+      {/* Weight Input Modal */}
       <WeightInputModal
         open={weightModal !== null}
         item={weightModal}
@@ -751,7 +768,7 @@ const OrderDetail = () => {
         onSubmit={handleWeightSubmit}
       />
 
-      {/* 🆕 使用新的 Complete Order Modal */}
+      {/* Complete Order Modal */}
       <CompleteOrderModal
         open={completeModal}
         orderName={order.name}
