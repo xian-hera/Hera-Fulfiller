@@ -433,33 +433,18 @@ const OrderDetail = () => {
     );
 
     return (
-      <div className="orderdetail-item-container" style={{ 
-        padding: '16px', 
-        borderBottom: '1px solid #e1e3e5',
-        opacity: isUpdating ? 0.6 : 1,
-        pointerEvents: isUpdating ? 'none' : 'auto',
-        transition: 'opacity 0.2s ease'
-      }}>
+      <div className="orderdetail-item-container">
         {/* 桌面端布局 - 完全保留原有样式 */}
-        <div className="orderdetail-item-desktop" style={{
-          display: 'flex',
-          alignItems: 'center'
-        }}>
-          <div style={{ marginRight: '16px' }}>
+        <div className="orderdetail-item-desktop">
+          <div className="orderdetail-item-thumbnail">
             {media}
           </div>
 
-          <div style={{ 
-            fontSize: '30px', 
-            lineHeight: 1,
-            marginRight: '20px',
-            marginTop: '5px',
-            minWidth: '50px'
-          }}>
+          <div className="orderdetail-item-quantity">
             {item.quantity}
           </div>
 
-          <div style={{ flex: 1, maxWidth: 'calc(100% - 350px)' }}>
+          <div className="orderdetail-item-info">
             <BlockStack gap="1">
               <Text variant="bodySm">
                 {item.brand}
@@ -498,12 +483,7 @@ const OrderDetail = () => {
             </BlockStack>
           </div>
 
-          <div style={{ 
-            display: 'flex',
-            alignItems: 'center',
-            gap: '12px',
-            marginLeft: 'auto'
-          }}>
+          <div className="orderdetail-item-right-desktop">
             {isOutOfStock && (
               <Badge tone="critical">Out of Stock</Badge>
             )}
@@ -660,26 +640,63 @@ const OrderDetail = () => {
   return (
     <>
       <style>{`
-        /* OrderDetail 移动端响应式样式 */
+        /* OrderDetail 响应式样式 - 完全参考 Picker.js */
         .orderdetail-item-container {
+          padding: 22px 16px;
+          border-bottom: 1px solid #e1e3e5;
           position: relative;
         }
 
+        /* 桌面端布局 - 默认显示 */
         .orderdetail-item-desktop {
           display: flex;
-          align-items: center;
+          alignItems: center;
+          width: 100%;
         }
 
+        .orderdetail-item-thumbnail {
+          margin-right: 16px;
+          flex-shrink: 0;
+        }
+
+        .orderdetail-item-quantity {
+          font-size: 30px;
+          line-height: 1;
+          margin-right: 20px;
+          margin-top: 5px;
+          min-width: 50px;
+          flex-shrink: 0;
+        }
+
+        .orderdetail-item-info {
+          flex: 1;
+          max-width: calc(100% - 350px);
+        }
+
+        .orderdetail-item-right-desktop {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          margin-left: auto;
+        }
+
+        /* 移动端布局 - 默认隐藏 */
         .orderdetail-item-mobile {
           display: none;
         }
 
-        /* 手机端响应式 (600px 以下) */
+        /* 手机响应式 (600px 以下) */
         @media (max-width: 600px) {
+          .orderdetail-item-container {
+            padding: 16px;
+          }
+
+          /* 隐藏桌面布局 */
           .orderdetail-item-desktop {
             display: none;
           }
 
+          /* 显示手机布局 */
           .orderdetail-item-mobile {
             display: block;
             width: 100%;
