@@ -329,6 +329,8 @@ const OrderDetail = () => {
       
       const nextOrder = findNextOrder();
       
+      console.log('Next order:', nextOrder);
+      
       if (nextOrder) {
         console.log('Jumping to next order:', nextOrder.shopify_order_id);
         navigate(`/packer/${nextOrder.shopify_order_id}`);
@@ -381,186 +383,243 @@ const OrderDetail = () => {
       <Thumbnail source={ImageIcon} alt="No image" size="large" />
     );
 
+    // 状态按钮组件
+    const StatusButton = () => (
+      <div 
+        onTouchStart={(e) => {
+          e.preventDefault();
+          if (!isUpdating) handleItemClick(item);
+        }}
+        onClick={(e) => {
+          if (!isUpdating) handleItemClick(item);
+        }}
+        style={{ 
+          cursor: isUpdating ? 'not-allowed' : 'pointer', 
+          padding: '8px',
+          WebkitTapHighlightColor: 'transparent',
+          userSelect: 'none'
+        }}
+      >
+        {item.packer_status === 'ready' ? (
+          <span style={{ fontSize: '32px', color: '#00a047' }}>✓</span>
+        ) : (
+          <div style={{ width: '32px', height: '32px', border: '2px solid #00A0AC', borderRadius: '50%', position: 'relative' }}>
+            {status === 'transferring' && (
+              <div style={{
+                position: 'absolute',
+                top: '-4px',
+                right: '-4px',
+                width: '14px',
+                height: '14px',
+                border: '2px solid #0080FF',
+                borderRadius: '50%',
+                background: 'white'
+              }} />
+            )}
+            {status === 'waiting' && (
+              <div style={{
+                position: 'absolute',
+                top: '-4px',
+                right: '-4px',
+                width: '10px',
+                height: '10px',
+                background: '#0080FF',
+                borderRadius: '50%'
+              }} />
+            )}
+          </div>
+        )}
+      </div>
+    );
+
     return (
-      <div style={{ 
-        padding: '16px',
+      <div className="orderdetail-item-container" style={{ 
+        padding: '16px', 
         borderBottom: '1px solid #e1e3e5',
-        display: 'flex',
-        flexDirection: 'row',
-        alignItems: 'flex-start',
-        gap: '12px',
         opacity: isUpdating ? 0.6 : 1,
         pointerEvents: isUpdating ? 'none' : 'auto',
         transition: 'opacity 0.2s ease'
       }}>
-        {/* Thumbnail */}
-        <div style={{ 
-          flexShrink: 0,
-          width: '60px',
-          height: '60px'
+        {/* 桌面端布局 - 完全保留原有样式 */}
+        <div className="orderdetail-item-desktop" style={{
+          display: 'flex',
+          alignItems: 'center'
         }}>
-          {media}
+          <div style={{ marginRight: '16px' }}>
+            {media}
+          </div>
+
+          <div style={{ 
+            fontSize: '30px', 
+            lineHeight: 1,
+            marginRight: '20px',
+            marginTop: '5px',
+            minWidth: '50px'
+          }}>
+            {item.quantity}
+          </div>
+
+          <div style={{ flex: 1, maxWidth: 'calc(100% - 350px)' }}>
+            <BlockStack gap="1">
+              <Text variant="bodySm">
+                {item.brand}
+              </Text>
+              
+              <Text variant="bodyMd" fontWeight="bold">
+                {item.title} {item.size}
+              </Text>
+              
+              {item.variant_title && (
+                <Text variant="bodySm">
+                  {item.variant_title}
+                </Text>
+              )}
+              
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Text variant="bodySm" tone={hasWarning ? 'critical' : 'subdued'}>
+                  {item.weight}{item.weight_unit}
+                </Text>
+                {hasWarning && (
+                  <Button
+                    plain
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setWeightModal(item);
+                    }}
+                  >
+                    ⚠️
+                  </Button>
+                )}
+              </div>
+              
+              <Text variant="bodySm" fontWeight="bold">
+                {formatSKU(item.sku)}
+              </Text>
+            </BlockStack>
+          </div>
+
+          <div style={{ 
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            marginLeft: 'auto'
+          }}>
+            {isOutOfStock && (
+              <Badge tone="critical">Out of Stock</Badge>
+            )}
+            
+            {item.transferInfo && !isOutOfStock && (
+              <Text variant="bodySm" fontWeight="bold" tone="info">
+                Transfer: {item.transferInfo.quantity} from {item.transferInfo.transferFrom}, Est: {formatDate(item.transferInfo.estimateMonth, item.transferInfo.estimateDay)}
+              </Text>
+            )}
+            
+            <StatusButton />
+          </div>
         </div>
 
-        {/* Quantity */}
-        <div style={{ 
-          fontSize: '24px',
-          lineHeight: 1,
-          flexShrink: 0,
-          minWidth: '30px',
-          alignSelf: 'center'
-        }}>
-          {item.quantity}
-        </div>
-
-        {/* Product Info */}
-        <div style={{ 
-          flex: 1,
-          minWidth: 0,
-          overflow: 'hidden'
-        }}>
-          {/* Brand */}
-          <div style={{ 
-            fontSize: '12px',
-            color: '#6d7175',
-            marginBottom: '4px',
-            wordBreak: 'break-word',
-            whiteSpace: 'normal'
-          }}>
-            {item.brand}
-          </div>
-          
-          {/* Title */}
-          <div style={{ 
-            fontSize: '14px',
-            fontWeight: '600',
-            marginBottom: '4px',
-            wordBreak: 'break-word',
-            whiteSpace: 'normal',
-            lineHeight: '1.4'
-          }}>
-            {item.title} {item.size}
-          </div>
-          
-          {/* Variant Title */}
-          {item.variant_title && (
+        {/* 移动端布局 - 新增 */}
+        <div className="orderdetail-item-mobile">
+          {/* 第一行：产品信息文本 */}
+          <div className="orderdetail-mobile-text">
             <div style={{ 
               fontSize: '12px',
               color: '#6d7175',
               marginBottom: '4px',
-              wordBreak: 'break-word',
-              whiteSpace: 'normal'
+              wordBreak: 'break-word'
             }}>
-              {item.variant_title}
+              {item.brand}
             </div>
-          )}
-          
-          {/* Weight + Warning */}
-          <div style={{ 
-            display: 'flex', 
-            alignItems: 'center', 
-            gap: '8px',
-            marginBottom: '4px',
-            flexWrap: 'wrap'
-          }}>
-            <span style={{ 
-              fontSize: '12px',
-              color: hasWarning ? '#d72c0d' : '#6d7175'
+            
+            <div style={{ 
+              fontSize: '14px',
+              fontWeight: '600',
+              marginBottom: '4px',
+              wordBreak: 'break-word',
+              lineHeight: '1.4'
             }}>
-              {item.weight}{item.weight_unit}
-            </span>
-            {hasWarning && (
-              <Button
-                plain
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setWeightModal(item);
-                }}
-              >
-                ⚠️
-              </Button>
+              {item.title} {item.size}
+            </div>
+            
+            {item.variant_title && (
+              <div style={{ 
+                fontSize: '12px',
+                color: '#6d7175',
+                marginBottom: '4px',
+                wordBreak: 'break-word'
+              }}>
+                {item.variant_title}
+              </div>
             )}
-          </div>
-          
-          {/* SKU */}
-          <div style={{ 
-            fontSize: '12px',
-            fontWeight: '600',
-            marginBottom: '8px',
-            wordBreak: 'break-all',
-            whiteSpace: 'normal'
-          }}>
-            {formatSKU(item.sku)}
-          </div>
-
-          {/* Transfer info - 移动端显示在下方 */}
-          {item.transferInfo && !isOutOfStock && (
+            
+            <div style={{ 
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              marginBottom: '4px',
+              flexWrap: 'wrap'
+            }}>
+              <span style={{ 
+                fontSize: '12px',
+                color: hasWarning ? '#d72c0d' : '#6d7175'
+              }}>
+                {item.weight}{item.weight_unit}
+              </span>
+              {hasWarning && (
+                <Button
+                  plain
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setWeightModal(item);
+                  }}
+                >
+                  ⚠️
+                </Button>
+              )}
+            </div>
+            
             <div style={{ 
               fontSize: '12px',
-              color: '#0080FF',
               fontWeight: '600',
-              marginBottom: '8px',
-              wordBreak: 'break-word',
-              whiteSpace: 'normal'
+              wordBreak: 'break-all',
+              marginBottom: '8px'
             }}>
-              Transfer: {item.transferInfo.quantity} from {item.transferInfo.transferFrom}, Est: {formatDate(item.transferInfo.estimateMonth, item.transferInfo.estimateDay)}
+              {formatSKU(item.sku)}
             </div>
-          )}
 
-          {/* Out of Stock Badge - 移动端显示在下方 */}
-          {isOutOfStock && (
-            <div style={{ marginBottom: '8px' }}>
-              <Badge tone="critical">Out of Stock</Badge>
-            </div>
-          )}
-        </div>
+            {item.transferInfo && !isOutOfStock && (
+              <div style={{ 
+                fontSize: '12px',
+                color: '#0080FF',
+                fontWeight: '600',
+                marginBottom: '8px',
+                wordBreak: 'break-word'
+              }}>
+                Transfer: {item.transferInfo.quantity} from {item.transferInfo.transferFrom}, Est: {formatDate(item.transferInfo.estimateMonth, item.transferInfo.estimateDay)}
+              </div>
+            )}
 
-        {/* Status Button */}
-        <div 
-          onTouchStart={(e) => {
-            e.preventDefault();
-            if (!isUpdating) handleItemClick(item);
-          }}
-          onClick={(e) => {
-            if (!isUpdating) handleItemClick(item);
-          }}
-          style={{ 
-            cursor: isUpdating ? 'not-allowed' : 'pointer',
-            flexShrink: 0,
-            WebkitTapHighlightColor: 'transparent',
-            userSelect: 'none',
-            alignSelf: 'center'
-          }}
-        >
-          {item.packer_status === 'ready' ? (
-            <span style={{ fontSize: '32px', color: '#00a047' }}>✓</span>
-          ) : (
-            <div style={{ width: '32px', height: '32px', border: '2px solid #00A0AC', borderRadius: '50%', position: 'relative' }}>
-              {status === 'transferring' && (
-                <div style={{
-                  position: 'absolute',
-                  top: '-4px',
-                  right: '-4px',
-                  width: '14px',
-                  height: '14px',
-                  border: '2px solid #0080FF',
-                  borderRadius: '50%',
-                  background: 'white'
-                }} />
-              )}
-              {status === 'waiting' && (
-                <div style={{
-                  position: 'absolute',
-                  top: '-4px',
-                  right: '-4px',
-                  width: '10px',
-                  height: '10px',
-                  background: '#0080FF',
-                  borderRadius: '50%'
-                }} />
-              )}
+            {isOutOfStock && (
+              <div style={{ marginBottom: '8px' }}>
+                <Badge tone="critical">Out of Stock</Badge>
+              </div>
+            )}
+          </div>
+
+          {/* 第二行：图片 + 数量 + 状态按钮 */}
+          <div className="orderdetail-mobile-bottom">
+            <div className="orderdetail-thumbnail-mobile">
+              {media}
             </div>
-          )}
+
+            <div className="orderdetail-quantity-mobile">
+              {item.quantity}
+            </div>
+
+            <div className="orderdetail-mobile-right">
+              <StatusButton />
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -599,185 +658,241 @@ const OrderDetail = () => {
   };
 
   return (
-    <Page
-      title={`Order ${order.name}`}
-      subtitle={`${new Date(order.created_at).toLocaleDateString()} • $${order.subtotal_price} • ${order.total_quantity} items`}
-      backAction={{ content: 'Back to Packer', onAction: () => navigate('/packer') }}
-      primaryAction={primaryAction}
-      secondaryActions={secondaryActions}
-    >
-      {message && (
-        <div style={{ 
-          padding: '12px', 
-          marginBottom: '16px', 
-          backgroundColor: message.includes('Error') || message.includes('error') ? '#fef1f2' : '#d4edda', 
-          borderRadius: '4px',
-          color: message.includes('Error') || message.includes('error') ? '#d72c0d' : '#1a7f37'
-        }}>
-          {message}
-        </div>
-      )}
+    <>
+      <style>{`
+        /* OrderDetail 移动端响应式样式 */
+        .orderdetail-item-container {
+          position: relative;
+        }
 
-      <Layout>
-        <Layout.Section>
-          <Card>
-            <div style={{ padding: '16px', position: 'relative' }}>
-              {order.status === 'holding' && (
-                <div style={{
-                  position: 'absolute',
-                  top: '16px',
-                  right: '16px'
-                }}>
-                  <span style={{
-                    display: 'inline-block',
-                    padding: '4px 12px',
-                    borderRadius: '6px',
-                    backgroundColor: '#9c6ade',
-                    color: 'white',
-                    fontSize: '14px',
-                    fontWeight: '500'
+        .orderdetail-item-desktop {
+          display: flex;
+          align-items: center;
+        }
+
+        .orderdetail-item-mobile {
+          display: none;
+        }
+
+        /* 手机端响应式 (600px 以下) */
+        @media (max-width: 600px) {
+          .orderdetail-item-desktop {
+            display: none;
+          }
+
+          .orderdetail-item-mobile {
+            display: block;
+            width: 100%;
+          }
+
+          .orderdetail-mobile-text {
+            margin-bottom: 12px;
+          }
+
+          .orderdetail-mobile-bottom {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+          }
+
+          .orderdetail-thumbnail-mobile {
+            flex-shrink: 0;
+          }
+
+          .orderdetail-quantity-mobile {
+            font-size: 24px;
+            line-height: 1;
+            min-width: 30px;
+            flex-shrink: 0;
+            align-self: center;
+          }
+
+          .orderdetail-mobile-right {
+            margin-left: auto;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 8px;
+          }
+        }
+      `}</style>
+
+      <Page
+        title={`Order ${order.name}`}
+        subtitle={`${new Date(order.created_at).toLocaleDateString()} • $${order.subtotal_price} • ${order.total_quantity} items`}
+        backAction={{ content: 'Back to Packer', onAction: () => navigate('/packer') }}
+        primaryAction={primaryAction}
+        secondaryActions={secondaryActions}
+      >
+        {message && (
+          <div style={{ 
+            padding: '12px', 
+            marginBottom: '16px', 
+            backgroundColor: message.includes('Error') || message.includes('error') ? '#fef1f2' : '#d4edda', 
+            borderRadius: '4px',
+            color: message.includes('Error') || message.includes('error') ? '#d72c0d' : '#1a7f37'
+          }}>
+            {message}
+          </div>
+        )}
+
+        <Layout>
+          <Layout.Section>
+            <Card>
+              <div style={{ padding: '16px', position: 'relative' }}>
+                {order.status === 'holding' && (
+                  <div style={{
+                    position: 'absolute',
+                    top: '16px',
+                    right: '16px'
                   }}>
-                    Holding
-                  </span>
+                    <span style={{
+                      display: 'inline-block',
+                      padding: '4px 12px',
+                      borderRadius: '6px',
+                      backgroundColor: '#9c6ade',
+                      color: 'white',
+                      fontSize: '14px',
+                      fontWeight: '500'
+                    }}>
+                      Holding
+                    </span>
+                  </div>
+                )}
+
+                <Text variant="headingSm" as="h3">Shipping Address</Text>
+                <div style={{ marginTop: '12px' }}>
+                  <BlockStack gap="1">
+                    <Text as="p">{order.shipping_name}</Text>
+                    <Text as="p">{order.shipping_address1}</Text>
+                    {order.shipping_address2 && <Text as="p">{order.shipping_address2}</Text>}
+                    <Text as="p">
+                      {order.shipping_city}, {order.shipping_province} {order.shipping_zip}
+                    </Text>
+                    <Text as="p">{order.shipping_country}</Text>
+                  </BlockStack>
                 </div>
-              )}
 
-              <Text variant="headingSm" as="h3">Shipping Address</Text>
-              <div style={{ marginTop: '12px' }}>
-                <BlockStack gap="1">
-                  <Text as="p">{order.shipping_name}</Text>
-                  <Text as="p">{order.shipping_address1}</Text>
-                  {order.shipping_address2 && <Text as="p">{order.shipping_address2}</Text>}
-                  <Text as="p">
-                    {order.shipping_city}, {order.shipping_province} {order.shipping_zip}
-                  </Text>
-                  <Text as="p">{order.shipping_country}</Text>
-                </BlockStack>
-              </div>
-
-              {order.packer_note && (
-                <div style={{ 
-                  marginTop: '16px', 
-                  paddingTop: '16px', 
-                  borderTop: '1px solid #e1e3e5' 
-                }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Text variant="headingSm" as="h3">Note</Text>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <Button 
-                        size="slim" 
-                        onClick={() => {
-                          setNoteValue(order.packer_note);
-                          setNoteModal(true);
-                        }}
-                      >
-                        Edit
-                      </Button>
-                      <Button 
-                        size="slim" 
-                        destructive 
-                        onClick={handleNoteDelete}
-                      >
-                        Delete
-                      </Button>
+                {order.packer_note && (
+                  <div style={{ 
+                    marginTop: '16px', 
+                    paddingTop: '16px', 
+                    borderTop: '1px solid #e1e3e5' 
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Text variant="headingSm" as="h3">Note</Text>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <Button 
+                          size="slim" 
+                          onClick={() => {
+                            setNoteValue(order.packer_note);
+                            setNoteModal(true);
+                          }}
+                        >
+                          Edit
+                        </Button>
+                        <Button 
+                          size="slim" 
+                          destructive 
+                          onClick={handleNoteDelete}
+                        >
+                          Delete
+                        </Button>
+                      </div>
+                    </div>
+                    <div style={{ marginTop: '8px' }}>
+                      <Text as="p">{order.packer_note}</Text>
                     </div>
                   </div>
-                  <div style={{ marginTop: '8px' }}>
-                    <Text as="p">{order.packer_note}</Text>
+                )}
+              </div>
+            </Card>
+          </Layout.Section>
+
+          <Layout.Section>
+            <Card>
+              <div>
+                {lineItems.map(item => (
+                  <div key={item.id}>
+                    {renderLineItem(item)}
                   </div>
-                </div>
-              )}
-            </div>
-          </Card>
-        </Layout.Section>
+                ))}
+              </div>
+            </Card>
+          </Layout.Section>
+        </Layout>
 
-        <Layout.Section>
-          <Card>
-            <div>
-              {lineItems.map(item => (
-                <div key={item.id}>
-                  {renderLineItem(item)}
-                </div>
-              ))}
-            </div>
-          </Card>
-        </Layout.Section>
-      </Layout>
+        <Modal
+          open={noteModal}
+          onClose={() => setNoteModal(false)}
+          title="Order Note"
+          primaryAction={{
+            content: 'Save',
+            onAction: handleNoteSave
+          }}
+          secondaryActions={[
+            {
+              content: 'Cancel',
+              onAction: () => setNoteModal(false)
+            }
+          ]}
+        >
+          <Modal.Section>
+            <TextField
+              label="Note (max 50 characters)"
+              value={noteValue}
+              onChange={setNoteValue}
+              maxLength={50}
+              autoComplete="off"
+              placeholder="Enter a note for this order"
+              showCharacterCount
+            />
+          </Modal.Section>
+        </Modal>
 
-      {/* Note Modal */}
-      <Modal
-        open={noteModal}
-        onClose={() => setNoteModal(false)}
-        title="Order Note"
-        primaryAction={{
-          content: 'Save',
-          onAction: handleNoteSave
-        }}
-        secondaryActions={[
-          {
-            content: 'Cancel',
-            onAction: () => setNoteModal(false)
-          }
-        ]}
-      >
-        <Modal.Section>
-          <TextField
-            label="Note (max 50 characters)"
-            value={noteValue}
-            onChange={setNoteValue}
-            maxLength={50}
-            autoComplete="off"
-            placeholder="Enter a note for this order"
-            showCharacterCount
-          />
-        </Modal.Section>
-      </Modal>
+        <Modal
+          open={selectedImage !== null}
+          onClose={() => setSelectedImage(null)}
+          title={selectedImage?.title || 'Product Image'}
+        >
+          <Modal.Section>
+            {selectedImage && (
+              <BlockStack gap="4">
+                <img 
+                  src={selectedImage.url} 
+                  alt="Product" 
+                  style={{ width: '100%', maxHeight: '500px', objectFit: 'contain' }} 
+                />
+                <Button 
+                  url={selectedImage.link} 
+                  external
+                  variant="primary"
+                  fullWidth
+                >
+                  View Product on Website
+                </Button>
+              </BlockStack>
+            )}
+          </Modal.Section>
+        </Modal>
 
-      {/* Image Modal */}
-      <Modal
-        open={selectedImage !== null}
-        onClose={() => setSelectedImage(null)}
-        title={selectedImage?.title || 'Product Image'}
-      >
-        <Modal.Section>
-          {selectedImage && (
-            <BlockStack gap="4">
-              <img 
-                src={selectedImage.url} 
-                alt="Product" 
-                style={{ width: '100%', maxHeight: '500px', objectFit: 'contain' }} 
-              />
-              <Button 
-                url={selectedImage.link} 
-                external
-                variant="primary"
-                fullWidth
-              >
-                View Product on Website
-              </Button>
-            </BlockStack>
-          )}
-        </Modal.Section>
-      </Modal>
+        <WeightInputModal
+          open={weightModal !== null}
+          item={weightModal}
+          onClose={() => setWeightModal(null)}
+          onSubmit={handleWeightSubmit}
+        />
 
-      {/* Weight Input Modal */}
-      <WeightInputModal
-        open={weightModal !== null}
-        item={weightModal}
-        onClose={() => setWeightModal(null)}
-        onSubmit={handleWeightSubmit}
-      />
-
-      {/* Complete Order Modal */}
-      <CompleteOrderModal
-        open={completeModal}
-        orderName={order.name}
-        hasWeightWarning={hasWeightWarning}
-        boxTypes={boxTypes}
-        onClose={() => setCompleteModal(false)}
-        onComplete={handleOrderComplete}
-      />
-    </Page>
+        <CompleteOrderModal
+          open={completeModal}
+          orderName={order.name}
+          hasWeightWarning={hasWeightWarning}
+          boxTypes={boxTypes}
+          onClose={() => setCompleteModal(false)}
+          onComplete={handleOrderComplete}
+        />
+      </Page>
+    </>
   );
 };
 
