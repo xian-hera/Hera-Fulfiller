@@ -221,7 +221,6 @@ const Transfer = () => {
     }
   };
 
-  // 🆕 设置 Out of Stock
   const handleOutClick = async (item) => {
     try {
       await axios.patch(`/api/transfer/items/${item.id}`, { 
@@ -235,7 +234,6 @@ const Transfer = () => {
     }
   };
 
-  // 🆕 撤销 Out of Stock
   const handleOutUndo = async (item) => {
     try {
       await axios.patch(`/api/transfer/items/${item.id}`, { 
@@ -301,7 +299,6 @@ const Transfer = () => {
   };
 
   const getItemBadge = (status, item, onBadgeClick) => {
-    // 🆕 Out of Stock 优先显示
     if (item.out_of_stock === 1) {
       return (
         <Badge tone="critical">Out of Stock</Badge>
@@ -362,120 +359,141 @@ const Transfer = () => {
     );
 
     return (
-      <div style={{ 
-        padding: '22px 16px', 
-        borderBottom: '1px solid #e1e3e5',
-        display: 'flex',
-        alignItems: 'center'
+      <div className="transfer-item-container" style={{ 
+        padding: '16px', 
+        borderBottom: '1px solid #e1e3e5'
       }}>
-        <div style={{ marginRight: '16px' }}>
-          {media}
-        </div>
-
-        <div style={{ 
-          fontSize: '38px', 
-          lineHeight: 1,
-          marginRight: '20px',
-          marginTop: '5px',
-          minWidth: '50px'
-        }}>
-          {quantity}
-        </div>
-
-        <div style={{ flex: 1, maxWidth: 'calc(100% - 350px)' }}>
-          <BlockStack gap="1">
-            <div style={{ 
-              wordWrap: 'break-word', 
-              overflowWrap: 'break-word',
-              maxWidth: '60ch'
-            }}>
-              <Text variant="bodyLg" fontWeight="bold">
-                {brand} {title} {size}
-              </Text>
-            </div>
-            
-            {variant_title && (
-              <Text variant="bodyMd">
-                {variant_title}
-              </Text>
-            )}
-            
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Text variant="bodySm">
-                {formatSKU(sku)}
-              </Text>
-              <button
-                onClick={() => handleSkuCopy(sku)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: '#005bd3',
-                  cursor: 'pointer',
-                  fontSize: '12px',
-                  padding: 0
-                }}
-              >
-                Copy
-              </button>
-            </div>
-            
-            <Text variant="bodySm" tone="subdued">
-              #{order_number}
-            </Text>
-          </BlockStack>
-        </div>
-
-        <div style={{ 
+        {/* 桌面端布局 - 完全保留原有样式 */}
+        <div className="transfer-item-desktop" style={{
           display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'flex-end',
-          gap: '17px',
-          marginLeft: 'auto'
+          alignItems: 'center'
         }}>
-          {clearMode ? (
-            <input
-              type="checkbox"
-              checked={selectedItems.includes(id)}
-              onChange={() => handleItemSelect(id)}
-              style={{ width: '20px', height: '20px' }}
-            />
-          ) : (
-            <>
-              {/* 第一行：Transfer info 和状态标签 */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                {(status === 'waiting' || status === 'received' || status === 'found') && transfer_from && out_of_stock !== 1 && (
-                  <Text variant="bodySm" fontWeight="bold" as="span" tone="info">
-                    {transfer_from}, {formatDate(estimate_month, estimate_day)}
-                  </Text>
-                )}
-                {getItemBadge(status, item, handleWaitingBadgeClick)}
+          <div style={{ marginRight: '16px' }}>
+            {media}
+          </div>
+
+          <div style={{ 
+            fontSize: '38px', 
+            lineHeight: 1,
+            marginRight: '20px',
+            marginTop: '5px',
+            minWidth: '50px'
+          }}>
+            {quantity}
+          </div>
+
+          <div style={{ flex: 1, maxWidth: 'calc(100% - 350px)' }}>
+            <BlockStack gap="1">
+              <div style={{ 
+                wordWrap: 'break-word', 
+                overflowWrap: 'break-word',
+                maxWidth: '60ch'
+              }}>
+                <Text variant="bodyLg" fontWeight="bold">
+                  {brand} {title} {size}
+                </Text>
               </div>
               
-              {/* 第二行：主按钮（Transfer/Received/Found/Undo）*/}
-              {out_of_stock !== 1 ? (
-                <>
-                  {status === 'transferring' && (
-                    <div style={{ display: 'flex', gap: '12px' }}>
-                      <button
-                        onClick={() => handleBlueClick(item)}
-                        style={{
-                          backgroundColor: 'white',
-                          color: '#0080FF',
-                          border: '2px solid #0080FF',
-                          borderRadius: '8px',
-                          padding: '8px 16px',
-                          fontSize: '14px',
-                          cursor: 'pointer',
-                          fontWeight: '500',
-                          minWidth: '80px'
-                        }}
-                      >
-                        Transfer
-                      </button>
+              {variant_title && (
+                <Text variant="bodyMd">
+                  {variant_title}
+                </Text>
+              )}
+              
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Text variant="bodySm">
+                  {formatSKU(sku)}
+                </Text>
+                <button
+                  onClick={() => handleSkuCopy(sku)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: '#005bd3',
+                    cursor: 'pointer',
+                    fontSize: '12px',
+                    padding: 0
+                  }}
+                >
+                  Copy
+                </button>
+              </div>
+              
+              <Text variant="bodySm" tone="subdued">
+                #{order_number}
+              </Text>
+            </BlockStack>
+          </div>
+
+          <div style={{ 
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'flex-end',
+            gap: '17px',
+            marginLeft: 'auto'
+          }}>
+            {clearMode ? (
+              <input
+                type="checkbox"
+                checked={selectedItems.includes(id)}
+                onChange={() => handleItemSelect(id)}
+                style={{ width: '20px', height: '20px' }}
+              />
+            ) : (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  {(status === 'waiting' || status === 'received' || status === 'found') && transfer_from && out_of_stock !== 1 && (
+                    <Text variant="bodySm" fontWeight="bold" as="span" tone="info">
+                      {transfer_from}, {formatDate(estimate_month, estimate_day)}
+                    </Text>
+                  )}
+                  {getItemBadge(status, item, handleWaitingBadgeClick)}
+                </div>
+                
+                {out_of_stock !== 1 ? (
+                  <>
+                    {status === 'transferring' && (
+                      <div style={{ display: 'flex', gap: '12px' }}>
+                        <button
+                          onClick={() => handleBlueClick(item)}
+                          style={{
+                            backgroundColor: 'white',
+                            color: '#0080FF',
+                            border: '2px solid #0080FF',
+                            borderRadius: '8px',
+                            padding: '8px 16px',
+                            fontSize: '14px',
+                            cursor: 'pointer',
+                            fontWeight: '500',
+                            minWidth: '80px'
+                          }}
+                        >
+                          Transfer
+                        </button>
+                        <button
+                          onClick={() => handleGreenClick(item)}
+                          style={{
+                            backgroundColor: '#00A047',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '8px',
+                            padding: '8px 16px',
+                            fontSize: '14px',
+                            cursor: 'pointer',
+                            fontWeight: '500',
+                            minWidth: '80px'
+                          }}
+                        >
+                          Found
+                        </button>
+                      </div>
+                    )}
+                    
+                    {status === 'waiting' && (
                       <button
                         onClick={() => handleGreenClick(item)}
                         style={{
-                          backgroundColor: '#00A047',
+                          backgroundColor: '#0080FF',
                           color: 'white',
                           border: 'none',
                           borderRadius: '8px',
@@ -483,62 +501,58 @@ const Transfer = () => {
                           fontSize: '14px',
                           cursor: 'pointer',
                           fontWeight: '500',
-                          minWidth: '80px'
+                          minWidth: '100px'
                         }}
                       >
-                        Found
+                        Received
                       </button>
-                    </div>
-                  )}
-                  
-                  {status === 'waiting' && (
+                    )}
+                  </>
+                ) : (
+                  <button
+                    onClick={() => handleOutUndo(item)}
+                    style={{
+                      backgroundColor: '#0080FF',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '8px',
+                      padding: '8px 16px',
+                      fontSize: '14px',
+                      cursor: 'pointer',
+                      fontWeight: '500',
+                      minWidth: '100px'
+                    }}
+                  >
+                    Undo
+                  </button>
+                )}
+                
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  {out_of_stock !== 1 && (status === 'transferring' || status === 'waiting') && (
                     <button
-                      onClick={() => handleGreenClick(item)}
+                      onClick={() => handleOutClick(item)}
                       style={{
-                        backgroundColor: '#0080FF',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '8px',
-                        padding: '8px 16px',
-                        fontSize: '14px',
+                        backgroundColor: 'white',
+                        color: '#D72C0D',
+                        border: '1px solid #D72C0D',
+                        borderRadius: '6px',
+                        padding: '4px 12px',
+                        fontSize: '13px',
                         cursor: 'pointer',
                         fontWeight: '500',
-                        minWidth: '100px'
+                        minWidth: '60px'
                       }}
                     >
-                      Received
+                      OUT
                     </button>
                   )}
-                </>
-              ) : (
-                <button
-                  onClick={() => handleOutUndo(item)}
-                  style={{
-                    backgroundColor: '#0080FF',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '8px',
-                    padding: '8px 16px',
-                    fontSize: '14px',
-                    cursor: 'pointer',
-                    fontWeight: '500',
-                    minWidth: '100px'
-                  }}
-                >
-                  Undo
-                </button>
-              )}
-              
-              {/* 🆕 第三行：OUT + Copy 按钮（小按钮，同一行）*/}
-              <div style={{ display: 'flex', gap: '8px' }}>
-                {/* OUT 按钮：只在非 out_of_stock 状态且是 transferring/waiting 时显示 */}
-                {out_of_stock !== 1 && (status === 'transferring' || status === 'waiting') && (
+                  
                   <button
-                    onClick={() => handleOutClick(item)}
+                    onClick={() => handleCopy(id)}
                     style={{
                       backgroundColor: 'white',
-                      color: '#D72C0D',
-                      border: '1px solid #D72C0D',
+                      color: '#202223',
+                      border: '1px solid #c9cccf',
                       borderRadius: '6px',
                       padding: '4px 12px',
                       fontSize: '13px',
@@ -547,30 +561,231 @@ const Transfer = () => {
                       minWidth: '60px'
                     }}
                   >
-                    OUT
+                    Copy
                   </button>
-                )}
-                
-                {/* Copy 按钮 */}
-                <button
-                  onClick={() => handleCopy(id)}
-                  style={{
-                    backgroundColor: 'white',
-                    color: '#202223',
-                    border: '1px solid #c9cccf',
-                    borderRadius: '6px',
-                    padding: '4px 12px',
-                    fontSize: '13px',
-                    cursor: 'pointer',
-                    fontWeight: '500',
-                    minWidth: '60px'
-                  }}
-                >
-                  Copy
-                </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* 移动端布局 - 新增 */}
+        <div className="transfer-item-mobile">
+          {/* 第一行：产品信息文本 */}
+          <div className="transfer-mobile-text">
+            <div style={{ 
+              fontSize: '12px',
+              color: '#6d7175',
+              marginBottom: '4px',
+              wordBreak: 'break-word'
+            }}>
+              {brand}
+            </div>
+            
+            <div style={{ 
+              fontSize: '14px',
+              fontWeight: '600',
+              marginBottom: '4px',
+              wordBreak: 'break-word',
+              lineHeight: '1.4'
+            }}>
+              {title} {size}
+            </div>
+            
+            {variant_title && (
+              <div style={{ 
+                fontSize: '12px',
+                color: '#6d7175',
+                marginBottom: '4px',
+                wordBreak: 'break-word'
+              }}>
+                {variant_title}
               </div>
-            </>
-          )}
+            )}
+            
+            <div 
+              onClick={() => handleSkuCopy(sku)}
+              style={{ 
+                fontSize: '12px',
+                fontWeight: '600',
+                marginBottom: '4px',
+                wordBreak: 'break-all',
+                cursor: 'pointer',
+                color: '#0080FF'
+              }}
+            >
+              SKU: {formatSKU(sku)}
+            </div>
+            
+            <div style={{ 
+              fontSize: '12px',
+              color: '#6d7175',
+              marginBottom: '8px'
+            }}>
+              Order: #{order_number}
+            </div>
+
+            {/* Badges */}
+            <div style={{ 
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: '8px',
+              marginBottom: '8px'
+            }}>
+              {getItemBadge(status, item, handleWaitingBadgeClick)}
+              {out_of_stock === 1 && <Badge tone="critical">Out of Stock</Badge>}
+            </div>
+
+            {/* Transfer info */}
+            {(status === 'waiting' || status === 'received' || status === 'found') && transfer_from && out_of_stock !== 1 && (
+              <div style={{ 
+                fontSize: '12px',
+                color: '#0080FF',
+                fontWeight: '600',
+                marginBottom: '8px',
+                wordBreak: 'break-word'
+              }}>
+                From: {transfer_from}, Est: {formatDate(estimate_month, estimate_day)}
+              </div>
+            )}
+          </div>
+
+          {/* 第二行：图片 + 数量 + 按钮区域 */}
+          <div className="transfer-mobile-bottom">
+            <div className="transfer-thumbnail-mobile">
+              {media}
+            </div>
+
+            <div className="transfer-quantity-mobile">
+              {quantity}
+            </div>
+
+            <div className="transfer-mobile-right">
+              {clearMode ? (
+                <input
+                  type="checkbox"
+                  checked={selectedItems.includes(id)}
+                  onChange={() => handleItemSelect(id)}
+                  style={{ width: '20px', height: '20px' }}
+                />
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {out_of_stock !== 1 ? (
+                    <>
+                      {status === 'transferring' && (
+                        <>
+                          <button
+                            onClick={() => handleBlueClick(item)}
+                            style={{
+                              backgroundColor: 'white',
+                              color: '#0080FF',
+                              border: '2px solid #0080FF',
+                              borderRadius: '6px',
+                              padding: '6px 12px',
+                              fontSize: '13px',
+                              cursor: 'pointer',
+                              fontWeight: '500',
+                              minWidth: '80px'
+                            }}
+                          >
+                            Transfer
+                          </button>
+                          <button
+                            onClick={() => handleGreenClick(item)}
+                            style={{
+                              backgroundColor: '#00A047',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: '6px',
+                              padding: '6px 12px',
+                              fontSize: '13px',
+                              cursor: 'pointer',
+                              fontWeight: '500',
+                              minWidth: '80px'
+                            }}
+                          >
+                            Found
+                          </button>
+                        </>
+                      )}
+                      
+                      {status === 'waiting' && (
+                        <button
+                          onClick={() => handleGreenClick(item)}
+                          style={{
+                            backgroundColor: '#0080FF',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '6px',
+                            padding: '6px 12px',
+                            fontSize: '13px',
+                            cursor: 'pointer',
+                            fontWeight: '500',
+                            minWidth: '80px'
+                          }}
+                        >
+                          Received
+                        </button>
+                      )}
+                      
+                      {(status === 'transferring' || status === 'waiting') && (
+                        <button
+                          onClick={() => handleOutClick(item)}
+                          style={{
+                            backgroundColor: 'white',
+                            color: '#D72C0D',
+                            border: '1px solid #D72C0D',
+                            borderRadius: '6px',
+                            padding: '4px 12px',
+                            fontSize: '13px',
+                            cursor: 'pointer',
+                            fontWeight: '500',
+                            minWidth: '60px'
+                          }}
+                        >
+                          OUT
+                        </button>
+                      )}
+                    </>
+                  ) : (
+                    <button
+                      onClick={() => handleOutUndo(item)}
+                      style={{
+                        backgroundColor: '#0080FF',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '6px',
+                        padding: '6px 12px',
+                        fontSize: '13px',
+                        cursor: 'pointer',
+                        fontWeight: '500',
+                        minWidth: '80px'
+                      }}
+                    >
+                      Undo
+                    </button>
+                  )}
+                  
+                  <button
+                    onClick={() => handleCopy(id)}
+                    style={{
+                      backgroundColor: 'white',
+                      color: '#202223',
+                      border: '1px solid #c9cccf',
+                      borderRadius: '6px',
+                      padding: '4px 12px',
+                      fontSize: '13px',
+                      cursor: 'pointer',
+                      fontWeight: '500',
+                      minWidth: '60px'
+                    }}
+                  >
+                    Copy
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -584,204 +799,264 @@ const Transfer = () => {
   const statusCounts = getStatusCounts();
 
   return (
-    <Frame>
-      <Page
-        title="Transfer"
-        backAction={{ content: 'Dashboard', onAction: () => navigate('/') }}
-        primaryAction={{
-          content: clearMode ? 'Delete Selected' : 'Clear Mode',
-          destructive: clearMode,
-          onAction: clearMode ? handleClearSelected : handleClearToggle
-        }}
-        secondaryActions={
-          clearMode
-            ? [
-                {
-                  content: 'Cancel',
-                  onAction: () => {
-                    setClearMode(false);
-                    setSelectedItems([]);
-                  }
-                }
-              ]
-            : []
+    <>
+      <style>{`
+        /* Transfer 移动端响应式样式 */
+        .transfer-item-container {
+          position: relative;
         }
-      >
-        <Layout>
-          <Layout.Section>
-            <Card>
-              <div style={{ padding: '16px' }}>
-                <BlockStack gap="4">
-                  <ChoiceList
-                    title="Show items"
-                    choices={[
-                      { label: `Transferring (${statusCounts.transferring})`, value: 'transferring' },
-                      { label: `Waiting (${statusCounts.waiting})`, value: 'waiting' },
-                      { label: `Received/Found (${statusCounts.received})`, value: 'received' }
-                    ]}
-                    selected={statusFilter}
-                    onChange={setStatusFilter}
-                    allowMultiple
-                  />
-                  
-                  <div style={{ 
-                    paddingTop: '12px', 
-                    borderTop: '1px solid #e1e3e5'
-                  }}>
-                    <div style={{ marginBottom: '12px' }}>
-                      <Checkbox
-                        label="Receiving"
-                        checked={receivingEnabled}
-                        onChange={handleReceivingToggle}
-                      />
-                    </div>
-                    
-                    {receivingEnabled && (
-                      <BlockStack gap="3">
-                        <ChoiceList
-                          title="Transfer From"
-                          choices={receivingOptions.transferFroms.map(from => ({
-                            label: from,
-                            value: from
-                          }))}
-                          selected={receivingFromFilter}
-                          onChange={setReceivingFromFilter}
-                          allowMultiple
-                        />
-                        
-                        <ChoiceList
-                          title="Transfer Date"
-                          choices={receivingOptions.transferDates.map(date => ({
-                            label: date,
-                            value: date
-                          }))}
-                          selected={receivingDateFilter}
-                          onChange={setReceivingDateFilter}
-                          allowMultiple
-                        />
-                      </BlockStack>
-                    )}
-                  </div>
-                </BlockStack>
-              </div>
-            </Card>
-          </Layout.Section>
 
-          <Layout.Section>
-            <Card>
-              <div>
-                {filteredItems.length === 0 ? (
-                  <Banner>No items to transfer</Banner>
-                ) : (
-                  filteredItems.map(item => (
-                    <div key={item.id}>
-                      {renderItem(item)}
-                    </div>
-                  ))
-                )}
-              </div>
-            </Card>
-          </Layout.Section>
-        </Layout>
+        .transfer-item-desktop {
+          display: flex;
+          align-items: center;
+        }
 
-        <Modal
-          open={selectedImage !== null}
-          onClose={() => setSelectedImage(null)}
-          title={selectedImage?.title || 'Product Image'}
-        >
-          <Modal.Section>
-            {selectedImage && (
-              <BlockStack gap="4">
-                <img 
-                  src={selectedImage.url} 
-                  alt="Product" 
-                  style={{ width: '100%', maxHeight: '500px', objectFit: 'contain' }} 
-                />
-                <Button 
-                  url={selectedImage.link} 
-                  external
-                  variant="primary"
-                  fullWidth
-                >
-                  View Product on Website
-                </Button>
-              </BlockStack>
-            )}
-          </Modal.Section>
-        </Modal>
+        .transfer-item-mobile {
+          display: none;
+        }
 
-        <Modal
-          open={transferModal !== null}
-          onClose={() => setTransferModal(null)}
-          title="Transfer Information"
+        /* 手机端响应式 (600px 以下) */
+        @media (max-width: 600px) {
+          .transfer-item-desktop {
+            display: none;
+          }
+
+          .transfer-item-mobile {
+            display: block;
+            width: 100%;
+          }
+
+          .transfer-mobile-text {
+            margin-bottom: 12px;
+          }
+
+          .transfer-mobile-bottom {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+          }
+
+          .transfer-thumbnail-mobile {
+            flex-shrink: 0;
+          }
+
+          .transfer-quantity-mobile {
+            font-size: 24px;
+            line-height: 1;
+            min-width: 30px;
+            flex-shrink: 0;
+            align-self: center;
+          }
+
+          .transfer-mobile-right {
+            margin-left: auto;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 8px;
+          }
+        }
+      `}</style>
+
+      <Frame>
+        <Page
+          title="Transfer"
+          backAction={{ content: 'Dashboard', onAction: () => navigate('/') }}
           primaryAction={{
-            content: 'Submit',
-            onAction: handleTransferSubmit
+            content: clearMode ? 'Delete Selected' : 'Clear Mode',
+            destructive: clearMode,
+            onAction: clearMode ? handleClearSelected : handleClearToggle
           }}
-          secondaryActions={[
-            {
-              content: 'Cancel',
-              onAction: () => setTransferModal(null)
-            }
-          ]}
+          secondaryActions={
+            clearMode
+              ? [
+                  {
+                    content: 'Cancel',
+                    onAction: () => {
+                      setClearMode(false);
+                      setSelectedItems([]);
+                    }
+                  }
+                ]
+              : []
+          }
         >
-          <Modal.Section>
-            {transferModal && (
-              <BlockStack gap="4">
-                {transferModal.quantity > 1 && (
+          <Layout>
+            <Layout.Section>
+              <Card>
+                <div style={{ padding: '16px' }}>
+                  <BlockStack gap="4">
+                    <ChoiceList
+                      title="Show items"
+                      choices={[
+                        { label: `Transferring (${statusCounts.transferring})`, value: 'transferring' },
+                        { label: `Waiting (${statusCounts.waiting})`, value: 'waiting' },
+                        { label: `Received/Found (${statusCounts.received})`, value: 'received' }
+                      ]}
+                      selected={statusFilter}
+                      onChange={setStatusFilter}
+                      allowMultiple
+                    />
+                    
+                    <div style={{ 
+                      paddingTop: '12px', 
+                      borderTop: '1px solid #e1e3e5'
+                    }}>
+                      <div style={{ marginBottom: '12px' }}>
+                        <Checkbox
+                          label="Receiving"
+                          checked={receivingEnabled}
+                          onChange={handleReceivingToggle}
+                        />
+                      </div>
+                      
+                      {receivingEnabled && (
+                        <BlockStack gap="3">
+                          <ChoiceList
+                            title="Transfer From"
+                            choices={receivingOptions.transferFroms.map(from => ({
+                              label: from,
+                              value: from
+                            }))}
+                            selected={receivingFromFilter}
+                            onChange={setReceivingFromFilter}
+                            allowMultiple
+                          />
+                          
+                          <ChoiceList
+                            title="Transfer Date"
+                            choices={receivingOptions.transferDates.map(date => ({
+                              label: date,
+                              value: date
+                            }))}
+                            selected={receivingDateFilter}
+                            onChange={setReceivingDateFilter}
+                            allowMultiple
+                          />
+                        </BlockStack>
+                      )}
+                    </div>
+                  </BlockStack>
+                </div>
+              </Card>
+            </Layout.Section>
+
+            <Layout.Section>
+              <Card>
+                <div>
+                  {filteredItems.length === 0 ? (
+                    <Banner>No items to transfer</Banner>
+                  ) : (
+                    filteredItems.map(item => (
+                      <div key={item.id}>
+                        {renderItem(item)}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </Card>
+            </Layout.Section>
+          </Layout>
+
+          <Modal
+            open={selectedImage !== null}
+            onClose={() => setSelectedImage(null)}
+            title={selectedImage?.title || 'Product Image'}
+          >
+            <Modal.Section>
+              {selectedImage && (
+                <BlockStack gap="4">
+                  <img 
+                    src={selectedImage.url} 
+                    alt="Product" 
+                    style={{ width: '100%', maxHeight: '500px', objectFit: 'contain' }} 
+                  />
+                  <Button 
+                    url={selectedImage.link} 
+                    external
+                    variant="primary"
+                    fullWidth
+                  >
+                    View Product on Website
+                  </Button>
+                </BlockStack>
+              )}
+            </Modal.Section>
+          </Modal>
+
+          <Modal
+            open={transferModal !== null}
+            onClose={() => setTransferModal(null)}
+            title="Transfer Information"
+            primaryAction={{
+              content: 'Submit',
+              onAction: handleTransferSubmit
+            }}
+            secondaryActions={[
+              {
+                content: 'Cancel',
+                onAction: () => setTransferModal(null)
+              }
+            ]}
+          >
+            <Modal.Section>
+              {transferModal && (
+                <BlockStack gap="4">
+                  {transferModal.quantity > 1 && (
+                    <TextField
+                      label="Transfer Quantity"
+                      type="number"
+                      value={transferData.transferQuantity}
+                      onChange={(value) => setTransferData({ ...transferData, transferQuantity: value })}
+                      max={transferModal.quantity}
+                      autoComplete="off"
+                    />
+                  )}
                   <TextField
-                    label="Transfer Quantity"
-                    type="number"
-                    value={transferData.transferQuantity}
-                    onChange={(value) => setTransferData({ ...transferData, transferQuantity: value })}
-                    max={transferModal.quantity}
+                    label="Transfer From (warehouse number)"
+                    value={transferData.transferFrom}
+                    onChange={(value) => setTransferData({ ...transferData, transferFrom: value })}
+                    placeholder="e.g., 01, 02, 03"
                     autoComplete="off"
                   />
-                )}
-                <TextField
-                  label="Transfer From (warehouse number)"
-                  value={transferData.transferFrom}
-                  onChange={(value) => setTransferData({ ...transferData, transferFrom: value })}
-                  placeholder="e.g., 01, 02, 03"
-                  autoComplete="off"
-                />
-                <div>
-                  <Text variant="bodyMd" as="p" fontWeight="semibold">
-                    Estimated Arrival (Month/Day)
-                  </Text>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
-                    <div style={{ flex: 1 }}>
-                      <TextField
-                        type="number"
-                        value={currentMonth.toString()}
-                        onChange={() => {}}
-                        disabled
-                        prefix="Month:"
-                        autoComplete="off"
-                      />
-                    </div>
-                    <Text variant="bodyLg">/</Text>
-                    <div style={{ flex: 1 }}>
-                      <TextField
-                        type="number"
-                        value={transferData.estimateDay}
-                        onChange={(value) => setTransferData({ ...transferData, estimateDay: value })}
-                        min={1}
-                        max={31}
-                        prefix="Day:"
-                        autoComplete="off"
-                      />
+                  <div>
+                    <Text variant="bodyMd" as="p" fontWeight="semibold">
+                      Estimated Arrival (Month/Day)
+                    </Text>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
+                      <div style={{ flex: 1 }}>
+                        <TextField
+                          type="number"
+                          value={currentMonth.toString()}
+                          onChange={() => {}}
+                          disabled
+                          prefix="Month:"
+                          autoComplete="off"
+                        />
+                      </div>
+                      <Text variant="bodyLg">/</Text>
+                      <div style={{ flex: 1 }}>
+                        <TextField
+                          type="number"
+                          value={transferData.estimateDay}
+                          onChange={(value) => setTransferData({ ...transferData, estimateDay: value })}
+                          min={1}
+                          max={31}
+                          prefix="Day:"
+                          autoComplete="off"
+                        />
+                      </div>
                     </div>
                   </div>
-                </div>
-              </BlockStack>
-            )}
-          </Modal.Section>
-        </Modal>
+                </BlockStack>
+              )}
+            </Modal.Section>
+          </Modal>
 
-        {toastMarkup}
-      </Page>
-    </Frame>
+          {toastMarkup}
+        </Page>
+      </Frame>
+    </>
   );
 };
 
