@@ -42,12 +42,6 @@ const Transfer = () => {
   const [toastActive, setToastActive] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
 
-  // Emoji mapping
-  const EMOJI_MAP = {
-    '01': '🟫', '02': '🟧', '03': '🟨', '04': '🟩', '05': '⬛',
-    '06': '🟪', '07': '🟥', '08': '⬜', '09': '🟦', '11': '🔳'
-  };
-
   const getStatusCounts = useCallback(() => {
     return {
       transferring: items
@@ -186,29 +180,17 @@ const Transfer = () => {
     }
   };
 
-  const handleReceivedClick = async (item) => {
+  const handleGreenClick = async (item) => {
+    const newStatus = item.status === 'transferring' ? 'found' : 'received';
     try {
-      await axios.patch(`/api/transfer/items/${item.id}`, { status: 'received' });
+      await axios.patch(`/api/transfer/items/${item.id}`, { status: newStatus });
       await fetchItems();
-      showToast('Status changed to Received');
     } catch (error) {
       console.error('Error updating status:', error);
-      showToast('Error updating status');
     }
   };
 
-  const handleFoundClick = async (item) => {
-    try {
-      await axios.patch(`/api/transfer/items/${item.id}`, { status: 'found' });
-      await fetchItems();
-      showToast('Status changed to Found');
-    } catch (error) {
-      console.error('Error updating status:', error);
-      showToast('Error updating status');
-    }
-  };
-
-  const handleTransferClick = (item) => {
+  const handleBlueClick = (item) => {
     const currentDate = new Date();
     setTransferModal(item);
     setTransferData({
@@ -218,17 +200,28 @@ const Transfer = () => {
     });
   };
 
-  const handleUndoClick = async (item) => {
+  const handleWaitingBadgeClick = (item) => {
+    const currentDate = new Date();
+    setTransferModal(item);
+    setTransferData({
+      transferQuantity: item.quantity.toString(),
+      transferFrom: item.transfer_from || '',
+      estimateDay: item.estimate_day ? item.estimate_day.toString() : currentDate.getDate().toString()
+    });
+  };
+
+  const handleReceivedUndo = async (item) => {
     try {
       await axios.patch(`/api/transfer/items/${item.id}`, { status: 'transferring' });
       await fetchItems();
       showToast('Status changed to Transferring');
     } catch (error) {
-      console.error('Error undoing status:', error);
+      console.error('Error undoing received status:', error);
       showToast('Error updating status');
     }
   };
 
+  // 🆕 设置 Out of Stock
   const handleOutClick = async (item) => {
     try {
       await axios.patch(`/api/transfer/items/${item.id}`, { 
@@ -242,13 +235,15 @@ const Transfer = () => {
     }
   };
 
+  // 🆕 撤销 Out of Stock
   const handleOutUndo = async (item) => {
     try {
       await axios.patch(`/api/transfer/items/${item.id}`, { 
-        out_of_stock: 0
+        out_of_stock: 0, 
+        status: 'transferring' 
       });
       await fetchItems();
-      showToast('Out of Stock removed');
+      showToast('Out of Stock status removed');
     } catch (error) {
       console.error('Error removing out of stock:', error);
       showToast('Error updating status');
@@ -256,51 +251,42 @@ const Transfer = () => {
   };
 
   const handleTransferSubmit = async () => {
-    if (!transferData.transferFrom || !transferData.estimateDay) {
-      showToast('Please fill in all fields');
-      return;
-    }
-
-    const qty = parseInt(transferData.transferQuantity);
+    const currentDate = new Date();
+    const currentMonth = currentDate.getMonth() + 1;
     const day = parseInt(transferData.estimateDay);
+    let month = currentMonth;
 
-    if (isNaN(qty) || qty < 1 || qty > transferModal.quantity) {
-      showToast('Invalid quantity');
-      return;
+    if (day < currentDate.getDate()) {
+      month = currentMonth === 12 ? 1 : currentMonth + 1;
     }
 
-    if (isNaN(day) || day < 1 || day > 31) {
-      showToast('Invalid day');
+    if (!transferData.transferFrom) {
+      alert('Please enter Transfer From location');
       return;
     }
 
     try {
-      const currentDate = new Date();
-      const month = currentDate.getMonth() + 1;
-
-      if (qty === transferModal.quantity) {
-        await axios.patch(`/api/transfer/items/${transferModal.id}`, {
-          status: 'waiting',
-          transfer_from: transferData.transferFrom,
-          estimate_month: month,
-          estimate_day: day
-        });
-      } else {
+      const qty = parseInt(transferData.transferQuantity);
+      if (qty < transferModal.quantity) {
         await axios.post(`/api/transfer/items/${transferModal.id}/split`, {
           transferQuantity: qty,
           transfer_from: transferData.transferFrom,
           estimate_month: month,
           estimate_day: day
         });
+      } else {
+        await axios.patch(`/api/transfer/items/${transferModal.id}`, {
+          status: 'waiting',
+          transfer_from: transferData.transferFrom,
+          estimate_month: month,
+          estimate_day: day
+        });
       }
-
       await fetchItems();
       await fetchReceivingOptions();
       setTransferModal(null);
-      showToast('Transfer information updated');
     } catch (error) {
-      console.error('Error submitting transfer:', error);
-      showToast('Error updating transfer');
+      console.error('Error updating transfer:', error);
     }
   };
 
@@ -308,244 +294,282 @@ const Transfer = () => {
     if (item.image_url) {
       setSelectedImage({
         url: item.image_url,
-        link: `https://herabeauty.ca/products/${item.url_handle || ''}`,
+        link: `https://herabeauty.ca/products/${item.url_handle}`,
         title: `${item.brand} ${item.title}`
       });
     }
   };
 
+  const getItemBadge = (status, item, onBadgeClick) => {
+    // 🆕 Out of Stock 优先显示
+    if (item.out_of_stock === 1) {
+      return (
+        <Badge tone="critical">Out of Stock</Badge>
+      );
+    }
+
+    switch (status) {
+      case 'waiting':
+        return (
+          <span 
+            onClick={(e) => {
+              e.stopPropagation();
+              onBadgeClick(item);
+            }}
+            style={{ cursor: 'pointer' }}
+          >
+            <Badge tone="info">Waiting</Badge>
+          </span>
+        );
+      case 'received':
+      case 'found':
+        return (
+          <span 
+            onClick={(e) => {
+              e.stopPropagation();
+              handleReceivedUndo(item);
+            }}
+            style={{ cursor: 'pointer' }}
+          >
+            <Badge tone="success">Received</Badge>
+          </span>
+        );
+      default:
+        return <Badge>Transferring</Badge>;
+    }
+  };
+
+  const formatSKU = (sku) => {
+    if (!sku) return '';
+    return sku.match(/.{1,4}/g)?.join(' ') || sku;
+  };
+
+  const formatDate = (month, day) => {
+    const m = month.toString().padStart(2, '0');
+    const d = day.toString().padStart(2, '0');
+    return `${m}/${d}`;
+  };
+
   const renderItem = (item) => {
-    const { id, status, out_of_stock } = item;
-    const isWaiting = status === 'waiting';
-    const isReceived = status === 'received';
-    const isFound = status === 'found';
-    const isOutOfStock = out_of_stock === 1;
-    const emoji = EMOJI_MAP[item.transfer_from] || '';
+    const { id, quantity, image_url, order_number, sku, brand, title, size, status, transfer_from, estimate_month, estimate_day, variant_title, out_of_stock } = item;
+    
+    const media = image_url ? (
+      <div onClick={() => handleImageClick(item)} style={{ cursor: 'pointer' }}>
+        <Thumbnail source={image_url} alt={title} size="large" />
+      </div>
+    ) : (
+      <Thumbnail source={ImageIcon} alt="No image" size="large" />
+    );
 
     return (
-      <div style={{
-        padding: '16px',
+      <div style={{ 
+        padding: '22px 16px', 
         borderBottom: '1px solid #e1e3e5',
         display: 'flex',
-        flexDirection: 'row',
-        gap: '12px',
-        alignItems: 'flex-start'
+        alignItems: 'center'
       }}>
-        {/* Clear Mode Checkbox */}
-        {clearMode && (
-          <div style={{ 
-            flexShrink: 0,
-            alignSelf: 'center'
-          }}>
-            <Checkbox
-              checked={selectedItems.includes(id)}
-              onChange={() => handleItemSelect(id)}
-            />
-          </div>
-        )}
-
-        {/* Thumbnail */}
-        <div 
-          onClick={() => handleImageClick(item)}
-          style={{ 
-            flexShrink: 0,
-            width: '60px',
-            height: '60px',
-            cursor: item.image_url ? 'pointer' : 'default'
-          }}
-        >
-          {item.image_url ? (
-            <Thumbnail source={item.image_url} alt={item.title} size="large" />
-          ) : (
-            <Thumbnail source={ImageIcon} alt="No image" size="large" />
-          )}
+        <div style={{ marginRight: '16px' }}>
+          {media}
         </div>
 
-        {/* Quantity */}
-        <div style={{
-          fontSize: '24px',
-          fontWeight: 'bold',
-          flexShrink: 0,
-          minWidth: '30px',
-          alignSelf: 'center'
-        }}>
-          {item.quantity}
-        </div>
-
-        {/* Product Info */}
         <div style={{ 
-          flex: 1,
-          minWidth: 0,
-          overflow: 'hidden'
+          fontSize: '38px', 
+          lineHeight: 1,
+          marginRight: '20px',
+          marginTop: '5px',
+          minWidth: '50px'
         }}>
-          {/* Brand */}
-          <div style={{
-            fontSize: '12px',
-            color: '#6d7175',
-            marginBottom: '4px',
-            wordBreak: 'break-word',
-            whiteSpace: 'normal'
-          }}>
-            {item.brand}
-          </div>
+          {quantity}
+        </div>
 
-          {/* Title */}
-          <div style={{
-            fontSize: '14px',
-            fontWeight: '600',
-            marginBottom: '4px',
-            wordBreak: 'break-word',
-            whiteSpace: 'normal',
-            lineHeight: '1.4'
-          }}>
-            {item.custom_name || item.title}
-          </div>
-
-          {/* Size */}
-          {item.size && (
-            <div style={{
-              fontSize: '12px',
-              color: '#6d7175',
-              marginBottom: '4px',
-              wordBreak: 'break-word',
-              whiteSpace: 'normal'
+        <div style={{ flex: 1, maxWidth: 'calc(100% - 350px)' }}>
+          <BlockStack gap="1">
+            <div style={{ 
+              wordWrap: 'break-word', 
+              overflowWrap: 'break-word',
+              maxWidth: '60ch'
             }}>
-              {item.size}
+              <Text variant="bodyLg" fontWeight="bold">
+                {brand} {title} {size}
+              </Text>
             </div>
-          )}
-
-          {/* SKU */}
-          <div 
-            onClick={() => handleSkuCopy(item.sku)}
-            style={{
-              fontSize: '12px',
-              fontWeight: '600',
-              marginBottom: '8px',
-              wordBreak: 'break-all',
-              whiteSpace: 'normal',
-              cursor: 'pointer',
-              color: '#0080FF'
-            }}
-          >
-            SKU: {item.sku}
-          </div>
-
-          {/* Order Number */}
-          <div style={{
-            fontSize: '12px',
-            color: '#6d7175',
-            marginBottom: '8px',
-            wordBreak: 'break-word',
-            whiteSpace: 'normal'
-          }}>
-            Order: #{item.order_number}
-          </div>
-
-          {/* Status Badges and Transfer Info */}
-          <div style={{ 
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: '8px',
-            marginBottom: '8px'
-          }}>
-            {isOutOfStock && <Badge tone="critical">Out of Stock</Badge>}
-            {isWaiting && <Badge tone="info">Waiting</Badge>}
-            {isReceived && <Badge tone="success">Received</Badge>}
-            {isFound && <Badge tone="success">Found</Badge>}
-          </div>
-
-          {/* Transfer Details (只在 waiting 状态显示) */}
-          {isWaiting && item.transfer_from && (
-            <div style={{
-              fontSize: '13px',
-              color: '#0080FF',
-              fontWeight: '600',
-              marginBottom: '8px',
-              wordBreak: 'break-word',
-              whiteSpace: 'normal'
-            }}>
-              {emoji} From: {item.transfer_from} | Est: {item.estimate_month}/{item.estimate_day}
-            </div>
-          )}
-
-          {/* Action Buttons */}
-          {!clearMode && (
-            <div style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: '8px',
-              marginTop: '12px'
-            }}>
-              {/* OUT Button */}
-              {!isOutOfStock && (status === 'transferring' || status === 'waiting') && (
-                <Button
-                  size="slim"
-                  onClick={() => handleOutClick(item)}
-                >
-                  OUT
-                </Button>
-              )}
-
-              {/* Undo OUT Button */}
-              {isOutOfStock && (
-                <Button
-                  size="slim"
-                  onClick={() => handleOutUndo(item)}
-                >
-                  Undo OUT
-                </Button>
-              )}
-
-              {/* Transfer Button */}
-              {status === 'transferring' && (
-                <Button
-                  variant="primary"
-                  size="slim"
-                  onClick={() => handleTransferClick(item)}
-                >
-                  Transfer
-                </Button>
-              )}
-
-              {/* Received Button */}
-              {status === 'waiting' && (
-                <Button
-                  variant="primary"
-                  size="slim"
-                  onClick={() => handleReceivedClick(item)}
-                >
-                  Received
-                </Button>
-              )}
-
-              {/* Found Button */}
-              {(status === 'waiting' || status === 'received') && (
-                <Button
-                  size="slim"
-                  onClick={() => handleFoundClick(item)}
-                >
-                  Found
-                </Button>
-              )}
-
-              {/* Undo Button */}
-              {(status === 'waiting' || status === 'received' || status === 'found') && (
-                <Button
-                  size="slim"
-                  onClick={() => handleUndoClick(item)}
-                >
-                  Undo
-                </Button>
-              )}
-
-              {/* Copy Button */}
-              <Button
-                size="slim"
-                onClick={() => handleCopy(id)}
+            
+            {variant_title && (
+              <Text variant="bodyMd">
+                {variant_title}
+              </Text>
+            )}
+            
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Text variant="bodySm">
+                {formatSKU(sku)}
+              </Text>
+              <button
+                onClick={() => handleSkuCopy(sku)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#005bd3',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  padding: 0
+                }}
               >
                 Copy
-              </Button>
+              </button>
             </div>
+            
+            <Text variant="bodySm" tone="subdued">
+              #{order_number}
+            </Text>
+          </BlockStack>
+        </div>
+
+        <div style={{ 
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'flex-end',
+          gap: '17px',
+          marginLeft: 'auto'
+        }}>
+          {clearMode ? (
+            <input
+              type="checkbox"
+              checked={selectedItems.includes(id)}
+              onChange={() => handleItemSelect(id)}
+              style={{ width: '20px', height: '20px' }}
+            />
+          ) : (
+            <>
+              {/* 第一行：Transfer info 和状态标签 */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                {(status === 'waiting' || status === 'received' || status === 'found') && transfer_from && out_of_stock !== 1 && (
+                  <Text variant="bodySm" fontWeight="bold" as="span" tone="info">
+                    {transfer_from}, {formatDate(estimate_month, estimate_day)}
+                  </Text>
+                )}
+                {getItemBadge(status, item, handleWaitingBadgeClick)}
+              </div>
+              
+              {/* 第二行：主按钮（Transfer/Received/Found/Undo）*/}
+              {out_of_stock !== 1 ? (
+                <>
+                  {status === 'transferring' && (
+                    <div style={{ display: 'flex', gap: '12px' }}>
+                      <button
+                        onClick={() => handleBlueClick(item)}
+                        style={{
+                          backgroundColor: 'white',
+                          color: '#0080FF',
+                          border: '2px solid #0080FF',
+                          borderRadius: '8px',
+                          padding: '8px 16px',
+                          fontSize: '14px',
+                          cursor: 'pointer',
+                          fontWeight: '500',
+                          minWidth: '80px'
+                        }}
+                      >
+                        Transfer
+                      </button>
+                      <button
+                        onClick={() => handleGreenClick(item)}
+                        style={{
+                          backgroundColor: '#00A047',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '8px',
+                          padding: '8px 16px',
+                          fontSize: '14px',
+                          cursor: 'pointer',
+                          fontWeight: '500',
+                          minWidth: '80px'
+                        }}
+                      >
+                        Found
+                      </button>
+                    </div>
+                  )}
+                  
+                  {status === 'waiting' && (
+                    <button
+                      onClick={() => handleGreenClick(item)}
+                      style={{
+                        backgroundColor: '#0080FF',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '8px',
+                        padding: '8px 16px',
+                        fontSize: '14px',
+                        cursor: 'pointer',
+                        fontWeight: '500',
+                        minWidth: '100px'
+                      }}
+                    >
+                      Received
+                    </button>
+                  )}
+                </>
+              ) : (
+                <button
+                  onClick={() => handleOutUndo(item)}
+                  style={{
+                    backgroundColor: '#0080FF',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    padding: '8px 16px',
+                    fontSize: '14px',
+                    cursor: 'pointer',
+                    fontWeight: '500',
+                    minWidth: '100px'
+                  }}
+                >
+                  Undo
+                </button>
+              )}
+              
+              {/* 🆕 第三行：OUT + Copy 按钮（小按钮，同一行）*/}
+              <div style={{ display: 'flex', gap: '8px' }}>
+                {/* OUT 按钮：只在非 out_of_stock 状态且是 transferring/waiting 时显示 */}
+                {out_of_stock !== 1 && (status === 'transferring' || status === 'waiting') && (
+                  <button
+                    onClick={() => handleOutClick(item)}
+                    style={{
+                      backgroundColor: 'white',
+                      color: '#D72C0D',
+                      border: '1px solid #D72C0D',
+                      borderRadius: '6px',
+                      padding: '4px 12px',
+                      fontSize: '13px',
+                      cursor: 'pointer',
+                      fontWeight: '500',
+                      minWidth: '60px'
+                    }}
+                  >
+                    OUT
+                  </button>
+                )}
+                
+                {/* Copy 按钮 */}
+                <button
+                  onClick={() => handleCopy(id)}
+                  style={{
+                    backgroundColor: 'white',
+                    color: '#202223',
+                    border: '1px solid #c9cccf',
+                    borderRadius: '6px',
+                    padding: '4px 12px',
+                    fontSize: '13px',
+                    cursor: 'pointer',
+                    fontWeight: '500',
+                    minWidth: '60px'
+                  }}
+                >
+                  Copy
+                </button>
+              </div>
+            </>
           )}
         </div>
       </div>
@@ -660,7 +684,6 @@ const Transfer = () => {
           </Layout.Section>
         </Layout>
 
-        {/* Image Modal */}
         <Modal
           open={selectedImage !== null}
           onClose={() => setSelectedImage(null)}
@@ -687,7 +710,6 @@ const Transfer = () => {
           </Modal.Section>
         </Modal>
 
-        {/* Transfer Modal */}
         <Modal
           open={transferModal !== null}
           onClose={() => setTransferModal(null)}
