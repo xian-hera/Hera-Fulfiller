@@ -221,6 +221,7 @@ const Transfer = () => {
     }
   };
 
+  // 🆕 设置 Out of Stock
   const handleOutClick = async (item) => {
     try {
       await axios.patch(`/api/transfer/items/${item.id}`, { 
@@ -234,6 +235,7 @@ const Transfer = () => {
     }
   };
 
+  // 🆕 撤销 Out of Stock
   const handleOutUndo = async (item) => {
     try {
       await axios.patch(`/api/transfer/items/${item.id}`, { 
@@ -299,6 +301,7 @@ const Transfer = () => {
   };
 
   const getItemBadge = (status, item, onBadgeClick) => {
+    // 🆕 Out of Stock 优先显示
     if (item.out_of_stock === 1) {
       return (
         <Badge tone="critical">Out of Stock</Badge>
@@ -359,15 +362,9 @@ const Transfer = () => {
     );
 
     return (
-      <div className="transfer-item-container" style={{ 
-        padding: '16px', 
-        borderBottom: '1px solid #e1e3e5'
-      }}>
+      <div className="transfer-item-container">
         {/* 桌面端布局 - 完全保留原有样式 */}
-        <div className="transfer-item-desktop" style={{
-          display: 'flex',
-          alignItems: 'center'
-        }}>
+        <div className="transfer-item-desktop">
           <div style={{ marginRight: '16px' }}>
             {media}
           </div>
@@ -571,8 +568,7 @@ const Transfer = () => {
 
         {/* 移动端布局 - 新增 */}
         <div className="transfer-item-mobile">
-          {/* 第一行：产品信息文本 */}
-          <div className="transfer-mobile-text">
+          <div style={{ marginBottom: '12px' }}>
             <div style={{ 
               fontSize: '12px',
               color: '#6d7175',
@@ -625,7 +621,6 @@ const Transfer = () => {
               Order: #{order_number}
             </div>
 
-            {/* Badges */}
             <div style={{ 
               display: 'flex',
               flexWrap: 'wrap',
@@ -636,7 +631,6 @@ const Transfer = () => {
               {out_of_stock === 1 && <Badge tone="critical">Out of Stock</Badge>}
             </div>
 
-            {/* Transfer info */}
             {(status === 'waiting' || status === 'received' || status === 'found') && transfer_from && out_of_stock !== 1 && (
               <div style={{ 
                 fontSize: '12px',
@@ -650,17 +644,32 @@ const Transfer = () => {
             )}
           </div>
 
-          {/* 第二行：图片 + 数量 + 按钮区域 */}
-          <div className="transfer-mobile-bottom">
-            <div className="transfer-thumbnail-mobile">
+          <div style={{ 
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '12px'
+          }}>
+            <div style={{ flexShrink: 0 }}>
               {media}
             </div>
 
-            <div className="transfer-quantity-mobile">
+            <div style={{
+              fontSize: '24px',
+              fontWeight: 'bold',
+              flexShrink: 0,
+              minWidth: '30px',
+              alignSelf: 'center'
+            }}>
               {quantity}
             </div>
 
-            <div className="transfer-mobile-right">
+            <div style={{
+              marginLeft: 'auto',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'flex-end',
+              gap: '8px'
+            }}>
               {clearMode ? (
                 <input
                   type="checkbox"
@@ -669,7 +678,7 @@ const Transfer = () => {
                   style={{ width: '20px', height: '20px' }}
                 />
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <>
                   {out_of_stock !== 1 ? (
                     <>
                       {status === 'transferring' && (
@@ -782,7 +791,7 @@ const Transfer = () => {
                   >
                     Copy
                   </button>
-                </div>
+                </>
               )}
             </div>
           </div>
@@ -790,6 +799,7 @@ const Transfer = () => {
       </div>
     );
   };
+
 
   const toastMarkup = toastActive ? (
     <Toast content={toastMessage} onDismiss={() => setToastActive(false)} />
@@ -801,22 +811,27 @@ const Transfer = () => {
   return (
     <>
       <style>{`
-        /* Transfer 移动端响应式样式 */
         .transfer-item-container {
+          padding: 22px 16px;
+          border-bottom: 1px solid #e1e3e5;
           position: relative;
         }
 
         .transfer-item-desktop {
           display: flex;
           align-items: center;
+          width: 100%;
         }
 
         .transfer-item-mobile {
           display: none;
         }
 
-        /* 手机端响应式 (600px 以下) */
         @media (max-width: 600px) {
+          .transfer-item-container {
+            padding: 16px;
+          }
+
           .transfer-item-desktop {
             display: none;
           }
@@ -825,238 +840,208 @@ const Transfer = () => {
             display: block;
             width: 100%;
           }
-
-          .transfer-mobile-text {
-            margin-bottom: 12px;
-          }
-
-          .transfer-mobile-bottom {
-            display: flex;
-            align-items: flex-start;
-            gap: 12px;
-          }
-
-          .transfer-thumbnail-mobile {
-            flex-shrink: 0;
-          }
-
-          .transfer-quantity-mobile {
-            font-size: 24px;
-            line-height: 1;
-            min-width: 30px;
-            flex-shrink: 0;
-            align-self: center;
-          }
-
-          .transfer-mobile-right {
-            margin-left: auto;
-            display: flex;
-            flex-direction: column;
-            align-items: flex-end;
-            gap: 8px;
-          }
         }
       `}</style>
 
       <Frame>
-        <Page
-          title="Transfer"
-          backAction={{ content: 'Dashboard', onAction: () => navigate('/') }}
-          primaryAction={{
-            content: clearMode ? 'Delete Selected' : 'Clear Mode',
-            destructive: clearMode,
-            onAction: clearMode ? handleClearSelected : handleClearToggle
-          }}
-          secondaryActions={
-            clearMode
-              ? [
-                  {
-                    content: 'Cancel',
-                    onAction: () => {
-                      setClearMode(false);
-                      setSelectedItems([]);
-                    }
+      <Page
+        title="Transfer"
+        backAction={{ content: 'Dashboard', onAction: () => navigate('/') }}
+        primaryAction={{
+          content: clearMode ? 'Delete Selected' : 'Clear Mode',
+          destructive: clearMode,
+          onAction: clearMode ? handleClearSelected : handleClearToggle
+        }}
+        secondaryActions={
+          clearMode
+            ? [
+                {
+                  content: 'Cancel',
+                  onAction: () => {
+                    setClearMode(false);
+                    setSelectedItems([]);
                   }
-                ]
-              : []
-          }
-        >
-          <Layout>
-            <Layout.Section>
-              <Card>
-                <div style={{ padding: '16px' }}>
-                  <BlockStack gap="4">
-                    <ChoiceList
-                      title="Show items"
-                      choices={[
-                        { label: `Transferring (${statusCounts.transferring})`, value: 'transferring' },
-                        { label: `Waiting (${statusCounts.waiting})`, value: 'waiting' },
-                        { label: `Received/Found (${statusCounts.received})`, value: 'received' }
-                      ]}
-                      selected={statusFilter}
-                      onChange={setStatusFilter}
-                      allowMultiple
-                    />
+                }
+              ]
+            : []
+        }
+      >
+        <Layout>
+          <Layout.Section>
+            <Card>
+              <div style={{ padding: '16px' }}>
+                <BlockStack gap="4">
+                  <ChoiceList
+                    title="Show items"
+                    choices={[
+                      { label: `Transferring (${statusCounts.transferring})`, value: 'transferring' },
+                      { label: `Waiting (${statusCounts.waiting})`, value: 'waiting' },
+                      { label: `Received/Found (${statusCounts.received})`, value: 'received' }
+                    ]}
+                    selected={statusFilter}
+                    onChange={setStatusFilter}
+                    allowMultiple
+                  />
+                  
+                  <div style={{ 
+                    paddingTop: '12px', 
+                    borderTop: '1px solid #e1e3e5'
+                  }}>
+                    <div style={{ marginBottom: '12px' }}>
+                      <Checkbox
+                        label="Receiving"
+                        checked={receivingEnabled}
+                        onChange={handleReceivingToggle}
+                      />
+                    </div>
                     
-                    <div style={{ 
-                      paddingTop: '12px', 
-                      borderTop: '1px solid #e1e3e5'
-                    }}>
-                      <div style={{ marginBottom: '12px' }}>
-                        <Checkbox
-                          label="Receiving"
-                          checked={receivingEnabled}
-                          onChange={handleReceivingToggle}
+                    {receivingEnabled && (
+                      <BlockStack gap="3">
+                        <ChoiceList
+                          title="Transfer From"
+                          choices={receivingOptions.transferFroms.map(from => ({
+                            label: from,
+                            value: from
+                          }))}
+                          selected={receivingFromFilter}
+                          onChange={setReceivingFromFilter}
+                          allowMultiple
                         />
-                      </div>
-                      
-                      {receivingEnabled && (
-                        <BlockStack gap="3">
-                          <ChoiceList
-                            title="Transfer From"
-                            choices={receivingOptions.transferFroms.map(from => ({
-                              label: from,
-                              value: from
-                            }))}
-                            selected={receivingFromFilter}
-                            onChange={setReceivingFromFilter}
-                            allowMultiple
-                          />
-                          
-                          <ChoiceList
-                            title="Transfer Date"
-                            choices={receivingOptions.transferDates.map(date => ({
-                              label: date,
-                              value: date
-                            }))}
-                            selected={receivingDateFilter}
-                            onChange={setReceivingDateFilter}
-                            allowMultiple
-                          />
-                        </BlockStack>
-                      )}
-                    </div>
-                  </BlockStack>
-                </div>
-              </Card>
-            </Layout.Section>
-
-            <Layout.Section>
-              <Card>
-                <div>
-                  {filteredItems.length === 0 ? (
-                    <Banner>No items to transfer</Banner>
-                  ) : (
-                    filteredItems.map(item => (
-                      <div key={item.id}>
-                        {renderItem(item)}
-                      </div>
-                    ))
-                  )}
-                </div>
-              </Card>
-            </Layout.Section>
-          </Layout>
-
-          <Modal
-            open={selectedImage !== null}
-            onClose={() => setSelectedImage(null)}
-            title={selectedImage?.title || 'Product Image'}
-          >
-            <Modal.Section>
-              {selectedImage && (
-                <BlockStack gap="4">
-                  <img 
-                    src={selectedImage.url} 
-                    alt="Product" 
-                    style={{ width: '100%', maxHeight: '500px', objectFit: 'contain' }} 
-                  />
-                  <Button 
-                    url={selectedImage.link} 
-                    external
-                    variant="primary"
-                    fullWidth
-                  >
-                    View Product on Website
-                  </Button>
-                </BlockStack>
-              )}
-            </Modal.Section>
-          </Modal>
-
-          <Modal
-            open={transferModal !== null}
-            onClose={() => setTransferModal(null)}
-            title="Transfer Information"
-            primaryAction={{
-              content: 'Submit',
-              onAction: handleTransferSubmit
-            }}
-            secondaryActions={[
-              {
-                content: 'Cancel',
-                onAction: () => setTransferModal(null)
-              }
-            ]}
-          >
-            <Modal.Section>
-              {transferModal && (
-                <BlockStack gap="4">
-                  {transferModal.quantity > 1 && (
-                    <TextField
-                      label="Transfer Quantity"
-                      type="number"
-                      value={transferData.transferQuantity}
-                      onChange={(value) => setTransferData({ ...transferData, transferQuantity: value })}
-                      max={transferModal.quantity}
-                      autoComplete="off"
-                    />
-                  )}
-                  <TextField
-                    label="Transfer From (warehouse number)"
-                    value={transferData.transferFrom}
-                    onChange={(value) => setTransferData({ ...transferData, transferFrom: value })}
-                    placeholder="e.g., 01, 02, 03"
-                    autoComplete="off"
-                  />
-                  <div>
-                    <Text variant="bodyMd" as="p" fontWeight="semibold">
-                      Estimated Arrival (Month/Day)
-                    </Text>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
-                      <div style={{ flex: 1 }}>
-                        <TextField
-                          type="number"
-                          value={currentMonth.toString()}
-                          onChange={() => {}}
-                          disabled
-                          prefix="Month:"
-                          autoComplete="off"
+                        
+                        <ChoiceList
+                          title="Transfer Date"
+                          choices={receivingOptions.transferDates.map(date => ({
+                            label: date,
+                            value: date
+                          }))}
+                          selected={receivingDateFilter}
+                          onChange={setReceivingDateFilter}
+                          allowMultiple
                         />
-                      </div>
-                      <Text variant="bodyLg">/</Text>
-                      <div style={{ flex: 1 }}>
-                        <TextField
-                          type="number"
-                          value={transferData.estimateDay}
-                          onChange={(value) => setTransferData({ ...transferData, estimateDay: value })}
-                          min={1}
-                          max={31}
-                          prefix="Day:"
-                          autoComplete="off"
-                        />
-                      </div>
-                    </div>
+                      </BlockStack>
+                    )}
                   </div>
                 </BlockStack>
-              )}
-            </Modal.Section>
-          </Modal>
+              </div>
+            </Card>
+          </Layout.Section>
 
-          {toastMarkup}
-        </Page>
-      </Frame>
-    </>
+          <Layout.Section>
+            <Card>
+              <div>
+                {filteredItems.length === 0 ? (
+                  <Banner>No items to transfer</Banner>
+                ) : (
+                  filteredItems.map(item => (
+                    <div key={item.id}>
+                      {renderItem(item)}
+                    </div>
+                  ))
+                )}
+              </div>
+            </Card>
+          </Layout.Section>
+        </Layout>
+
+        <Modal
+          open={selectedImage !== null}
+          onClose={() => setSelectedImage(null)}
+          title={selectedImage?.title || 'Product Image'}
+        >
+          <Modal.Section>
+            {selectedImage && (
+              <BlockStack gap="4">
+                <img 
+                  src={selectedImage.url} 
+                  alt="Product" 
+                  style={{ width: '100%', maxHeight: '500px', objectFit: 'contain' }} 
+                />
+                <Button 
+                  url={selectedImage.link} 
+                  external
+                  variant="primary"
+                  fullWidth
+                >
+                  View Product on Website
+                </Button>
+              </BlockStack>
+            )}
+          </Modal.Section>
+        </Modal>
+
+        <Modal
+          open={transferModal !== null}
+          onClose={() => setTransferModal(null)}
+          title="Transfer Information"
+          primaryAction={{
+            content: 'Submit',
+            onAction: handleTransferSubmit
+          }}
+          secondaryActions={[
+            {
+              content: 'Cancel',
+              onAction: () => setTransferModal(null)
+            }
+          ]}
+        >
+          <Modal.Section>
+            {transferModal && (
+              <BlockStack gap="4">
+                {transferModal.quantity > 1 && (
+                  <TextField
+                    label="Transfer Quantity"
+                    type="number"
+                    value={transferData.transferQuantity}
+                    onChange={(value) => setTransferData({ ...transferData, transferQuantity: value })}
+                    max={transferModal.quantity}
+                    autoComplete="off"
+                  />
+                )}
+                <TextField
+                  label="Transfer From (warehouse number)"
+                  value={transferData.transferFrom}
+                  onChange={(value) => setTransferData({ ...transferData, transferFrom: value })}
+                  placeholder="e.g., 01, 02, 03"
+                  autoComplete="off"
+                />
+                <div>
+                  <Text variant="bodyMd" as="p" fontWeight="semibold">
+                    Estimated Arrival (Month/Day)
+                  </Text>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
+                    <div style={{ flex: 1 }}>
+                      <TextField
+                        type="number"
+                        value={currentMonth.toString()}
+                        onChange={() => {}}
+                        disabled
+                        prefix="Month:"
+                        autoComplete="off"
+                      />
+                    </div>
+                    <Text variant="bodyLg">/</Text>
+                    <div style={{ flex: 1 }}>
+                      <TextField
+                        type="number"
+                        value={transferData.estimateDay}
+                        onChange={(value) => setTransferData({ ...transferData, estimateDay: value })}
+                        min={1}
+                        max={31}
+                        prefix="Day:"
+                        autoComplete="off"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </BlockStack>
+            )}
+          </Modal.Section>
+        </Modal>
+
+        {toastMarkup}
+      </Page>
+    </Frame>
+  </>
   );
 };
 
