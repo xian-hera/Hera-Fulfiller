@@ -269,7 +269,7 @@ router.patch('/items/:id/packer-status', async (req, res) => {
   }
 });
 
-// 🆕 Complete 订单时同时减少 box quantity
+// 🆕 Complete 订单时同时减少 box quantity 并更新 Shopify metafield
 router.post('/orders/:shopifyOrderId/complete', async (req, res) => {
   try {
     const { shopifyOrderId } = req.params;
@@ -279,6 +279,15 @@ router.post('/orders/:shopifyOrderId/complete', async (req, res) => {
       return res.status(400).json({ error: 'Box type is required' });
     }
 
+    // 获取订单的 Shopify ID（数字格式）
+    const order = await db.prepare(
+      'SELECT id FROM orders WHERE shopify_order_id = ?'
+    ).get(shopifyOrderId);
+
+    if (!order || !order.id) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
     // 更新订单状态
     await db.prepare(`
       UPDATE orders 
@@ -286,7 +295,7 @@ router.post('/orders/:shopifyOrderId/complete', async (req, res) => {
       WHERE shopify_order_id = ?
     `).run(boxType, weight || null, shopifyOrderId);
 
-    // 🆕 更新 box type 使用统计，同时减少剩余数量
+    // 更新 box type 使用统计，同时减少剩余数量
     await db.prepare(`
       UPDATE box_types 
       SET usage_count = usage_count + 1,
@@ -295,6 +304,22 @@ router.post('/orders/:shopifyOrderId/complete', async (req, res) => {
     `).run(boxType);
 
     console.log(`✓ Box type ${boxType} usage count updated and quantity decreased`);
+
+    // 🆕 更新 Shopify Order Metafield: custom.ready = true
+    try {
+      const shopifyClient = require('../shopify/client');
+      await shopifyClient.updateOrderMetafield(
+        order.id,           // Shopify Order ID（数字格式）
+        'custom',           // namespace
+        'ready',            // key
+        'true',             // value
+        'boolean'           // type
+      );
+      console.log(`✓ Shopify metafield updated: Order ${shopifyOrderId} (ID: ${order.id}) marked as ready`);
+    } catch (metafieldError) {
+      console.error('⚠️ Error updating Shopify metafield (non-critical):', metafieldError.message);
+      // 不阻止主流程，metafield 更新失败不影响订单完成
+    }
 
     res.json({ success: true });
   } catch (error) {

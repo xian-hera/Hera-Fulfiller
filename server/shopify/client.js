@@ -278,6 +278,61 @@ class ShopifyClient {
       throw error;
     }
   }
+
+  // 🆕 Update order metafield
+  async updateOrderMetafield(orderId, namespace, key, value, type = 'boolean') {
+    try {
+      console.log(`\n========== UPDATING ORDER METAFIELD ==========`);
+      console.log(`Order ID: ${orderId}`);
+      console.log(`Namespace: ${namespace}`);
+      console.log(`Key: ${key}`);
+      console.log(`Value: ${value}`);
+      console.log(`Type: ${type}`);
+
+      // 先获取现有的 metafields 来检查是否已存在
+      const existingMetafieldsResponse = await this.client.get(`/orders/${orderId}/metafields.json`);
+      const existingMetafields = existingMetafieldsResponse.data.metafields || [];
+      
+      const existingMetafield = existingMetafields.find(
+        m => m.namespace === namespace && m.key === key
+      );
+
+      let response;
+      
+      if (existingMetafield) {
+        // 更新现有 metafield
+        console.log(`Updating existing metafield ID: ${existingMetafield.id}`);
+        response = await this.client.put(`/orders/${orderId}/metafields/${existingMetafield.id}.json`, {
+          metafield: {
+            id: existingMetafield.id,
+            value: String(value),
+            type: type
+          }
+        });
+      } else {
+        // 创建新 metafield
+        console.log(`Creating new metafield`);
+        response = await this.client.post(`/orders/${orderId}/metafields.json`, {
+          metafield: {
+            namespace: namespace,
+            key: key,
+            value: String(value),
+            type: type
+          }
+        });
+      }
+
+      console.log(`✓ Order metafield updated successfully`);
+      console.log(`Response:`, JSON.stringify(response.data.metafield, null, 2));
+      console.log(`=============================================\n`);
+      
+      return response.data.metafield;
+    } catch (error) {
+      console.error('✗ Error updating order metafield:', error.response?.data || error.message);
+      console.log(`=============================================\n`);
+      throw error;
+    }
+  }
 }
 
 module.exports = new ShopifyClient();
