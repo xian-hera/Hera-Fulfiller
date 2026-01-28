@@ -275,18 +275,25 @@ router.post('/orders/:shopifyOrderId/complete', async (req, res) => {
     const { shopifyOrderId } = req.params;
     const { boxType, weight } = req.body;
 
+    console.log('\n========== ORDER COMPLETION START ==========');
+    console.log(`Shopify Order ID parameter: ${shopifyOrderId}`);
+
     if (!boxType) {
       return res.status(400).json({ error: 'Box type is required' });
     }
 
-    // 获取订单的 Shopify ID（数字格式）
+    // 获取订单信息
     const order = await db.prepare(
-      'SELECT id FROM orders WHERE shopify_order_id = ?'
+      'SELECT * FROM orders WHERE shopify_order_id = ?'
     ).get(shopifyOrderId);
 
-    if (!order || !order.id) {
+    if (!order) {
+      console.log('✗ Order not found in database');
       return res.status(404).json({ error: 'Order not found' });
     }
+
+    console.log(`Order found: ${order.name}`);
+    console.log(`shopify_order_id from DB: ${order.shopify_order_id}`);
 
     // 更新订单状态
     await db.prepare(`
@@ -295,7 +302,7 @@ router.post('/orders/:shopifyOrderId/complete', async (req, res) => {
       WHERE shopify_order_id = ?
     `).run(boxType, weight || null, shopifyOrderId);
 
-    // 更新 box type 使用统计，同时减少剩余数量
+    // 更新 box type 使用统计
     await db.prepare(`
       UPDATE box_types 
       SET usage_count = usage_count + 1,
@@ -305,21 +312,44 @@ router.post('/orders/:shopifyOrderId/complete', async (req, res) => {
 
     console.log(`✓ Box type ${boxType} usage count updated and quantity decreased`);
 
-    // 🆕 更新 Shopify Order Metafield: custom.ready = true
+    // 🆕 更新 Shopify Order Metafield
     try {
+      // 从 shopify_order_id 中提取真正的 Shopify Order ID
+      // 格式：gid://shopify/Order/7109941887286 → 7109941887286
+      let realShopifyOrderId = shopifyOrderId;
+      
+      if (shopifyOrderId.includes('gid://shopify/Order/')) {
+        realShopifyOrderId = shopifyOrderId.split('gid://shopify/Order/')[1];
+        console.log(`Extracted Shopify Order ID from GID: ${realShopifyOrderId}`);
+      } else if (shopifyOrderId.includes('/')) {
+        // 如果还有其他斜杠格式，取最后一部分
+        realShopifyOrderId = shopifyOrderId.split('/').pop();
+        console.log(`Extracted Shopify Order ID from path: ${realShopifyOrderId}`);
+      }
+
+      console.log(`Using Shopify Order ID for metafield: ${realShopifyOrderId}`);
+
       const shopifyClient = require('../shopify/client');
-      await shopifyClient.updateOrderMetafield(
-        order.id,           // Shopify Order ID（数字格式）
-        'custom',           // namespace
-        'ready',            // key
-        'true',             // value
-        'boolean'           // type
+      const result = await shopifyClient.updateOrderMetafield(
+        realShopifyOrderId,  // 使用提取后的真实 ID
+        'custom',
+        'ready',
+        'true',
+        'boolean'
       );
-      console.log(`✓ Shopify metafield updated: Order ${shopifyOrderId} (ID: ${order.id}) marked as ready`);
+      
+      console.log(`✓ Shopify metafield updated successfully for Order ${order.name}`);
+      console.log(`Metafield ID: ${result.id}`);
     } catch (metafieldError) {
       console.error('⚠️ Error updating Shopify metafield (non-critical):', metafieldError.message);
-      // 不阻止主流程，metafield 更新失败不影响订单完成
+      if (metafieldError.response) {
+        console.error('Response status:', metafieldError.response.status);
+        console.error('Response data:', JSON.stringify(metafieldError.response.data, null, 2));
+      }
+      // 不阻止主流程
     }
+
+    console.log('========== ORDER COMPLETION END ==========\n');
 
     res.json({ success: true });
   } catch (error) {
