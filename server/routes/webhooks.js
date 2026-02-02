@@ -2,11 +2,21 @@ const express = require('express');
 const router = express.Router();
 const OrderWebhookHandler = require('../webhooks/orderHandler');
 
-// Order Created
+// Order Created - 在 APP 端过滤 POS 订单
 router.post('/orders/create', async (req, res) => {
   try {
-    console.log('Webhook received: Order Created', req.body.id);
-    const result = await OrderWebhookHandler.handleOrderCreated(req.body);
+    const orderData = req.body;
+    
+    // 🆕 过滤 POS 订单
+    const sourceName = orderData.source_name?.toLowerCase() || '';
+    if (sourceName === 'pos' || sourceName === 'shopify_pos' || sourceName.includes('pos')) {
+      console.log(`✗ Skipping POS order: ${orderData.name} (source: ${orderData.source_name})`);
+      return res.status(200).json({ message: 'POS order ignored' });
+    }
+    
+    console.log('✓ Webhook received: Order Created', orderData.id);
+    console.log(`  Order: ${orderData.name}, Source: ${orderData.source_name}`);
+    const result = await OrderWebhookHandler.handleOrderCreated(orderData);
     res.json(result);
   } catch (error) {
     console.error('Error processing order created webhook:', error);
@@ -26,7 +36,7 @@ router.post('/orders/updated', async (req, res) => {
   }
 });
 
-// Order Edits Complete (新增路由)
+// Order Edits Complete
 router.post('/order-edits/complete', async (req, res) => {
   try {
     console.log('Webhook received: Order Edits Complete');
@@ -73,6 +83,5 @@ router.post('/refunds/create', async (req, res) => {
     res.status(500).json({ error: 'Failed to process webhook' });
   }
 });
-
 
 module.exports = router;
