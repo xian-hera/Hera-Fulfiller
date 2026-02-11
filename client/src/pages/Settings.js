@@ -193,6 +193,31 @@ const Settings = () => {
     return new Date(dateString).toLocaleString();
   };
 
+  // 🆕 计算预计用完天数
+  const calculateDaysUntilEmpty = (box) => {
+    if (!boxStatsStartDate || !box.usage_count || box.usage_count === 0 || !box.quantity || box.quantity <= 0) {
+      return null;
+    }
+
+    // 计算从开始日期到今天的天数
+    const startDate = new Date(boxStatsStartDate);
+    const today = new Date();
+    const daysPassed = Math.max(1, Math.floor((today - startDate) / (1000 * 60 * 60 * 24)));
+
+    // 计算日均使用量
+    const dailyUsage = box.usage_count / daysPassed;
+
+    // 如果日均使用量为 0，返回 null
+    if (dailyUsage === 0) {
+      return null;
+    }
+
+    // 计算剩余天数（向下取整）
+    const daysRemaining = Math.floor(box.quantity / dailyUsage);
+
+    return daysRemaining;
+  };
+
   // 🆕 按使用次数和字母排序 box types
   const sortedBoxTypes = [...boxTypes].sort((a, b) => {
     if (b.usage_count !== a.usage_count) {
@@ -295,6 +320,9 @@ const Settings = () => {
                         // 🆕 quantity 就是剩余数量
                         const remainingDisplay = (box.quantity !== undefined && box.quantity !== null) ? box.quantity : 'null';
                         
+                        // 🆕 计算预计用完天数
+                        const daysUntilEmpty = calculateDaysUntilEmpty(box);
+                        
                         return (
                           <div 
                             key={box.id}
@@ -318,6 +346,14 @@ const Settings = () => {
                               <Text variant="headingMd" as="span">{box.usage_count || 0}</Text>
                               <Text variant="bodySm" tone="subdued" as="span">{remainingDisplay}</Text>
                             </div>
+                            {/* 🆕 第三行：预计用完天数 */}
+                            {daysUntilEmpty !== null && (
+                              <div style={{ marginTop: '4px' }}>
+                                <Text variant="bodySm" tone="subdued" as="span" style={{ fontSize: '11px' }}>
+                                  ~{daysUntilEmpty}d
+                                </Text>
+                              </div>
+                            )}
                           </div>
                         );
                       })}
