@@ -122,11 +122,11 @@ router.get('/stock-report', async (req, res) => {
 
     // 1. 获取所有 transferring 状态的 items
     const transferringItems = await db.prepare(`
-      SELECT DISTINCT sku, title, SUM(quantity) as total_quantity
+      SELECT sku, MAX(title) as title, SUM(quantity) as total_quantity
       FROM transfer_items
       WHERE status = 'transferring'
       GROUP BY sku
-      ORDER BY title
+      ORDER BY MAX(title)
     `).all();
 
     console.log(`Found ${transferringItems.length} unique SKUs in transferring status`);
