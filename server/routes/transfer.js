@@ -218,7 +218,10 @@ async function getInventoryBySku(sku) {
                       location {
                         name
                       }
-                      available
+                      quantities(names: ["available"]) {
+                        name
+                        quantity
+                      }
                     }
                   }
                 }
@@ -280,7 +283,11 @@ async function getInventoryBySku(sku) {
     const inventory = {};
     inventoryLevels.forEach(level => {
       const locationName = level.node.location.name;
-      const available = level.node.available;
+      
+      // 从 quantities 数组中获取 available 数量
+      const availableQty = level.node.quantities?.find(q => q.name === 'available');
+      const available = availableQty ? availableQty.quantity : 0;
+      
       inventory[locationName] = available;
       console.log(`  ✓ ${locationName}: ${available}`);
     });
