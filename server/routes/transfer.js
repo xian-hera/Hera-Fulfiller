@@ -118,7 +118,7 @@ router.get('/items/:id/copy-text', async (req, res) => {
 // 🆕 生成库存报表
 router.get('/stock-report', async (req, res) => {
   try {
-    console.log('\n=== Generating Stock Report ===');
+    console.log('\n========== GENERATING STOCK REPORT ==========');
 
     // 1. 获取所有 transferring 状态的 items
     const transferringItems = await db.prepare(`
@@ -132,42 +132,49 @@ router.get('/stock-report', async (req, res) => {
     console.log(`Found ${transferringItems.length} unique SKUs in transferring status`);
 
     if (transferringItems.length === 0) {
+      console.log('❌ No transferring items found');
       return res.status(404).json({ 
         error: 'No transferring items found',
         message: 'There are no items in transferring status to generate a report for.'
       });
     }
 
+    // 显示前几个 SKU
+    console.log('First few SKUs:');
+    transferringItems.slice(0, 3).forEach(item => {
+      console.log(`  - ${item.sku}: ${item.title} (qty: ${item.total_quantity})`);
+    });
+
     // 2. 为每个 SKU 查询 Shopify 库存
     const reportData = [];
+    let successCount = 0;
+    let failCount = 0;
 
     for (const item of transferringItems) {
-      console.log(`Processing SKU: ${item.sku}`);
+      const inventoryData = await getInventoryBySku(item.sku);
       
-      try {
-        // 使用 GraphQL 查询库存
-        const inventoryData = await getInventoryBySku(item.sku);
-        
-        reportData.push({
-          title: item.title,
-          sku: item.sku,
-          quantityNeeded: item.total_quantity,
-          inventory: inventoryData
-        });
+      reportData.push({
+        title: item.title,
+        sku: item.sku,
+        quantityNeeded: item.total_quantity,
+        inventory: inventoryData
+      });
 
-        console.log(`✓ Found inventory for ${item.sku}`);
-      } catch (error) {
-        console.error(`✗ Error fetching inventory for SKU ${item.sku}:`, error.message);
-        
-        // 即使出错，也添加到报表中（库存为空）
-        reportData.push({
-          title: item.title,
-          sku: item.sku,
-          quantityNeeded: item.total_quantity,
-          inventory: {}
-        });
+      const locationCount = Object.keys(inventoryData).length;
+      if (locationCount > 0) {
+        successCount++;
+        console.log(`✓ SKU ${item.sku}: ${locationCount} locations found`);
+      } else {
+        failCount++;
+        console.log(`✗ SKU ${item.sku}: No inventory data`);
       }
     }
+
+    console.log(`\n========== SUMMARY ==========`);
+    console.log(`Total SKUs processed: ${transferringItems.length}`);
+    console.log(`Successful: ${successCount} (with inventory data)`);
+    console.log(`Failed: ${failCount} (no inventory data)`);
+    console.log(`============================\n`);
 
     // 3. 生成 CSV
     const csv = generateCSV(reportData);
@@ -177,9 +184,13 @@ router.get('/stock-report', async (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename="stock-report-${Date.now()}.csv"`);
     res.send(csv);
 
-    console.log('=== Stock Report Generated Successfully ===\n');
+    console.log('========== STOCK REPORT GENERATED SUCCESSFULLY ==========\n');
   } catch (error) {
-    console.error('Error generating stock report:', error);
+    console.error('\n========== STOCK REPORT ERROR ==========');
+    console.error('Error:', error.message);
+    console.error('Stack:', error.stack);
+    console.error('=======================================\n');
+    
     res.status(500).json({ 
       error: 'Failed to generate stock report',
       message: error.message 
@@ -190,6 +201,8 @@ router.get('/stock-report', async (req, res) => {
 // 🆕 通过 SKU 查询库存（使用 GraphQL）
 async function getInventoryBySku(sku) {
   try {
+    console.log(`\n--- Querying inventory for SKU: ${sku} ---`);
+    
     const query = `
       query getInventoryBySku($query: String!) {
         productVariants(first: 1, query: $query) {
@@ -216,20 +229,52 @@ async function getInventoryBySku(sku) {
       }
     `;
 
+    const searchQuery = `sku:${sku}`;
+    console.log(`GraphQL search query: "${searchQuery}"`);
+
     const response = await shopifyClient.client.post('/graphql.json', {
       query,
-      variables: { query: `sku:${sku}` }
+      variables: { query: searchQuery }
     });
 
+    console.log(`Response status: ${response.status}`);
+    
+    // 检查是否有 GraphQL errors
+    if (response.data.errors) {
+      console.error('❌ GraphQL errors:', JSON.stringify(response.data.errors, null, 2));
+      return {};
+    }
+
+    // 检查 data 结构
+    if (!response.data.data) {
+      console.error('❌ No data in response');
+      console.error('Response:', JSON.stringify(response.data, null, 2));
+      return {};
+    }
+
     const edges = response.data.data?.productVariants?.edges || [];
+    console.log(`Found ${edges.length} variant(s) for SKU: ${sku}`);
 
     if (edges.length === 0) {
-      console.log(`No variant found for SKU: ${sku}`);
+      console.log(`❌ No variant found - returning empty inventory`);
       return {};
     }
 
     const variant = edges[0].node;
-    const inventoryLevels = variant.inventoryItem?.inventoryLevels?.edges || [];
+    console.log(`✓ Variant ID: ${variant.id}, SKU: ${variant.sku}`);
+    
+    if (!variant.inventoryItem) {
+      console.log(`❌ No inventoryItem for variant`);
+      return {};
+    }
+
+    const inventoryLevels = variant.inventoryItem.inventoryLevels?.edges || [];
+    console.log(`Found ${inventoryLevels.length} inventory level(s)`);
+
+    if (inventoryLevels.length === 0) {
+      console.log(`❌ No inventory levels found`);
+      return {};
+    }
 
     // 转换为 location => available 的映射
     const inventory = {};
@@ -237,12 +282,18 @@ async function getInventoryBySku(sku) {
       const locationName = level.node.location.name;
       const available = level.node.available;
       inventory[locationName] = available;
+      console.log(`  ✓ ${locationName}: ${available}`);
     });
 
+    console.log(`✓ SUCCESS: Retrieved inventory for ${sku}: ${Object.keys(inventory).length} locations`);
     return inventory;
   } catch (error) {
-    console.error(`Error in getInventoryBySku for ${sku}:`, error.message);
-    throw error;
+    console.error(`❌ EXCEPTION in getInventoryBySku for ${sku}:`, error.message);
+    if (error.response) {
+      console.error('Response status:', error.response.status);
+      console.error('Response data:', JSON.stringify(error.response.data, null, 2));
+    }
+    return {};  // 返回空对象而不是抛出错误
   }
 }
 
