@@ -322,14 +322,11 @@ function generateCSV(reportData) {
     LOCATIONS.forEach(location => {
       const available = item.inventory[location];
 
+      // 只有当库存 >= 需求时，才标记
       if (available !== undefined && available >= item.quantityNeeded) {
-        // 库存足够，打勾并显示数量
-        row.push(`✓${available}`);
-      } else if (available !== undefined) {
-        // 有库存但不够
-        row.push(available);
+        row.push(`[OK] ${available}`);
       } else {
-        // 没有库存数据
+        // 库存不足或无库存，留空
         row.push('');
       }
     });
