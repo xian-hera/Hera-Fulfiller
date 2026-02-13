@@ -41,6 +41,8 @@ const Transfer = () => {
   const [selectedImage, setSelectedImage] = useState(null);
   const [toastActive, setToastActive] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
+  // 🆕 Stock Report loading state
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
 
   const getStatusCounts = useCallback(() => {
     return {
@@ -177,6 +179,41 @@ const Transfer = () => {
       showToast(`Deleted ${selectedItems.length} items`);
     } catch (error) {
       console.error('Error clearing items:', error);
+    }
+  };
+
+  // 🆕 生成库存报表
+  const handleGenerateStockReport = async () => {
+    setIsGeneratingReport(true);
+    try {
+      console.log('Generating stock report...');
+      
+      const response = await axios.get('/api/transfer/stock-report', {
+        responseType: 'blob'  // 重要：告诉 axios 期望二进制数据
+      });
+
+      // 创建下载链接
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `stock-report-${Date.now()}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+
+      console.log('✓ Stock report downloaded successfully');
+      showToast('Stock report downloaded successfully');
+    } catch (error) {
+      console.error('Error generating stock report:', error);
+      
+      if (error.response?.status === 404) {
+        showToast('No transferring items found to generate a report');
+      } else {
+        showToast('Failed to generate stock report. Please try again');
+      }
+    } finally {
+      setIsGeneratingReport(false);
     }
   };
 
@@ -863,7 +900,14 @@ const Transfer = () => {
                   }
                 }
               ]
-            : []
+            : [
+                {
+                  content: isGeneratingReport ? 'Generating...' : 'Stock Report',
+                  onAction: handleGenerateStockReport,
+                  loading: isGeneratingReport,
+                  disabled: isGeneratingReport
+                }
+              ]
         }
       >
         <Layout>

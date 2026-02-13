@@ -9,6 +9,20 @@ const EMOJI_MAP = {
   '06': '🟪', '07': '🟥', '08': '⬜', '09': '🟦', '11': '🔳'
 };
 
+// 🆕 固定的 location 列表
+const LOCATIONS = [
+  'MTL01',
+  'MTL02',
+  'MTL03',
+  'MTL04',
+  'MTL05EXP',
+  'MTL06',
+  'MTL07',
+  'MTL08',
+  'MTL09',
+  'MTL11'
+];
+
 // Get all transfer items
 router.get('/items', async (req, res) => {
   try {
@@ -100,6 +114,173 @@ router.get('/items/:id/copy-text', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+// 🆕 生成库存报表
+router.get('/stock-report', async (req, res) => {
+  try {
+    console.log('\n=== Generating Stock Report ===');
+
+    // 1. 获取所有 transferring 状态的 items
+    const transferringItems = await db.prepare(`
+      SELECT DISTINCT sku, title, SUM(quantity) as total_quantity
+      FROM transfer_items
+      WHERE status = 'transferring'
+      GROUP BY sku
+      ORDER BY title
+    `).all();
+
+    console.log(`Found ${transferringItems.length} unique SKUs in transferring status`);
+
+    if (transferringItems.length === 0) {
+      return res.status(404).json({ 
+        error: 'No transferring items found',
+        message: 'There are no items in transferring status to generate a report for.'
+      });
+    }
+
+    // 2. 为每个 SKU 查询 Shopify 库存
+    const reportData = [];
+
+    for (const item of transferringItems) {
+      console.log(`Processing SKU: ${item.sku}`);
+      
+      try {
+        // 使用 GraphQL 查询库存
+        const inventoryData = await getInventoryBySku(item.sku);
+        
+        reportData.push({
+          title: item.title,
+          sku: item.sku,
+          quantityNeeded: item.total_quantity,
+          inventory: inventoryData
+        });
+
+        console.log(`✓ Found inventory for ${item.sku}`);
+      } catch (error) {
+        console.error(`✗ Error fetching inventory for SKU ${item.sku}:`, error.message);
+        
+        // 即使出错，也添加到报表中（库存为空）
+        reportData.push({
+          title: item.title,
+          sku: item.sku,
+          quantityNeeded: item.total_quantity,
+          inventory: {}
+        });
+      }
+    }
+
+    // 3. 生成 CSV
+    const csv = generateCSV(reportData);
+
+    // 4. 返回 CSV 文件
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="stock-report-${Date.now()}.csv"`);
+    res.send(csv);
+
+    console.log('=== Stock Report Generated Successfully ===\n');
+  } catch (error) {
+    console.error('Error generating stock report:', error);
+    res.status(500).json({ 
+      error: 'Failed to generate stock report',
+      message: error.message 
+    });
+  }
+});
+
+// 🆕 通过 SKU 查询库存（使用 GraphQL）
+async function getInventoryBySku(sku) {
+  try {
+    const query = `
+      query getInventoryBySku($query: String!) {
+        productVariants(first: 1, query: $query) {
+          edges {
+            node {
+              id
+              sku
+              inventoryItem {
+                id
+                inventoryLevels(first: 50) {
+                  edges {
+                    node {
+                      location {
+                        name
+                      }
+                      available
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
+
+    const response = await shopifyClient.client.post('/graphql.json', {
+      query,
+      variables: { query: `sku:${sku}` }
+    });
+
+    const edges = response.data.data?.productVariants?.edges || [];
+
+    if (edges.length === 0) {
+      console.log(`No variant found for SKU: ${sku}`);
+      return {};
+    }
+
+    const variant = edges[0].node;
+    const inventoryLevels = variant.inventoryItem?.inventoryLevels?.edges || [];
+
+    // 转换为 location => available 的映射
+    const inventory = {};
+    inventoryLevels.forEach(level => {
+      const locationName = level.node.location.name;
+      const available = level.node.available;
+      inventory[locationName] = available;
+    });
+
+    return inventory;
+  } catch (error) {
+    console.error(`Error in getInventoryBySku for ${sku}:`, error.message);
+    throw error;
+  }
+}
+
+// 🆕 生成 CSV 内容
+function generateCSV(reportData) {
+  // CSV Header
+  const headers = ['Title', 'SKU', 'Quantity needed', ...LOCATIONS];
+  let csv = headers.join(',') + '\n';
+
+  // CSV Rows
+  reportData.forEach(item => {
+    const row = [
+      `"${item.title.replace(/"/g, '""')}"`,  // 转义引号
+      item.sku,
+      item.quantityNeeded
+    ];
+
+    // 为每个 location 添加列
+    LOCATIONS.forEach(location => {
+      const available = item.inventory[location];
+
+      if (available !== undefined && available >= item.quantityNeeded) {
+        // 库存足够，打勾并显示数量
+        row.push(`✓${available}`);
+      } else if (available !== undefined) {
+        // 有库存但不够
+        row.push(available);
+      } else {
+        // 没有库存数据
+        row.push('');
+      }
+    });
+
+    csv += row.join(',') + '\n';
+  });
+
+  return csv;
+}
 
 // Update transfer item status
 router.patch('/items/:id', async (req, res) => {
