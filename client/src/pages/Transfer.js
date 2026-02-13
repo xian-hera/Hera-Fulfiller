@@ -41,7 +41,6 @@ const Transfer = () => {
   const [selectedImage, setSelectedImage] = useState(null);
   const [toastActive, setToastActive] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
-  // 🆕 Stock Report loading state
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
 
   const getStatusCounts = useCallback(() => {
@@ -109,6 +108,7 @@ const Transfer = () => {
       setItems(response.data);
     } catch (error) {
       console.error('Error fetching transfer items:', error);
+      showToast('Error loading transfer items');
     }
   };
 
@@ -140,10 +140,12 @@ const Transfer = () => {
       showToast('Copied to clipboard!');
     } catch (error) {
       console.error('Error copying text:', error);
+      showToast('Error copying text');
     }
   };
 
   const handleSkuCopy = (sku) => {
+    if (!sku) return;
     navigator.clipboard.writeText(sku);
     showToast('SKU copied!');
   };
@@ -166,33 +168,55 @@ const Transfer = () => {
     }
   };
 
+  // 🔧 修复并发删除问题
   const handleClearSelected = async () => {
     if (selectedItems.length === 0) return;
     
     try {
-      await axios.post('/api/transfer/items/bulk-delete', {
+      console.log(`Attempting to delete ${selectedItems.length} items:`, selectedItems);
+      
+      const response = await axios.post('/api/transfer/items/bulk-delete', {
         ids: selectedItems
       });
+
+      console.log('Delete response:', response.data);
+
+      // 重新获取数据
       await fetchItems();
       setSelectedItems([]);
       setClearMode(false);
-      showToast(`Deleted ${selectedItems.length} items`);
+
+      // 显示更详细的消息
+      const { deleted, notFound } = response.data;
+      if (notFound > 0) {
+        showToast(`Deleted ${deleted} items (${notFound} already deleted by another user)`);
+      } else {
+        showToast(`Deleted ${deleted} items`);
+      }
     } catch (error) {
       console.error('Error clearing items:', error);
+      
+      // 更好的错误处理
+      if (error.response?.status === 500) {
+        showToast('Server error. Refreshing data...');
+        await fetchItems();
+        setSelectedItems([]);
+        setClearMode(false);
+      } else {
+        showToast('Failed to delete items. Please try again.');
+      }
     }
   };
 
-  // 🆕 生成库存报表
   const handleGenerateStockReport = async () => {
     setIsGeneratingReport(true);
     try {
       console.log('Generating stock report...');
       
       const response = await axios.get('/api/transfer/stock-report', {
-        responseType: 'blob'  // 重要：告诉 axios 期望二进制数据
+        responseType: 'blob'
       });
 
-      // 创建下载链接
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
@@ -224,6 +248,7 @@ const Transfer = () => {
       await fetchItems();
     } catch (error) {
       console.error('Error updating status:', error);
+      showToast('Error updating status');
     }
   };
 
@@ -231,7 +256,7 @@ const Transfer = () => {
     const currentDate = new Date();
     setTransferModal(item);
     setTransferData({
-      transferQuantity: item.quantity.toString(),
+      transferQuantity: item.quantity ? item.quantity.toString() : '1',
       transferFrom: '',
       estimateDay: currentDate.getDate().toString()
     });
@@ -241,7 +266,7 @@ const Transfer = () => {
     const currentDate = new Date();
     setTransferModal(item);
     setTransferData({
-      transferQuantity: item.quantity.toString(),
+      transferQuantity: item.quantity ? item.quantity.toString() : '1',
       transferFrom: item.transfer_from || '',
       estimateDay: item.estimate_day ? item.estimate_day.toString() : currentDate.getDate().toString()
     });
@@ -258,7 +283,6 @@ const Transfer = () => {
     }
   };
 
-  // 🆕 设置 Out of Stock
   const handleOutClick = async (item) => {
     try {
       await axios.patch(`/api/transfer/items/${item.id}`, { 
@@ -272,7 +296,6 @@ const Transfer = () => {
     }
   };
 
-  // 🆕 撤销 Out of Stock
   const handleOutUndo = async (item) => {
     try {
       await axios.patch(`/api/transfer/items/${item.id}`, { 
@@ -324,21 +347,21 @@ const Transfer = () => {
       setTransferModal(null);
     } catch (error) {
       console.error('Error updating transfer:', error);
+      showToast('Error updating transfer');
     }
   };
 
   const handleImageClick = (item) => {
-    if (item.image_url) {
+    if (item.image_url && item.url_handle) {
       setSelectedImage({
         url: item.image_url,
         link: `https://herabeauty.ca/products/${item.url_handle}`,
-        title: `${item.brand} ${item.title}`
+        title: `${item.brand || ''} ${item.title || ''}`
       });
     }
   };
 
   const getItemBadge = (status, item, onBadgeClick) => {
-    // 🆕 Out of Stock 优先显示
     if (item.out_of_stock === 1) {
       return (
         <Badge tone="critical">Out of Stock</Badge>
@@ -381,14 +404,45 @@ const Transfer = () => {
     return sku.match(/.{1,4}/g)?.join(' ') || sku;
   };
 
+  // 🔧 修复 formatDate - 添加 null 检查
   const formatDate = (month, day) => {
-    const m = month.toString().padStart(2, '0');
-    const d = day.toString().padStart(2, '0');
-    return `${m}/${d}`;
+    if (month == null || day == null || month === '' || day === '') {
+      return 'N/A';
+    }
+    
+    try {
+      const m = String(month).padStart(2, '0');
+      const d = String(day).padStart(2, '0');
+      return `${m}/${d}`;
+    } catch (error) {
+      console.error('Error formatting date:', { month, day, error });
+      return 'N/A';
+    }
   };
 
+  // 🔧 修复 renderItem - 添加完整的 null 检查
   const renderItem = (item) => {
-    const { id, quantity, image_url, order_number, sku, brand, title, size, status, transfer_from, estimate_month, estimate_day, variant_title, out_of_stock } = item;
+    if (!item) {
+      console.error('renderItem received null item');
+      return null;
+    }
+
+    const { 
+      id, 
+      quantity = 0, 
+      image_url, 
+      order_number = '', 
+      sku = '', 
+      brand = '', 
+      title = '', 
+      size = '', 
+      status, 
+      transfer_from, 
+      estimate_month, 
+      estimate_day, 
+      variant_title, 
+      out_of_stock 
+    } = item;
     
     const media = image_url ? (
       <div onClick={() => handleImageClick(item)} style={{ cursor: 'pointer' }}>
@@ -400,7 +454,7 @@ const Transfer = () => {
 
     return (
       <div className="transfer-item-container">
-        {/* 桌面端布局 - 完全保留原有样式 */}
+        {/* 桌面端布局 */}
         <div className="transfer-item-desktop">
           <div style={{ marginRight: '16px' }}>
             {media}
@@ -476,7 +530,11 @@ const Transfer = () => {
             ) : (
               <>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  {(status === 'waiting' || status === 'received' || status === 'found') && transfer_from && out_of_stock !== 1 && (
+                  {(status === 'waiting' || status === 'received' || status === 'found') && 
+                   transfer_from && 
+                   out_of_stock !== 1 && 
+                   estimate_month != null && 
+                   estimate_day != null && (
                     <Text variant="bodySm" fontWeight="bold" as="span" tone="info">
                       {transfer_from}, {formatDate(estimate_month, estimate_day)}
                     </Text>
@@ -603,7 +661,7 @@ const Transfer = () => {
           </div>
         </div>
 
-        {/* 移动端布局 - 新增 */}
+        {/* 移动端布局 */}
         <div className="transfer-item-mobile">
           <div style={{ marginBottom: '12px' }}>
             <div style={{ 
@@ -668,7 +726,11 @@ const Transfer = () => {
               {out_of_stock === 1 && <Badge tone="critical">Out of Stock</Badge>}
             </div>
 
-            {(status === 'waiting' || status === 'received' || status === 'found') && transfer_from && out_of_stock !== 1 && (
+            {(status === 'waiting' || status === 'received' || status === 'found') && 
+             transfer_from && 
+             out_of_stock !== 1 && 
+             estimate_month != null && 
+             estimate_day != null && (
               <div style={{ 
                 fontSize: '12px',
                 color: '#0080FF',
@@ -836,7 +898,6 @@ const Transfer = () => {
       </div>
     );
   };
-
 
   const toastMarkup = toastActive ? (
     <Toast content={toastMessage} onDismiss={() => setToastActive(false)} />

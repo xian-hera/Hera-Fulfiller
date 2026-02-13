@@ -479,13 +479,52 @@ router.post('/items/bulk-delete', async (req, res) => {
       return res.status(400).json({ error: 'Invalid ids array' });
     }
 
-    const placeholders = ids.map(() => '?').join(',');
-    await db.prepare(`DELETE FROM transfer_items WHERE id IN (${placeholders})`).run(...ids);
+    console.log(`Bulk delete request: ${ids.length} items`);
 
-    res.json({ success: true, deleted: ids.length });
+    // 🆕 先检查哪些 ID 实际存在
+    const placeholdersCheck = ids.map(() => '?').join(',');
+    const existingItems = await db.prepare(
+      `SELECT id FROM transfer_items WHERE id IN (${placeholdersCheck})`
+    ).all(...ids);
+
+    const existingIds = existingItems.map(item => item.id);
+    const notFoundIds = ids.filter(id => !existingIds.includes(id));
+
+    if (notFoundIds.length > 0) {
+      console.log(`Warning: ${notFoundIds.length} items not found (already deleted):`, notFoundIds);
+    }
+
+    if (existingIds.length === 0) {
+      console.log('No items to delete (all already deleted)');
+      return res.json({ 
+        success: true, 
+        deleted: 0,
+        message: 'No items found to delete (may have been already deleted)'
+      });
+    }
+
+    // 🆕 只删除实际存在的 items
+    const placeholders = existingIds.map(() => '?').join(',');
+    const result = await db.prepare(
+      `DELETE FROM transfer_items WHERE id IN (${placeholders})`
+    ).run(...existingIds);
+
+    console.log(`Successfully deleted ${existingIds.length} items`);
+
+    res.json({ 
+      success: true, 
+      deleted: existingIds.length,
+      notFound: notFoundIds.length
+    });
   } catch (error) {
     console.error('Error bulk deleting transfer items:', error);
-    res.status(500).json({ error: error.message });
+    
+    // 🆕 返回更详细的错误信息
+    res.status(500).json({ 
+      error: 'Failed to delete items',
+      message: error.message,
+      code: error.code
+    });
   }
 });
 
