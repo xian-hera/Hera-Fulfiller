@@ -620,6 +620,24 @@ const Transfer = () => {
                 )}
                 
                 <div style={{ display: 'flex', gap: '8px' }}>
+                  {out_of_stock !== 1 && status === 'waiting' && (
+                    <button
+                      onClick={() => handleReceivedUndo(item)}
+                      style={{
+                        backgroundColor: 'white',
+                        color: '#6d7175',
+                        border: '1px solid #6d7175',
+                        borderRadius: '6px',
+                        padding: '4px 12px',
+                        fontSize: '13px',
+                        cursor: 'pointer',
+                        fontWeight: '500',
+                        minWidth: '60px'
+                      }}
+                    >
+                      Undo
+                    </button>
+                  )}
                   {out_of_stock !== 1 && (status === 'transferring' || status === 'waiting') && (
                     <button
                       onClick={() => handleOutClick(item)}
@@ -837,22 +855,42 @@ const Transfer = () => {
                       )}
                       
                       {(status === 'transferring' || status === 'waiting') && (
-                        <button
-                          onClick={() => handleOutClick(item)}
-                          style={{
-                            backgroundColor: 'white',
-                            color: '#D72C0D',
-                            border: '1px solid #D72C0D',
-                            borderRadius: '6px',
-                            padding: '4px 12px',
-                            fontSize: '13px',
-                            cursor: 'pointer',
-                            fontWeight: '500',
-                            minWidth: '60px'
-                          }}
-                        >
-                          OUT
-                        </button>
+                        <>
+                          {status === 'waiting' && (
+                            <button
+                              onClick={() => handleReceivedUndo(item)}
+                              style={{
+                                backgroundColor: 'white',
+                                color: '#6d7175',
+                                border: '1px solid #6d7175',
+                                borderRadius: '6px',
+                                padding: '4px 12px',
+                                fontSize: '13px',
+                                cursor: 'pointer',
+                                fontWeight: '500',
+                                minWidth: '60px'
+                              }}
+                            >
+                              Undo
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleOutClick(item)}
+                            style={{
+                              backgroundColor: 'white',
+                              color: '#D72C0D',
+                              border: '1px solid #D72C0D',
+                              borderRadius: '6px',
+                              padding: '4px 12px',
+                              fontSize: '13px',
+                              cursor: 'pointer',
+                              fontWeight: '500',
+                              minWidth: '60px'
+                            }}
+                          >
+                            OUT
+                          </button>
+                        </>
                       )}
                     </>
                   ) : (
