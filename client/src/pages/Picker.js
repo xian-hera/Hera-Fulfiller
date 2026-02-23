@@ -33,6 +33,9 @@ const Picker = () => {
   const [selectedImage, setSelectedImage] = useState(null);
   const [quantityModal, setQuantityModal] = useState(null);
   const [pickedQuantity, setPickedQuantity] = useState('');
+  // 🆕 MTL10 库存相关
+  const [mtl10Inventory, setMtl10Inventory] = useState({});
+  const [isLoadingInventory, setIsLoadingInventory] = useState(false);
 
   // 🆕 计算每个状态的实时数量（按 quantity 累加）
   const getStatusCounts = useCallback(() => {
@@ -97,6 +100,42 @@ const Picker = () => {
       setItems(response.data);
     } catch (error) {
       console.error('Error fetching items:', error);
+    }
+  };
+
+  // 🆕 查询 MTL10 库存（只查询 picking 且未查询过的 items）
+  const handleCheckStock = async () => {
+    setIsLoadingInventory(true);
+    try {
+      // 只查询 picking 状态且未查询过的 items
+      const pickingItems = items.filter(
+        item => item.picker_status === 'picking' && mtl10Inventory[item.id] === undefined
+      );
+      
+      if (pickingItems.length === 0) {
+        setIsLoadingInventory(false);
+        return;
+      }
+      
+      const itemIds = pickingItems.map(item => item.id);
+      
+      console.log(`📦 Checking MTL10 stock for ${itemIds.length} items...`);
+      
+      const response = await axios.post('/api/picker/items/batch-mtl10-inventory', {
+        itemIds
+      });
+      
+      console.log(`✓ Received inventory for ${Object.keys(response.data.inventory).length} items`);
+      
+      // 合并新查询的库存
+      setMtl10Inventory(prev => ({
+        ...prev,
+        ...response.data.inventory
+      }));
+    } catch (error) {
+      console.error('Error fetching MTL10 inventory:', error);
+    } finally {
+      setIsLoadingInventory(false);
     }
   };
 
@@ -277,9 +316,18 @@ const Picker = () => {
                   {formatSKU(sku)}
                 </Text>
                 
-                <Text variant="bodySm" tone="subdued">
-                  {order_name}
-                </Text>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <Text variant="bodySm" tone="subdued">
+                    {order_name}
+                  </Text>
+                  {/* 🆕 Desktop: QOH 显示在订单号右边 */}
+                  {mtl10Inventory[id] !== undefined && mtl10Inventory[id] !== null && (
+                    <span style={{ fontSize: '12px' }}>
+                      <span style={{ color: '#8c9196', fontSize: '11px' }}>QOH </span>
+                      <span style={{ fontWeight: 'bold', color: '#202223' }}>{mtl10Inventory[id]}</span>
+                    </span>
+                  )}
+                </div>
               </BlockStack>
             </div>
 
@@ -349,6 +397,17 @@ const Picker = () => {
 
               <div className="picker-item-quantity-mobile">
                 {quantity}
+                {/* 🆕 Mobile: QOH 显示在 quantity 下方 */}
+                {mtl10Inventory[id] !== undefined && mtl10Inventory[id] !== null && (
+                  <div style={{ 
+                    fontSize: '11px',
+                    marginTop: '4px',
+                    lineHeight: '1.2'
+                  }}>
+                    <span style={{ color: '#8c9196', fontSize: '10px' }}>QOH </span>
+                    <span style={{ fontWeight: 'bold', color: '#202223' }}>{mtl10Inventory[id]}</span>
+                  </div>
+                )}
               </div>
 
               <div className="picker-item-mobile-right">
@@ -597,6 +656,14 @@ const Picker = () => {
           icon: SortIcon,
           onAction: handleSort
         }}
+        secondaryActions={[
+          {
+            content: isLoadingInventory ? 'Checking...' : 'Check Stock',
+            onAction: handleCheckStock,
+            loading: isLoadingInventory,
+            disabled: isLoadingInventory
+          }
+        ]}
       >
         <Layout>
           <Layout.Section>

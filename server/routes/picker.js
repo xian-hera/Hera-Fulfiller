@@ -1,6 +1,93 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../database/init');
+const shopifyClient = require('../shopify/client');
+
+// 🆕 批量查询多个 SKU 在 MTL10 的库存
+async function getBatchMTL10Inventory(skus) {
+  try {
+    if (!skus || skus.length === 0) return {};
+    
+    // 去重 SKU
+    const uniqueSkus = [...new Set(skus.filter(sku => sku))];
+    
+    if (uniqueSkus.length === 0) return {};
+    
+    console.log(`📦 Fetching MTL10 inventory for ${uniqueSkus.length} SKUs`);
+    
+    // 使用 GraphQL 批量查询（每次最多 50 个）
+    const results = {};
+    const batchSize = 50;
+    
+    for (let i = 0; i < uniqueSkus.length; i += batchSize) {
+      const batch = uniqueSkus.slice(i, i + batchSize);
+      
+      // 构建查询字符串：(sku:123 OR sku:456 OR sku:789)
+      const skuQuery = batch.map(sku => `sku:${sku}`).join(' OR ');
+      
+      const query = `
+        query getInventoryBatch($query: String!) {
+          productVariants(first: 50, query: $query) {
+            edges {
+              node {
+                id
+                sku
+                inventoryItem {
+                  id
+                  inventoryLevels(first: 50) {
+                    edges {
+                      node {
+                        location {
+                          name
+                        }
+                        quantities(names: ["available"]) {
+                          name
+                          quantity
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      `;
+
+      const response = await shopifyClient.client.post('/graphql.json', {
+        query,
+        variables: { query: skuQuery }
+      });
+
+      const edges = response.data.data?.productVariants?.edges || [];
+      
+      // 处理每个 variant
+      edges.forEach(edge => {
+        const sku = edge.node.sku;
+        const inventoryLevels = edge.node.inventoryItem?.inventoryLevels?.edges || [];
+        
+        // 查找 MTL10 的库存
+        for (const level of inventoryLevels) {
+          if (level.node.location.name === 'MTL10') {
+            const availableQty = level.node.quantities?.find(q => q.name === 'available');
+            if (availableQty) {
+              results[sku] = availableQty.quantity;
+            }
+            break;
+          }
+        }
+      });
+      
+      console.log(`  Batch ${Math.floor(i / batchSize) + 1}: Processed ${batch.length} SKUs`);
+    }
+    
+    console.log(`✓ Fetched MTL10 inventory for ${Object.keys(results).length}/${uniqueSkus.length} SKUs`);
+    return results;
+  } catch (error) {
+    console.error('❌ Error fetching batch MTL10 inventory:', error.message);
+    return {};
+  }
+}
 
 // Get all line items for picker
 router.get('/items', async (req, res) => {
@@ -150,6 +237,53 @@ router.post('/items/:id/split', async (req, res) => {
   } catch (error) {
     console.error('Error splitting item:', error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// 🆕 批量获取 MTL10 库存
+router.post('/items/batch-mtl10-inventory', async (req, res) => {
+  try {
+    const { itemIds } = req.body;
+    
+    if (!itemIds || !Array.isArray(itemIds) || itemIds.length === 0) {
+      return res.json({ inventory: {} });
+    }
+    
+    console.log(`\n📦 Batch MTL10 inventory request for ${itemIds.length} items`);
+    
+    // 获取所有 items 的 SKU
+    const placeholders = itemIds.map(() => '?').join(',');
+    const items = await db.prepare(
+      `SELECT id, sku FROM line_items WHERE id IN (${placeholders})`
+    ).all(...itemIds);
+    
+    console.log(`  Found ${items.length} items in database`);
+    
+    // 提取所有 SKU
+    const skus = items.map(item => item.sku).filter(sku => sku);
+    
+    if (skus.length === 0) {
+      console.log(`  No SKUs to query`);
+      return res.json({ inventory: {} });
+    }
+    
+    // 批量查询 MTL10 库存
+    const inventoryBySku = await getBatchMTL10Inventory(skus);
+    
+    // 将结果映射回 item ID
+    const inventoryByItemId = {};
+    items.forEach(item => {
+      if (item.sku && inventoryBySku[item.sku] !== undefined) {
+        inventoryByItemId[item.id] = inventoryBySku[item.sku];
+      }
+    });
+    
+    console.log(`✓ Returning inventory for ${Object.keys(inventoryByItemId).length} items\n`);
+    
+    res.json({ inventory: inventoryByItemId });
+  } catch (error) {
+    console.error('❌ Error in batch MTL10 inventory:', error);
+    res.json({ inventory: {} });
   }
 });
 
