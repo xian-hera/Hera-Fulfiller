@@ -15,7 +15,7 @@ const LOCATIONS = [
   'MTL02',
   'MTL03',
   'MTL04',
-  'MTL05EXP',
+  'MTL05',
   'MTL06',
   'MTL07',
   'MTL08',
