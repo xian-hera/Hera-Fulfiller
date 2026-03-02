@@ -10,6 +10,7 @@ import Packer from './pages/Packer';
 import OrderDetail from './pages/OrderDetail';
 import Settings from './pages/Settings';
 import ErrorBoundary from './components/ErrorBoundary';
+import TransferPlanner from './pages/TransferPlanner';
 
 function App() {
   return (
