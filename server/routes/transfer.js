@@ -527,5 +527,138 @@ router.post('/items/bulk-delete', async (req, res) => {
     });
   }
 });
+// 在 server/routes/transfer.js 中添加以下两个 endpoints
+
+// 🆕 Transfer Planner: 批量查询库存
+router.post('/check-planner-stock', async (req, res) => {
+  try {
+    const { skus, locations } = req.body;
+    
+    if (!skus || !Array.isArray(skus) || skus.length === 0) {
+      return res.json({ inventory: [] });
+    }
+    
+    if (!locations || !Array.isArray(locations) || locations.length === 0) {
+      return res.json({ inventory: [] });
+    }
+
+    console.log(`\n📦 Transfer Planner: Checking stock`);
+    console.log(`  SKUs: ${skus.length}`);
+    console.log(`  Locations: ${locations.join(', ')}`);
+
+    // 使用现有的批量查询函数
+    const results = [];
+    
+    for (const sku of skus) {
+      try {
+        const query = `
+          query getInventoryBySku($query: String!) {
+            productVariants(first: 1, query: $query) {
+              edges {
+                node {
+                  id
+                  sku
+                  inventoryItem {
+                    id
+                    inventoryLevels(first: 50) {
+                      edges {
+                        node {
+                          location {
+                            name
+                          }
+                          quantities(names: ["available"]) {
+                            name
+                            quantity
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        `;
+
+        const response = await shopifyClient.client.post('/graphql.json', {
+          query,
+          variables: { query: `sku:${sku}` }
+        });
+
+        const edges = response.data.data?.productVariants?.edges || [];
+        
+        if (edges.length > 0) {
+          const inventoryLevels = edges[0].node.inventoryItem?.inventoryLevels?.edges || [];
+          
+          // 只返回请求的 locations
+          inventoryLevels.forEach(level => {
+            const locationName = level.node.location.name;
+            
+            if (locations.includes(locationName)) {
+              const availableQty = level.node.quantities?.find(q => q.name === 'available');
+              const qoh = availableQty ? availableQty.quantity : 0;
+              
+              results.push({
+                sku,
+                location: locationName,
+                qoh
+              });
+            }
+          });
+        }
+      } catch (error) {
+        console.error(`Error fetching inventory for SKU ${sku}:`, error.message);
+      }
+    }
+
+    console.log(`  ✓ Fetched inventory for ${results.length} SKU-location pairs`);
+    
+    res.json({ inventory: results });
+  } catch (error) {
+    console.error('Error in check-planner-stock:', error);
+    res.status(500).json({ error: 'Failed to check stock' });
+  }
+});
+
+// 🆕 Transfer Planner: 批量更新 items
+router.post('/batch-update-planner', async (req, res) => {
+  try {
+    const { items } = req.body;
+    
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'No items to update' });
+    }
+
+    console.log(`\n📦 Transfer Planner: Batch update ${items.length} items`);
+
+    // 批量更新
+    for (const item of items) {
+      const { id, transfer_from, estimate_month, estimate_day, status } = item;
+      
+      // 生成 transfer_date (MM/DD 格式)
+      const transfer_date = `${estimate_month.toString().padStart(2, '0')}/${estimate_day.toString().padStart(2, '0')}`;
+      
+      await db.prepare(`
+        UPDATE transfer_items
+        SET transfer_from = ?,
+            estimate_month = ?,
+            estimate_day = ?,
+            transfer_date = ?,
+            status = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(transfer_from, estimate_month, estimate_day, transfer_date, status, id);
+
+      console.log(`  ✓ Updated item ${id}: ${transfer_from}, ${transfer_date}`);
+    }
+
+    console.log(`✓ Batch update complete\n`);
+    
+    res.json({ success: true, updated: items.length });
+  } catch (error) {
+    console.error('Error in batch-update-planner:', error);
+    res.status(500).json({ error: 'Failed to update items' });
+  }
+});
 
 module.exports = router;

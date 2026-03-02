@@ -23,6 +23,7 @@ function App() {
             <Route path="/packer" element={<Packer />} />
             <Route path="/packer/:shopifyOrderId" element={<OrderDetail />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/transfer-planner" element={<TransferPlanner />} />
           </Routes>
         </Router>
       </ErrorBoundary>
