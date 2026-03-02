@@ -368,22 +368,32 @@ const TransferPlanner = () => {
                 <BlockStack gap="4">
                   <Text variant="headingMd" as="h3">Transfer from</Text>
                   
+                  {/* 第一行：Location 复选框 + Estimate 输入框 */}
                   <div style={{ 
                     display: 'flex', 
                     gap: '16px', 
-                    flexWrap: 'wrap',
-                    alignItems: 'center'
+                    alignItems: 'flex-start',
+                    justifyContent: 'space-between'
                   }}>
-                    {LOCATIONS.map(loc => (
-                      <Checkbox
-                        key={loc}
-                        label={loc}
-                        checked={selectedLocations.includes(loc)}
-                        onChange={() => handleLocationToggle(loc)}
-                      />
-                    ))}
+                    {/* 左侧：Location 复选框 */}
+                    <div style={{ 
+                      display: 'flex', 
+                      gap: '16px', 
+                      flexWrap: 'wrap',
+                      flex: 1
+                    }}>
+                      {LOCATIONS.map(loc => (
+                        <Checkbox
+                          key={loc}
+                          label={loc}
+                          checked={selectedLocations.includes(loc)}
+                          onChange={() => handleLocationToggle(loc)}
+                        />
+                      ))}
+                    </div>
 
-                    <div style={{ marginLeft: 'auto', minWidth: '120px' }}>
+                    {/* 右侧：Estimate 输入框 */}
+                    <div style={{ minWidth: '150px', flexShrink: 0 }}>
                       <TextField
                         label="Estimate"
                         type="number"
@@ -397,10 +407,12 @@ const TransferPlanner = () => {
                     </div>
                   </div>
 
+                  {/* 第二行：按钮区域 */}
                   <div style={{ 
                     display: 'flex', 
                     gap: '12px',
-                    justifyContent: 'space-between'
+                    justifyContent: 'space-between',
+                    marginTop: '8px'
                   }}>
                     <Button
                       onClick={handleCheckStock}
