@@ -254,12 +254,11 @@ const OrderDetail = () => {
 
   const handleItemClick = async (item) => {
     const itemId = item.id;
-    // 🆕 拦截：数量 >= 2 的第1次点击
     const currentState = quantityConfirmStates[itemId] || {};
     
+    // 拦截：数量 >= 2 的第1次点击
     if (item.quantity >= 2 && item.packer_status !== 'ready') {
       if (!currentState.needsConfirm) {
-        // 第1次点击：只显示提示，不执行下面的逻辑
         setQuantityConfirmStates(prev => ({
           ...prev,
           [itemId]: { needsConfirm: true, confirmed: false }
@@ -285,6 +284,22 @@ const OrderDetail = () => {
         li.id === item.id ? { ...li, packer_status: newStatus, _updating: false } : li
       );
       setLineItems(updatedItems);
+
+      // 更新确认状态
+      if (newStatus === 'packing') {
+        // 取消 check 时重置
+        setQuantityConfirmStates(prev => {
+          const newState = { ...prev };
+          delete newState[itemId];
+          return newState;
+        });
+      } else if (newStatus === 'ready' && item.quantity >= 2) {
+        // check 成功时标记已确认
+        setQuantityConfirmStates(prev => ({
+          ...prev,
+          [itemId]: { needsConfirm: true, confirmed: true }
+        }));
+      }
 
       const allReady = updatedItems.every(li => li.packer_status === 'ready');
       
@@ -320,12 +335,6 @@ const OrderDetail = () => {
         weight
       });
       await fetchOrderDetail();
-      // 🆕 重置确认状态
-      setQuantityConfirmStates(prev => {
-        const newState = { ...prev };
-        delete newState[itemId];
-        return newState;
-      });
       setWeightModal(null);
       setMessage('Weight updated successfully');
       setTimeout(() => setMessage(''), 3000);
@@ -397,13 +406,6 @@ const OrderDetail = () => {
     const isOutOfStock = item.outOfStock === true;
     const isUpdating = item._updating;
     
-    // 🆕 确认状态和样式
-    const confirmState = quantityConfirmStates[item.id] || {};
-    const showConfirm = confirmState.needsConfirm && item.packer_status !== 'ready';
-    const isConfirmed = confirmState.confirmed;
-    const quantityColor = showConfirm ? (isConfirmed ? '#00a047' : '#d72c0d') : '#202223';
-    const quantitySize = '36px';
-    
     const media = item.image_url ? (
       <div onClick={(e) => handleImageClick(e, item)} style={{ cursor: 'pointer' }}>
         <Thumbnail source={item.image_url} alt={item.title} size="large" />
@@ -469,6 +471,10 @@ const OrderDetail = () => {
             {media}
           </div>
 
+          <div className="orderdetail-item-quantity">
+            {item.quantity}
+          </div>
+
           <div className="orderdetail-item-info">
             <BlockStack gap="1">
               <Text variant="bodySm">
@@ -508,47 +514,22 @@ const OrderDetail = () => {
             </BlockStack>
           </div>
 
-          <div className="orderdetail-item-right-desktop" style={{ 
-          display: 'flex', 
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: '16px',
-          minWidth: '200px'
-        }}>
-          <div style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'flex-end',
-            gap: '4px',
-            flex: 1
-          }}>
+          <div className="orderdetail-item-right-desktop">
             {isOutOfStock && (
               <Badge tone="critical">Out of Stock</Badge>
             )}
-            
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              {showConfirm && (
-                <span style={{ fontSize: '14px', color: quantityColor, fontWeight: '500' }}>
-                  confirm quantity
-                </span>
-              )}
-              <span style={{ fontSize: quantitySize, color: quantityColor, fontWeight: 'bold', lineHeight: '1' }}>
-                {item.quantity}
-              </span>
-            </div>
             
             {item.transferInfo && !isOutOfStock && (
               <Text variant="bodySm" fontWeight="bold" tone="info">
                 Transfer: {item.transferInfo.quantity} from {item.transferInfo.transferFrom}, Est: {formatDate(item.transferInfo.estimateMonth, item.transferInfo.estimateDay)}
               </Text>
             )}
+            
+            <StatusButton />
           </div>
-          
-          <StatusButton />
-        </div>
         </div>
 
-        \3 - 新增 */}
+        {/* 移动端布局 - 新增 */}
         <div className="orderdetail-item-mobile">
           {/* 第一行：产品信息文本 */}
           <div className="orderdetail-mobile-text">
