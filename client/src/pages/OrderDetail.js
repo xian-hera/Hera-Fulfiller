@@ -97,7 +97,13 @@ const OrderDetail = () => {
       const response = await axios.get(`/api/packer/orders/${shopifyOrderId}`);
       console.log('Current order:', response.data.order_number);
       setOrder(response.data);
-      setLineItems(response.data.lineItems);
+      setLineItems(prev => {
+        const currentStatusMap = new Map(prev.map(item => [item.id, item._updating]));
+        return response.data.lineItems.map(item => ({
+          ...item,
+          _updating: currentStatusMap.get(item.id) || false
+        }));
+      });
       setNoteValue(response.data.packer_note || '');
       await fetchBoxTypes();
     } catch (error) {
@@ -545,7 +551,7 @@ const OrderDetail = () => {
         </div>
         </div>
 
-        \3 - 新增 */}
+       
         <div className="orderdetail-item-mobile">
           {/* 第一行：产品信息文本 */}
           <div className="orderdetail-mobile-text">
