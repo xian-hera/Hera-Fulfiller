@@ -501,34 +501,60 @@ const handleItemClick = async (item) => {
           </div>
 
         
-          <div className="orderdetail-item-right-desktop" style={{ 
+        <div className="orderdetail-item-right-desktop" style={{ 
           display: 'flex', 
-          flexDirection: 'column',
-          alignItems: 'flex-end',
-          gap: '8px',
-          minWidth: '150px'
+          flexDirection: 'row',  // 🔧 改为 row（横向）
+          alignItems: 'center',   // 🔧 改为 center（垂直居中）
+          gap: '16px',            // 🔧 增加间距
+          minWidth: '200px'
         }}>
-          {isOutOfStock && (
-            <Badge tone="critical">Out of Stock</Badge>
-          )}
-          
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            {showConfirm && (
-              <span style={{ fontSize: '0.85em', color: quantityColor, fontWeight: '500' }}>
-                confirm quantity
-              </span>
+          {/* 左侧：Quantity + Transfer info 区域 */}
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'flex-end',
+            gap: '4px',
+            flex: 1
+          }}>
+            {/* Out of Stock Badge */}
+            {isOutOfStock && (
+              <Badge tone="critical">Out of Stock</Badge>
             )}
-            <span style={{ fontSize: quantitySize, color: quantityColor, fontWeight: quantityWeight }}>
-              {item.quantity}
-            </span>
+            
+            {/* Quantity + Confirm 区域 */}
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '8px'
+            }}>
+              {showConfirm && (
+                <span style={{ 
+                  fontSize: '14px',        // confirm quantity 字号
+                  color: quantityColor,
+                  fontWeight: '500'
+                }}>
+                  confirm quantity
+                </span>
+              )}
+              <span style={{ 
+                fontSize: showConfirm ? '48px' : '36px',  // 🔧 基础 36px，确认时 48px（比原来大3倍）
+                color: quantityColor,
+                fontWeight: 'bold',                        // 🔧 始终加粗
+                lineHeight: '1'
+              }}>
+                {item.quantity}
+              </span>
+            </div>
+            
+            {/* Transfer Info（在 quantity 下方）*/}
+            {item.transferInfo && !isOutOfStock && (
+              <Text variant="bodySm" fontWeight="bold" tone="info">
+                Transfer: {item.transferInfo.quantity} from {item.transferInfo.transferFrom}, Est: {formatDate(item.transferInfo.estimateMonth, item.transferInfo.estimateDay)}
+              </Text>
+            )}
           </div>
           
-          {item.transferInfo && !isOutOfStock && (
-            <Text variant="bodySm" fontWeight="bold" tone="info">
-              Transfer: {item.transferInfo.quantity} from {item.transferInfo.transferFrom}, Est: {formatDate(item.transferInfo.estimateMonth, item.transferInfo.estimateDay)}
-            </Text>
-          )}
-          
+          {/* 右侧：Status Button */}
           <StatusButton />
         </div>
         </div>
