@@ -37,6 +37,7 @@ const OrderDetail = () => {
   // Note 功能状态
   const [noteModal, setNoteModal] = useState(false);
   const [noteValue, setNoteValue] = useState('');
+  const [quantityConfirmStates, setQuantityConfirmStates] = useState({});
 
   useEffect(() => {
     fetchAllOrders();
@@ -251,37 +252,49 @@ const OrderDetail = () => {
     return 'packing';
   };
 
-  const handleItemClick = async (item) => {
+const handleItemClick = async (item) => {
     if (item._updating) return;
     
-    const newStatus = item.packer_status === 'ready' ? 'packing' : 'ready';
+    const itemId = item.id;
+    const currentState = quantityConfirmStates[itemId] || {};
     
-    try {
-      setLineItems(prev => prev.map(li => 
-        li.id === item.id ? { ...li, _updating: true } : li
-      ));
-
-      await axios.patch(`/api/packer/items/${item.id}/packer-status`, {
-        status: newStatus
-      });
-      
-      const updatedItems = lineItems.map(li => 
-        li.id === item.id ? { ...li, packer_status: newStatus, _updating: false } : li
-      );
-      setLineItems(updatedItems);
-
-      const allReady = updatedItems.every(li => li.packer_status === 'ready');
-      
-      if (allReady && newStatus === 'ready') {
-        setCompleteModal(true);
+    // 如果已经 ready，取消并重置
+    if (item.packer_status === 'ready') {
+      setLineItems(prev => prev.map(i => i.id === itemId ? { ...i, _updating: true } : i));
+      try {
+        await axios.patch(`/api/packer/items/${itemId}/status`, { status: 'packing' });
+        await fetchOrderDetail();
+        setQuantityConfirmStates(prev => {
+          const newState = { ...prev };
+          delete newState[itemId];
+          return newState;
+        });
+      } catch (error) {
+        console.error('Error:', error);
+        setLineItems(prev => prev.map(i => i.id === itemId ? { ...i, _updating: false } : i));
       }
+      return;
+    }
+    
+    // 数量 >= 2 需要确认
+    if (item.quantity >= 2) {
+      if (!currentState.needsConfirm) {
+        setQuantityConfirmStates(prev => ({ ...prev, [itemId]: { needsConfirm: true, confirmed: false } }));
+        return;
+      }
+      if (!currentState.confirmed) {
+        setQuantityConfirmStates(prev => ({ ...prev, [itemId]: { needsConfirm: true, confirmed: true } }));
+      }
+    }
+    
+    // 执行 check
+    setLineItems(prev => prev.map(i => i.id === itemId ? { ...i, _updating: true } : i));
+    try {
+      await axios.patch(`/api/packer/items/${itemId}/status`, { status: 'ready' });
+      await fetchOrderDetail();
     } catch (error) {
-      console.error('Error updating item status:', error);
-      setLineItems(prev => prev.map(li => 
-        li.id === item.id ? { ...li, _updating: false } : li
-      ));
-      setMessage('Error updating item status');
-      setTimeout(() => setMessage(''), 3000);
+      console.error('Error:', error);
+      setLineItems(prev => prev.map(i => i.id === itemId ? { ...i, _updating: false } : i));
     }
   };
 
@@ -374,6 +387,12 @@ const OrderDetail = () => {
     const hasWarning = item.has_weight_warning === 1;
     const isOutOfStock = item.outOfStock === true;
     const isUpdating = item._updating;
+    const confirmState = quantityConfirmStates[item.id] || { needsConfirm: false, confirmed: false };
+    const showConfirm = confirmState.needsConfirm;
+    const isConfirmed = confirmState.confirmed;
+    const quantityColor = showConfirm ? (isConfirmed ? '#00a047' : '#d72c0d') : '#202223';
+    const quantitySize = showConfirm ? '1.25em' : '1em';
+    const quantityWeight = showConfirm ? 'bold' : 'normal';
     
     const media = item.image_url ? (
       <div onClick={(e) => handleImageClick(e, item)} style={{ cursor: 'pointer' }}>
@@ -440,9 +459,7 @@ const OrderDetail = () => {
             {media}
           </div>
 
-          <div className="orderdetail-item-quantity">
-            {item.quantity}
-          </div>
+
 
           <div className="orderdetail-item-info">
             <BlockStack gap="1">
@@ -483,19 +500,37 @@ const OrderDetail = () => {
             </BlockStack>
           </div>
 
-          <div className="orderdetail-item-right-desktop">
-            {isOutOfStock && (
-              <Badge tone="critical">Out of Stock</Badge>
+        
+          <div className="orderdetail-item-right-desktop" style={{ 
+          display: 'flex', 
+          flexDirection: 'column',
+          alignItems: 'flex-end',
+          gap: '8px',
+          minWidth: '150px'
+        }}>
+          {isOutOfStock && (
+            <Badge tone="critical">Out of Stock</Badge>
+          )}
+          
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {showConfirm && (
+              <span style={{ fontSize: '0.85em', color: quantityColor, fontWeight: '500' }}>
+                confirm quantity
+              </span>
             )}
-            
-            {item.transferInfo && !isOutOfStock && (
-              <Text variant="bodySm" fontWeight="bold" tone="info">
-                Transfer: {item.transferInfo.quantity} from {item.transferInfo.transferFrom}, Est: {formatDate(item.transferInfo.estimateMonth, item.transferInfo.estimateDay)}
-              </Text>
-            )}
-            
-            <StatusButton />
+            <span style={{ fontSize: quantitySize, color: quantityColor, fontWeight: quantityWeight }}>
+              {item.quantity}
+            </span>
           </div>
+          
+          {item.transferInfo && !isOutOfStock && (
+            <Text variant="bodySm" fontWeight="bold" tone="info">
+              Transfer: {item.transferInfo.quantity} from {item.transferInfo.transferFrom}, Est: {formatDate(item.transferInfo.estimateMonth, item.transferInfo.estimateDay)}
+            </Text>
+          )}
+          
+          <StatusButton />
+        </div>
         </div>
 
         {/* 移动端布局 - 新增 */}
@@ -567,17 +602,7 @@ const OrderDetail = () => {
               {formatSKU(item.sku)}
             </div>
 
-            {item.transferInfo && !isOutOfStock && (
-              <div style={{ 
-                fontSize: '12px',
-                color: '#0080FF',
-                fontWeight: '600',
-                marginBottom: '8px',
-                wordBreak: 'break-word'
-              }}>
-                Transfer: {item.transferInfo.quantity} from {item.transferInfo.transferFrom}, Est: {formatDate(item.transferInfo.estimateMonth, item.transferInfo.estimateDay)}
-              </div>
-            )}
+
 
             {isOutOfStock && (
               <div style={{ marginBottom: '8px' }}>
@@ -588,18 +613,31 @@ const OrderDetail = () => {
 
           {/* 第二行：图片 + 数量 + 状态按钮 */}
           <div className="orderdetail-mobile-bottom">
-            <div className="orderdetail-thumbnail-mobile">
-              {media}
-            </div>
-
-            <div className="orderdetail-quantity-mobile">
-              {item.quantity}
-            </div>
-
-            <div className="orderdetail-mobile-right">
-              <StatusButton />
-            </div>
+          <div className="orderdetail-thumbnail-mobile">
+            {media}
           </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px', flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              {showConfirm && (
+                <span style={{ fontSize: '11px', color: quantityColor, fontWeight: '500', whiteSpace: 'nowrap' }}>
+                  confirm quantity
+                </span>
+              )}
+              <span style={{ fontSize: showConfirm ? '1.5em' : '1.2em', color: quantityColor, fontWeight: showConfirm ? 'bold' : '600' }}>
+                {item.quantity}
+              </span>
+            </div>
+            
+            {item.transferInfo && !isOutOfStock && (
+              <div style={{ fontSize: '11px', color: '#0080FF', fontWeight: '600', textAlign: 'right', maxWidth: '200px' }}>
+                Transfer: {item.transferInfo.quantity} from {item.transferInfo.transferFrom}, Est: {formatDate(item.transferInfo.estimateMonth, item.transferInfo.estimateDay)}
+              </div>
+            )}
+            
+            <StatusButton />
+          </div>
+        </div>
         </div>
       </div>
     );
