@@ -406,6 +406,13 @@ const OrderDetail = () => {
     const isOutOfStock = item.outOfStock === true;
     const isUpdating = item._updating;
     
+    // 确认状态和样式
+    const confirmState = quantityConfirmStates[item.id] || {};
+    const showConfirm = confirmState.needsConfirm && item.packer_status !== 'ready';
+    const isConfirmed = confirmState.confirmed;
+    const quantityColor = showConfirm ? (isConfirmed ? '#00a047' : '#d72c0d') : '#202223';
+    const quantitySize = '36px';
+    
     const media = item.image_url ? (
       <div onClick={(e) => handleImageClick(e, item)} style={{ cursor: 'pointer' }}>
         <Thumbnail source={item.image_url} alt={item.title} size="large" />
@@ -471,10 +478,6 @@ const OrderDetail = () => {
             {media}
           </div>
 
-          <div className="orderdetail-item-quantity">
-            {item.quantity}
-          </div>
-
           <div className="orderdetail-item-info">
             <BlockStack gap="1">
               <Text variant="bodySm">
@@ -514,22 +517,47 @@ const OrderDetail = () => {
             </BlockStack>
           </div>
 
-          <div className="orderdetail-item-right-desktop">
+          <div className="orderdetail-item-right-desktop" style={{ 
+          display: 'flex', 
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: '16px',
+          minWidth: '200px'
+        }}>
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'flex-end',
+            gap: '4px',
+            flex: 1
+          }}>
             {isOutOfStock && (
               <Badge tone="critical">Out of Stock</Badge>
             )}
+            
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {showConfirm && (
+                <span style={{ fontSize: '14px', color: quantityColor, fontWeight: '500' }}>
+                  confirm quantity
+                </span>
+              )}
+              <span style={{ fontSize: quantitySize, color: quantityColor, fontWeight: 'bold', lineHeight: '1' }}>
+                {item.quantity}
+              </span>
+            </div>
             
             {item.transferInfo && !isOutOfStock && (
               <Text variant="bodySm" fontWeight="bold" tone="info">
                 Transfer: {item.transferInfo.quantity} from {item.transferInfo.transferFrom}, Est: {formatDate(item.transferInfo.estimateMonth, item.transferInfo.estimateDay)}
               </Text>
             )}
-            
-            <StatusButton />
           </div>
+          
+          <StatusButton />
+        </div>
         </div>
 
-        {/* 移动端布局 - 新增 */}
+        \3 - 新增 */}
         <div className="orderdetail-item-mobile">
           {/* 第一行：产品信息文本 */}
           <div className="orderdetail-mobile-text">
