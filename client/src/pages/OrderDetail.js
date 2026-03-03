@@ -97,13 +97,7 @@ const OrderDetail = () => {
       const response = await axios.get(`/api/packer/orders/${shopifyOrderId}`);
       console.log('Current order:', response.data.order_number);
       setOrder(response.data);
-      setLineItems(prev => {
-        const currentStatusMap = new Map(prev.map(item => [item.id, item._updating]));
-        return response.data.lineItems.map(item => ({
-          ...item,
-          _updating: currentStatusMap.get(item.id) || false
-        }));
-      });
+      setLineItems(response.data.lineItems);
       setNoteValue(response.data.packer_note || '');
       await fetchBoxTypes();
     } catch (error) {
@@ -258,55 +252,52 @@ const OrderDetail = () => {
     return 'packing';
   };
 
-    const handleItemClick = async (item) => {
-    if (item._updating) return;
-    
+  const handleItemClick = async (item) => {
+    // 🆕 拦截：数量 >= 2 的第1次点击
     const itemId = item.id;
     const currentState = quantityConfirmStates[itemId] || {};
     
-    // 如果已经 ready，取消 check 并重置
-    if (item.packer_status === 'ready') {
-      setLineItems(prev => prev.map(i => i.id === itemId ? { ...i, _updating: true } : i));
-      try {
-        await axios.patch(`/api/packer/items/${itemId}/status`, { status: 'packing' });
-        await fetchOrderDetail();
-        setQuantityConfirmStates(prev => {
-          const newState = { ...prev };
-          delete newState[itemId];
-          return newState;
-        });
-      } catch (error) {
-        console.error('Error:', error);
-        setLineItems(prev => prev.map(i => i.id === itemId ? { ...i, _updating: false } : i));
-      }
-      return;
-    }
-    
-    // 数量 >= 2 需要确认
-    if (item.quantity >= 2 && !currentState.needsConfirm) {
-      // 第1次点击：显示确认提示，不 check
-      setQuantityConfirmStates(prev => ({ 
-        ...prev, 
-        [itemId]: { needsConfirm: true, confirmed: false } 
-      }));
-      return;
-    }
-    
-    // 第2次点击（或 quantity = 1）：执行 check
-    setLineItems(prev => prev.map(i => i.id === itemId ? { ...i, _updating: true } : i));
-    try {
-      await axios.patch(`/api/packer/items/${itemId}/status`, { status: 'ready' });
-      await fetchOrderDetail();
-      // 标记为已确认
-      if (item.quantity >= 2) {
-        setQuantityConfirmStates(prev => ({ 
-          ...prev, 
-          [itemId]: { needsConfirm: true, confirmed: true } 
+    if (item.quantity >= 2 && item.packer_status !== 'ready') {
+      if (!currentState.needsConfirm) {
+        // 第1次点击：只显示提示，不执行下面的逻辑
+        setQuantityConfirmStates(prev => ({
+          ...prev,
+          [itemId]: { needsConfirm: true, confirmed: false }
         }));
+        return;
+      }
+    }
+    
+    if (item._updating) return;
+    
+    const newStatus = item.packer_status === 'ready' ? 'packing' : 'ready';
+    
+    try {
+      setLineItems(prev => prev.map(li => 
+        li.id === item.id ? { ...li, _updating: true } : li
+      ));
+
+      await axios.patch(`/api/packer/items/${item.id}/packer-status`, {
+        status: newStatus
+      });
+      
+      const updatedItems = lineItems.map(li => 
+        li.id === item.id ? { ...li, packer_status: newStatus, _updating: false } : li
+      );
+      setLineItems(updatedItems);
+
+      const allReady = updatedItems.every(li => li.packer_status === 'ready');
+      
+      if (allReady && newStatus === 'ready') {
+        setCompleteModal(true);
       }
     } catch (error) {
-      console.error('Error:', error);
-      setLineItems(prev => prev.map(i => i.id === itemId ? { ...i, _updating: false } : i));
+      console.error('Error updating item status:', error);
+      setLineItems(prev => prev.map(li => 
+        li.id === item.id ? { ...li, _updating: false } : li
+      ));
+      setMessage('Error updating item status');
+      setTimeout(() => setMessage(''), 3000);
     }
   };
 
@@ -329,6 +320,12 @@ const OrderDetail = () => {
         weight
       });
       await fetchOrderDetail();
+      // 🆕 重置确认状态
+      setQuantityConfirmStates(prev => {
+        const newState = { ...prev };
+        delete newState[itemId];
+        return newState;
+      });
       setWeightModal(null);
       setMessage('Weight updated successfully');
       setTimeout(() => setMessage(''), 3000);
@@ -400,7 +397,7 @@ const OrderDetail = () => {
     const isOutOfStock = item.outOfStock === true;
     const isUpdating = item._updating;
     
-    // 确认状态和样式
+    // 🆕 确认状态和样式
     const confirmState = quantityConfirmStates[item.id] || {};
     const showConfirm = confirmState.needsConfirm && item.packer_status !== 'ready';
     const isConfirmed = confirmState.confirmed;
@@ -551,7 +548,7 @@ const OrderDetail = () => {
         </div>
         </div>
 
-       
+        \3 - 新增 */}
         <div className="orderdetail-item-mobile">
           {/* 第一行：产品信息文本 */}
           <div className="orderdetail-mobile-text">
