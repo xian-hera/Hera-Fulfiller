@@ -258,7 +258,7 @@ const handleItemClick = async (item) => {
     const itemId = item.id;
     const currentState = quantityConfirmStates[itemId] || {};
     
-    // 如果已经 ready，取消并重置
+    // 如果已经 ready，取消 check 并重置
     if (item.packer_status === 'ready') {
       setLineItems(prev => prev.map(i => i.id === itemId ? { ...i, _updating: true } : i));
       try {
@@ -276,18 +276,28 @@ const handleItemClick = async (item) => {
       return;
     }
     
-    // 数量 >= 2 需要确认
+    // 🔧 数量 >= 2 需要确认
     if (item.quantity >= 2) {
+      // 第1次点击：显示确认提示，不 check
       if (!currentState.needsConfirm) {
-        setQuantityConfirmStates(prev => ({ ...prev, [itemId]: { needsConfirm: true, confirmed: false } }));
-        return;
+        setQuantityConfirmStates(prev => ({ 
+          ...prev, 
+          [itemId]: { needsConfirm: true, confirmed: false } 
+        }));
+        return; // 不执行 check，直接返回
       }
+      
+      // 第2次点击：标记为已确认，继续执行下面的 check
       if (!currentState.confirmed) {
-        setQuantityConfirmStates(prev => ({ ...prev, [itemId]: { needsConfirm: true, confirmed: true } }));
+        setQuantityConfirmStates(prev => ({ 
+          ...prev, 
+          [itemId]: { needsConfirm: true, confirmed: true } 
+        }));
+        // 🔧 注意：这里不 return，继续执行下面的 check 逻辑
       }
     }
     
-    // 执行 check
+    // 执行 check（quantity = 1 直接执行，quantity >= 2 第2次点击时执行）
     setLineItems(prev => prev.map(i => i.id === itemId ? { ...i, _updating: true } : i));
     try {
       await axios.patch(`/api/packer/items/${itemId}/status`, { status: 'ready' });
