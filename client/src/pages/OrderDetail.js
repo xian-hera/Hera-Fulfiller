@@ -253,8 +253,8 @@ const OrderDetail = () => {
   };
 
   const handleItemClick = async (item) => {
-    // 🆕 拦截：数量 >= 2 的第1次点击
     const itemId = item.id;
+    // 🆕 拦截：数量 >= 2 的第1次点击
     const currentState = quantityConfirmStates[itemId] || {};
     
     if (item.quantity >= 2 && item.packer_status !== 'ready') {
