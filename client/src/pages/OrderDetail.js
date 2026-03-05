@@ -557,7 +557,7 @@ const OrderDetail = () => {
         </div>
         </div>
 
-        \3 - 新增 */}
+       
         <div className="orderdetail-item-mobile">
           {/* 第一行：产品信息文本 */}
           <div className="orderdetail-mobile-text">
