@@ -330,16 +330,31 @@ router.post('/orders/:shopifyOrderId/complete', async (req, res) => {
       console.log(`Using Shopify Order ID for metafield: ${realShopifyOrderId}`);
 
       const shopifyClient = require('../shopify/client');
+      
+      // 更新 ready metafield
       const result = await shopifyClient.updateOrderMetafield(
-        realShopifyOrderId,  // 使用提取后的真实 ID
+        realShopifyOrderId,
         'custom',
         'ready',
         'true',
         'boolean'
       );
       
-      console.log(`✓ Shopify metafield updated successfully for Order ${order.name}`);
+      console.log(`✓ Shopify metafield 'ready' updated successfully for Order ${order.name}`);
       console.log(`Metafield ID: ${result.id}`);
+      
+      // 🆕 更新 packed_time metafield（当前日期和时间）
+      const packedTime = new Date().toISOString();
+      const packedTimeResult = await shopifyClient.updateOrderMetafield(
+        realShopifyOrderId,
+        'custom',
+        'packed_time',
+        packedTime,
+        'date_time'
+      );
+      
+      console.log(`✓ Shopify metafield 'packed_time' updated: ${packedTime}`);
+      console.log(`Metafield ID: ${packedTimeResult.id}`);
     } catch (metafieldError) {
       console.error('⚠️ Error updating Shopify metafield (non-critical):', metafieldError.message);
       if (metafieldError.response) {
