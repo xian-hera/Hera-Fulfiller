@@ -119,23 +119,17 @@ const Picker = () => {
       
       const itemIds = pickingItems.map(item => item.id);
       
-      // 🔍 详细日志
-      const pickingCount = pickingItems.filter(i => i.picker_status === 'picking').length;
-      const missingCount = pickingItems.filter(i => i.picker_status === 'missing').length;
-      console.log(`📦 Checking MTL10 stock for ${itemIds.length} items (${pickingCount} picking, ${missingCount} missing)...`);
-      console.log('Item IDs:', itemIds);
+      console.log(`📦 Checking MTL10 stock for ${itemIds.length} items...`);
       
       const response = await axios.post('/api/picker/items/batch-mtl10-inventory', {
         itemIds
       });
       
       console.log(`✓ Received inventory for ${Object.keys(response.data.inventory).length} items`);
-      console.log('Inventory data:', response.data.inventory);
       
       // 合并新查询的库存
       setMtl10Inventory(prev => {
         const merged = { ...prev, ...response.data.inventory };
-        console.log('Updated mtl10Inventory:', merged);
         return merged;
       });
     } catch (error) {
