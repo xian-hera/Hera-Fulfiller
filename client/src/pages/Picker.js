@@ -107,9 +107,9 @@ const Picker = () => {
   const handleCheckStock = async () => {
     setIsLoadingInventory(true);
     try {
-      // 只查询 picking 状态且未查询过的 items
+      // 查询 picking 和 missing 状态且未查询过的 items
       const pickingItems = items.filter(
-        item => item.picker_status === 'picking' && mtl10Inventory[item.id] === undefined
+        item => (item.picker_status === 'picking' || item.picker_status === 'missing') && mtl10Inventory[item.id] === undefined
       );
       
       if (pickingItems.length === 0) {
@@ -119,19 +119,25 @@ const Picker = () => {
       
       const itemIds = pickingItems.map(item => item.id);
       
-      console.log(`📦 Checking MTL10 stock for ${itemIds.length} items...`);
+      // 🔍 详细日志
+      const pickingCount = pickingItems.filter(i => i.picker_status === 'picking').length;
+      const missingCount = pickingItems.filter(i => i.picker_status === 'missing').length;
+      console.log(`📦 Checking MTL10 stock for ${itemIds.length} items (${pickingCount} picking, ${missingCount} missing)...`);
+      console.log('Item IDs:', itemIds);
       
       const response = await axios.post('/api/picker/items/batch-mtl10-inventory', {
         itemIds
       });
       
       console.log(`✓ Received inventory for ${Object.keys(response.data.inventory).length} items`);
+      console.log('Inventory data:', response.data.inventory);
       
       // 合并新查询的库存
-      setMtl10Inventory(prev => ({
-        ...prev,
-        ...response.data.inventory
-      }));
+      setMtl10Inventory(prev => {
+        const merged = { ...prev, ...response.data.inventory };
+        console.log('Updated mtl10Inventory:', merged);
+        return merged;
+      });
     } catch (error) {
       console.error('Error fetching MTL10 inventory:', error);
     } finally {
