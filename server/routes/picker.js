@@ -32,16 +32,16 @@ async function getBatchMTL10Inventory(skus) {
               node {
                 id
                 sku
-                product {
-                  id
-                  metafields(first: 10, namespace: "custom") {
-                    edges {
-                      node {
-                        key
-                        value
-                      }
+                metafields(first: 10, namespace: "custom") {
+                  edges {
+                    node {
+                      key
+                      value
                     }
                   }
+                }
+                product {
+                  id
                 }
                 inventoryItem {
                   id
@@ -77,14 +77,16 @@ async function getBatchMTL10Inventory(skus) {
         const sku = edge.node.sku;
         const inventoryLevels = edge.node.inventoryItem?.inventoryLevels?.edges || [];
         
-        // 提取 discontinued metafield
-        const metafields = edge.node.product?.metafields?.edges || [];
+        // 🆕 从 variant metafields 提取 discontinued（不是 product）
+        const metafields = edge.node.metafields?.edges || [];
         const discontinuedMetafield = metafields.find(m => m.node.key === 'discontinued');
         
         // 调试：打印 metafield 信息
         if (discontinuedMetafield) {
           console.log(`SKU ${sku} - discontinued metafield:`, discontinuedMetafield.node);
           console.log(`  value: "${discontinuedMetafield.node.value}" (type: ${typeof discontinuedMetafield.node.value})`);
+        } else {
+          console.log(`SKU ${sku} - no discontinued metafield found`);
         }
         
         // 只检查布尔值 true
