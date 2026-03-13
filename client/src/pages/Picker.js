@@ -127,9 +127,16 @@ const Picker = () => {
       
       console.log(`✓ Received inventory for ${Object.keys(response.data.inventory).length} items`);
       
+      // 🔍 调试：打印返回的数据
+      console.log('Inventory data:', response.data.inventory);
+      Object.entries(response.data.inventory).forEach(([itemId, data]) => {
+        console.log(`  Item ${itemId}:`, data);
+      });
+      
       // 合并新查询的库存
       setMtl10Inventory(prev => {
         const merged = { ...prev, ...response.data.inventory };
+        console.log('Merged inventory:', merged);
         return merged;
       });
     } catch (error) {
@@ -326,7 +333,7 @@ const Picker = () => {
                       <span style={{ color: '#8c9196', fontSize: '11px' }}>QOH </span>
                       <span style={{ 
                         fontWeight: 'bold', 
-                        color: mtl10Inventory[id].discontinued ? '#d72c0d' : '#202223' 
+                        color: (typeof mtl10Inventory[id] === 'object' && mtl10Inventory[id].discontinued) ? '#d72c0d' : '#202223' 
                       }}>
                         {typeof mtl10Inventory[id] === 'object' ? mtl10Inventory[id].quantity : mtl10Inventory[id]}
                       </span>
@@ -412,7 +419,7 @@ const Picker = () => {
                     <span style={{ color: '#8c9196', fontSize: '10px' }}>QOH </span>
                     <span style={{ 
                       fontWeight: 'bold', 
-                      color: mtl10Inventory[id].discontinued ? '#d72c0d' : '#202223' 
+                      color: (typeof mtl10Inventory[id] === 'object' && mtl10Inventory[id].discontinued) ? '#d72c0d' : '#202223' 
                     }}>
                       {typeof mtl10Inventory[id] === 'object' ? mtl10Inventory[id].quantity : mtl10Inventory[id]}
                     </span>
