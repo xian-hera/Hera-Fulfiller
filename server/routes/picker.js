@@ -80,7 +80,17 @@ async function getBatchMTL10Inventory(skus) {
         // 提取 discontinued metafield
         const metafields = edge.node.product?.metafields?.edges || [];
         const discontinuedMetafield = metafields.find(m => m.node.key === 'discontinued');
-        const isDiscontinued = discontinuedMetafield?.node?.value === 'true';
+        
+        // 调试：打印 metafield 信息
+        if (discontinuedMetafield) {
+          console.log(`SKU ${sku} - discontinued metafield:`, discontinuedMetafield.node);
+          console.log(`  value: "${discontinuedMetafield.node.value}" (type: ${typeof discontinuedMetafield.node.value})`);
+        }
+        
+        // 只检查布尔值 true
+        const isDiscontinued = discontinuedMetafield?.node?.value === true;
+        
+        console.log(`SKU ${sku} - isDiscontinued: ${isDiscontinued}`);
         
         // 查找 MTL10 的库存
         for (const level of inventoryLevels) {
