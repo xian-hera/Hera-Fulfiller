@@ -32,6 +32,17 @@ async function getBatchMTL10Inventory(skus) {
               node {
                 id
                 sku
+                product {
+                  id
+                  metafields(first: 10, namespace: "custom") {
+                    edges {
+                      node {
+                        key
+                        value
+                      }
+                    }
+                  }
+                }
                 inventoryItem {
                   id
                   inventoryLevels(first: 50) {
@@ -40,7 +51,7 @@ async function getBatchMTL10Inventory(skus) {
                         location {
                           name
                         }
-                        quantities(names: ["available"]) {
+                        quantities(names: ["on_hand"]) {
                           name
                           quantity
                         }
@@ -66,15 +77,31 @@ async function getBatchMTL10Inventory(skus) {
         const sku = edge.node.sku;
         const inventoryLevels = edge.node.inventoryItem?.inventoryLevels?.edges || [];
         
+        // 提取 discontinued metafield
+        const metafields = edge.node.product?.metafields?.edges || [];
+        const discontinuedMetafield = metafields.find(m => m.node.key === 'discontinued');
+        const isDiscontinued = discontinuedMetafield?.node?.value === 'true';
+        
         // 查找 MTL10 的库存
         for (const level of inventoryLevels) {
           if (level.node.location.name === 'MTL10') {
-            const availableQty = level.node.quantities?.find(q => q.name === 'available');
-            if (availableQty) {
-              results[sku] = availableQty.quantity;
+            const onHandQty = level.node.quantities?.find(q => q.name === 'on_hand');
+            if (onHandQty) {
+              results[sku] = {
+                quantity: onHandQty.quantity,
+                discontinued: isDiscontinued
+              };
             }
             break;
           }
+        }
+        
+        // 如果没有 MTL10 库存但有 discontinued 信息，也记录
+        if (!results[sku] && isDiscontinued) {
+          results[sku] = {
+            quantity: 0,
+            discontinued: true
+          };
         }
       });
       

@@ -324,7 +324,12 @@ const Picker = () => {
                   {mtl10Inventory[id] !== undefined && mtl10Inventory[id] !== null && (
                     <span style={{ fontSize: '12px' }}>
                       <span style={{ color: '#8c9196', fontSize: '11px' }}>QOH </span>
-                      <span style={{ fontWeight: 'bold', color: '#202223' }}>{mtl10Inventory[id]}</span>
+                      <span style={{ 
+                        fontWeight: 'bold', 
+                        color: mtl10Inventory[id].discontinued ? '#d72c0d' : '#202223' 
+                      }}>
+                        {typeof mtl10Inventory[id] === 'object' ? mtl10Inventory[id].quantity : mtl10Inventory[id]}
+                      </span>
                     </span>
                   )}
                 </div>
@@ -405,7 +410,12 @@ const Picker = () => {
                     lineHeight: '1.2'
                   }}>
                     <span style={{ color: '#8c9196', fontSize: '10px' }}>QOH </span>
-                    <span style={{ fontWeight: 'bold', color: '#202223' }}>{mtl10Inventory[id]}</span>
+                    <span style={{ 
+                      fontWeight: 'bold', 
+                      color: mtl10Inventory[id].discontinued ? '#d72c0d' : '#202223' 
+                    }}>
+                      {typeof mtl10Inventory[id] === 'object' ? mtl10Inventory[id].quantity : mtl10Inventory[id]}
+                    </span>
                   </div>
                 )}
               </div>

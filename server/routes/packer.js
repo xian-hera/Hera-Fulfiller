@@ -355,6 +355,37 @@ router.post('/orders/:shopifyOrderId/complete', async (req, res) => {
       
       console.log(`✓ Shopify metafield 'packed_time' updated: ${packedTime}`);
       console.log(`Metafield ID: ${packedTimeResult.id}`);
+      
+      // 🆕 更新 custom.package metafield (box type)
+      const packageResult = await shopifyClient.updateOrderMetafield(
+        realShopifyOrderId,
+        'custom',
+        'package',
+        boxType,
+        'single_line_text_field'
+      );
+      
+      console.log(`✓ Shopify metafield 'package' updated: ${boxType}`);
+      console.log(`Metafield ID: ${packageResult.id}`);
+      
+      // 🆕 更新 custom.weight metafield (如果有输入)
+      if (weight) {
+        const weightResult = await shopifyClient.updateOrderMetafield(
+          realShopifyOrderId,
+          'custom',
+          'weight',
+          JSON.stringify({
+            value: parseFloat(weight),
+            unit: 'g'
+          }),
+          'weight'
+        );
+        
+        console.log(`✓ Shopify metafield 'weight' updated: ${weight}g`);
+        console.log(`Metafield ID: ${weightResult.id}`);
+      } else {
+        console.log(`⚠️ No weight provided, skipping weight metafield`);
+      }
     } catch (metafieldError) {
       console.error('⚠️ Error updating Shopify metafield (non-critical):', metafieldError.message);
       if (metafieldError.response) {
