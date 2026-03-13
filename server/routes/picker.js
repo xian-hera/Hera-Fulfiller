@@ -94,19 +94,18 @@ async function getBatchMTL10Inventory(skus) {
           console.log(`✓ Found discontinued metafield:`, discontinuedMetafield.node);
           console.log(`  Raw value: ${discontinuedMetafield.node.value}`);
           console.log(`  Type: ${typeof discontinuedMetafield.node.value}`);
-          console.log(`  Strict equals true: ${discontinuedMetafield.node.value === true}`);
-          console.log(`  Equals "true": ${discontinuedMetafield.node.value === "true"}`);
-          console.log(`  Equals "True": ${discontinuedMetafield.node.value === "True"}`);
-          console.log(`  Equals "TRUE": ${discontinuedMetafield.node.value === "TRUE"}`);
-          console.log(`  String value: "${String(discontinuedMetafield.node.value)}"`);
-          console.log(`  Lowercase: "${String(discontinuedMetafield.node.value).toLowerCase()}"`);
         } else {
           console.log(`✗ No discontinued metafield found`);
         }
         
-        // 只检查布尔值 true 或字符串 "True"
-        const isDiscontinued = discontinuedMetafield?.node?.value === true || 
-                              discontinuedMetafield?.node?.value === "True";
+        // 忽略大小写判断：true, True, TRUE 都算 true
+        let isDiscontinued = false;
+        if (discontinuedMetafield?.node?.value) {
+          const value = discontinuedMetafield.node.value;
+          // 布尔值 true 或字符串 "true" (忽略大小写)
+          isDiscontinued = value === true || 
+                          String(value).toLowerCase() === 'true';
+        }
         
         console.log(`Final result - isDiscontinued: ${isDiscontinued}`);
         
