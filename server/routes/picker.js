@@ -79,20 +79,32 @@ async function getBatchMTL10Inventory(skus) {
         
         // 🆕 从 variant metafields 提取 discontinued（不是 product）
         const metafields = edge.node.metafields?.edges || [];
+        
+        // 🔍 调试：打印所有 metafields
+        console.log(`\n=== SKU ${sku} - All Metafields ===`);
+        console.log(`Total metafields: ${metafields.length}`);
+        metafields.forEach((mf, index) => {
+          console.log(`  [${index}] key: "${mf.node.key}", value: "${mf.node.value}" (type: ${typeof mf.node.value})`);
+        });
+        
         const discontinuedMetafield = metafields.find(m => m.node.key === 'discontinued');
         
-        // 调试：打印 metafield 信息
+        // 调试：打印 discontinued metafield
         if (discontinuedMetafield) {
-          console.log(`SKU ${sku} - discontinued metafield:`, discontinuedMetafield.node);
-          console.log(`  value: "${discontinuedMetafield.node.value}" (type: ${typeof discontinuedMetafield.node.value})`);
+          console.log(`✓ Found discontinued metafield:`, discontinuedMetafield.node);
+          console.log(`  Raw value: ${discontinuedMetafield.node.value}`);
+          console.log(`  Type: ${typeof discontinuedMetafield.node.value}`);
+          console.log(`  Strict equals true: ${discontinuedMetafield.node.value === true}`);
+          console.log(`  Equals "true": ${discontinuedMetafield.node.value === "true"}`);
         } else {
-          console.log(`SKU ${sku} - no discontinued metafield found`);
+          console.log(`✗ No discontinued metafield found`);
         }
         
-        // 只检查布尔值 true
-        const isDiscontinued = discontinuedMetafield?.node?.value === true;
+        // 只检查布尔值 true 或字符串 "True"
+        const isDiscontinued = discontinuedMetafield?.node?.value === true || 
+                              discontinuedMetafield?.node?.value === "True";
         
-        console.log(`SKU ${sku} - isDiscontinued: ${isDiscontinued}`);
+        console.log(`Final result - isDiscontinued: ${isDiscontinued}`);
         
         // 查找 MTL10 的库存
         for (const level of inventoryLevels) {
