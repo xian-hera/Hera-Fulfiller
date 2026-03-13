@@ -96,6 +96,10 @@ async function getBatchMTL10Inventory(skus) {
           console.log(`  Type: ${typeof discontinuedMetafield.node.value}`);
           console.log(`  Strict equals true: ${discontinuedMetafield.node.value === true}`);
           console.log(`  Equals "true": ${discontinuedMetafield.node.value === "true"}`);
+          console.log(`  Equals "True": ${discontinuedMetafield.node.value === "True"}`);
+          console.log(`  Equals "TRUE": ${discontinuedMetafield.node.value === "TRUE"}`);
+          console.log(`  String value: "${String(discontinuedMetafield.node.value)}"`);
+          console.log(`  Lowercase: "${String(discontinuedMetafield.node.value).toLowerCase()}"`);
         } else {
           console.log(`✗ No discontinued metafield found`);
         }
