@@ -36,6 +36,9 @@ const Picker = () => {
   // 🆕 MTL10 库存相关
   const [mtl10Inventory, setMtl10Inventory] = useState({});
   const [isLoadingInventory, setIsLoadingInventory] = useState(false);
+  // 🆕 Clean 功能相关
+  const [cleanModal, setCleanModal] = useState(null);
+  const [isCheckingClean, setIsCheckingClean] = useState(false);
 
   // 🆕 计算每个状态的实时数量（按 quantity 累加）
   const getStatusCounts = useCallback(() => {
@@ -143,6 +146,63 @@ const Picker = () => {
       console.error('Error fetching MTL10 inventory:', error);
     } finally {
       setIsLoadingInventory(false);
+    }
+  };
+
+  // 🆕 Clean 功能：检查已完成的订单
+  const handleCheckClean = async () => {
+    setIsCheckingClean(true);
+    try {
+      console.log('🧹 Checking for fulfilled orders...');
+      
+      const response = await axios.get('/api/picker/check-fulfilled-orders');
+      
+      console.log('✓ Clean check result:', response.data);
+      
+      if (response.data.orders.length === 0) {
+        // 没有需要清理的订单
+        alert('No fulfilled orders found in Picker.');
+        return;
+      }
+      
+      // 显示确认弹窗
+      setCleanModal({
+        orders: response.data.orders,
+        item_ids: response.data.item_ids,
+        total_items: response.data.total_items,
+        total_quantity: response.data.total_quantity
+      });
+    } catch (error) {
+      console.error('Error checking fulfilled orders:', error);
+      alert('Error checking fulfilled orders. Please try again.');
+    } finally {
+      setIsCheckingClean(false);
+    }
+  };
+
+  // 🆕 Clean 功能：执行清理
+  const handleConfirmClean = async () => {
+    if (!cleanModal) return;
+    
+    try {
+      console.log(`🗑️ Cleaning ${cleanModal.item_ids.length} items...`);
+      
+      const response = await axios.post('/api/picker/clean-fulfilled-items', {
+        item_ids: cleanModal.item_ids
+      });
+      
+      console.log(`✓ Cleaned ${response.data.deleted_count} items`);
+      
+      // 关闭弹窗
+      setCleanModal(null);
+      
+      // 重新加载 items
+      loadItems();
+      
+      alert(`Successfully cleaned ${response.data.deleted_count} items from ${cleanModal.orders.length} fulfilled orders.`);
+    } catch (error) {
+      console.error('Error cleaning fulfilled items:', error);
+      alert('Error cleaning items. Please try again.');
     }
   };
 
@@ -679,6 +739,13 @@ const Picker = () => {
             onAction: handleCheckStock,
             loading: isLoadingInventory,
             disabled: isLoadingInventory
+          },
+          {
+            content: isCheckingClean ? 'Checking...' : 'Clean',
+            onAction: handleCheckClean,
+            loading: isCheckingClean,
+            disabled: isCheckingClean,
+            destructive: true
           }
         ]}
       >
@@ -801,6 +868,60 @@ const Picker = () => {
           </Modal.Section>
         </Modal>
       </Page>
+
+      {/* 🆕 Clean Confirmation Modal */}
+      {cleanModal && (
+        <Modal
+          open={true}
+          onClose={() => setCleanModal(null)}
+          title="Clean Fulfilled Orders"
+          primaryAction={{
+            content: 'Proceed',
+            onAction: handleConfirmClean,
+            destructive: true
+          }}
+          secondaryActions={[
+            {
+              content: 'Cancel',
+              onAction: () => setCleanModal(null)
+            }
+          ]}
+        >
+          <Modal.Section>
+            <BlockStack gap="4">
+              <Text variant="headingMd">
+                The following orders have been fulfilled and will be removed from Picker:
+              </Text>
+              
+              <Box>
+                {cleanModal.orders.map((order, index) => (
+                  <div key={index} style={{ 
+                    padding: '12px', 
+                    borderBottom: index < cleanModal.orders.length - 1 ? '1px solid #e1e3e5' : 'none' 
+                  }}>
+                    <Text variant="bodyMd" fontWeight="bold">
+                      {order.order_name}
+                    </Text>
+                    <Text variant="bodySm" tone="subdued">
+                      Status: {order.fulfillment_status} | Items: {order.item_count} | Quantity: {order.total_quantity}
+                    </Text>
+                  </div>
+                ))}
+              </Box>
+              
+              <div style={{ 
+                padding: '12px', 
+                backgroundColor: '#f6f6f7', 
+                borderRadius: '8px' 
+              }}>
+                <Text variant="headingSm">
+                  Total: {cleanModal.orders.length} orders, {cleanModal.total_items} items, {cleanModal.total_quantity} units
+                </Text>
+              </div>
+            </BlockStack>
+          </Modal.Section>
+        </Modal>
+      )}
     </>
   );
 };

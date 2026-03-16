@@ -341,4 +341,105 @@ router.post('/items/batch-mtl10-inventory', async (req, res) => {
   }
 });
 
+// 🆕 检查已完成的订单（用于 Clean 功能）
+router.get('/check-fulfilled-orders', async (req, res) => {
+  try {
+    console.log('\n🧹 Checking for fulfilled orders...');
+    
+    // 获取所有在 Picker 中的 items 及其订单信息
+    const items = await db.prepare(`
+      SELECT 
+        li.id,
+        li.shopify_order_id,
+        li.quantity,
+        li.name,
+        o.name as order_name,
+        o.fulfillment_status
+      FROM line_items li
+      JOIN orders o ON li.shopify_order_id = o.shopify_order_id
+      WHERE o.fulfillment_status != 'fulfilled'
+    `).all();
+    
+    console.log(`  Found ${items.length} items in picker`);
+    
+    // 获取所有唯一的订单
+    const uniqueOrders = [...new Set(items.map(item => item.shopify_order_id))];
+    
+    console.log(`  Checking ${uniqueOrders.length} unique orders in Shopify...`);
+    
+    // 查询 Shopify 获取最新的 fulfillment status
+    const ordersToClean = [];
+    const itemsToClean = [];
+    
+    for (const shopifyOrderId of uniqueOrders) {
+      try {
+        // 使用 REST API 查询订单状态
+        const response = await shopifyClient.client.get(`/orders/${shopifyOrderId}.json`);
+        const order = response.data.order;
+        
+        // 如果订单已完成（fulfillment_status 不是 null 且不是 unfulfilled）
+        if (order.fulfillment_status && order.fulfillment_status !== 'unfulfilled') {
+          console.log(`  ✓ Order ${order.name} is ${order.fulfillment_status}`);
+          
+          // 找到该订单的所有 items
+          const orderItems = items.filter(item => item.shopify_order_id === shopifyOrderId);
+          
+          ordersToClean.push({
+            shopify_order_id: shopifyOrderId,
+            order_name: order.name,
+            fulfillment_status: order.fulfillment_status,
+            item_count: orderItems.length,
+            total_quantity: orderItems.reduce((sum, item) => sum + item.quantity, 0)
+          });
+          
+          itemsToClean.push(...orderItems.map(item => item.id));
+        }
+      } catch (error) {
+        console.error(`  ❌ Error checking order ${shopifyOrderId}:`, error.message);
+      }
+    }
+    
+    console.log(`✓ Found ${ordersToClean.length} orders to clean with ${itemsToClean.length} items\n`);
+    
+    res.json({
+      orders: ordersToClean,
+      item_ids: itemsToClean,
+      total_items: itemsToClean.length,
+      total_quantity: ordersToClean.reduce((sum, order) => sum + order.total_quantity, 0)
+    });
+  } catch (error) {
+    console.error('❌ Error checking fulfilled orders:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 🆕 清理已完成订单的 items
+router.post('/clean-fulfilled-items', async (req, res) => {
+  try {
+    const { item_ids } = req.body;
+    
+    if (!item_ids || !Array.isArray(item_ids) || item_ids.length === 0) {
+      return res.json({ success: true, deleted_count: 0 });
+    }
+    
+    console.log(`\n🗑️ Cleaning ${item_ids.length} items from picker...`);
+    
+    // 删除 items
+    const placeholders = item_ids.map(() => '?').join(',');
+    const result = await db.prepare(
+      `DELETE FROM line_items WHERE id IN (${placeholders})`
+    ).run(...item_ids);
+    
+    console.log(`✓ Deleted ${result.changes} items\n`);
+    
+    res.json({
+      success: true,
+      deleted_count: result.changes
+    });
+  } catch (error) {
+    console.error('❌ Error cleaning fulfilled items:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = router;
