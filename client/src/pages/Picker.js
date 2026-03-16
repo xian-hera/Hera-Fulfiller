@@ -16,7 +16,8 @@ import {
   Modal,
   BlockStack,
   Banner,
-  InlineStack
+  InlineStack,
+  Box
 } from '@shopify/polaris';
 import { SortIcon, ImageIcon } from '@shopify/polaris-icons';
 import NumericKeypad from '../components/NumericKeypad';
@@ -197,7 +198,7 @@ const Picker = () => {
       setCleanModal(null);
       
       // 重新加载 items
-      loadItems();
+      fetchItems();
       
       alert(`Successfully cleaned ${response.data.deleted_count} items from ${cleanModal.orders.length} fulfilled orders.`);
     } catch (error) {
