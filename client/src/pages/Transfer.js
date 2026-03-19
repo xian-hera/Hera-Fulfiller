@@ -9,29 +9,20 @@ import {
   Text,
   Badge,
   Button,
-  ChoiceList,
   Modal,
   TextField,
   BlockStack,
   Banner,
   Toast,
   Frame,
-  Checkbox
 } from '@shopify/polaris';
 import { ImageIcon } from '@shopify/polaris-icons';
 
 const Transfer = () => {
   const navigate = useNavigate();
   const [items, setItems] = useState([]);
-  const [filteredItems, setFilteredItems] = useState([]);
   const [clearMode, setClearMode] = useState(false);
   const [selectedItems, setSelectedItems] = useState([]);
-  const [statusFilter, setStatusFilter] = useState(['transferring', 'waiting', 'received']);
-  const [previousStatusFilter, setPreviousStatusFilter] = useState(['transferring', 'waiting', 'received']);
-  const [receivingEnabled, setReceivingEnabled] = useState(false);
-  const [receivingFromFilter, setReceivingFromFilter] = useState([]);
-  const [receivingDateFilter, setReceivingDateFilter] = useState([]);
-  const [receivingOptions, setReceivingOptions] = useState({ transferFroms: [], transferDates: [] });
   const [transferModal, setTransferModal] = useState(null);
   const [transferData, setTransferData] = useState({
     transferQuantity: '',
@@ -42,66 +33,17 @@ const Transfer = () => {
   const [toastActive, setToastActive] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
 
-  const getStatusCounts = useCallback(() => {
-    return {
-      transferring: items
-        .filter(item => item.status === 'transferring')
-        .reduce((sum, item) => sum + item.quantity, 0),
-      waiting: items
-        .filter(item => item.status === 'waiting')
-        .reduce((sum, item) => sum + item.quantity, 0),
-      received: items
-        .filter(item => item.status === 'received' || item.status === 'found')
-        .reduce((sum, item) => sum + item.quantity, 0)
-    };
-  }, [items]);
+  // ── Tag filter state ────────────────────────────────────────────────────────
+  // null = no filter, otherwise filter by this value
+  const [taskDateFilter, setTaskDateFilter] = useState(null);
+  const [shopifyTransferFilter, setShopifyTransferFilter] = useState(null);
 
-  const applyFilters = useCallback(() => {
-    let filtered = items.filter(item => {
-      if (item.status === 'transferring' && !statusFilter.includes('transferring')) return false;
-      if (item.status === 'waiting' && !statusFilter.includes('waiting')) return false;
-      if ((item.status === 'received' || item.status === 'found') && !statusFilter.includes('received')) return false;
-      
-      if (receivingEnabled) {
-        if (receivingFromFilter.length > 0 && !receivingFromFilter.includes(item.transfer_from)) {
-          return false;
-        }
-        
-        if (receivingDateFilter.length > 0 && !receivingDateFilter.includes(item.transfer_date)) {
-          return false;
-        }
-      }
-      
-      return true;
-    });
-    
-    if (receivingEnabled) {
-      filtered = filtered.sort((a, b) => {
-        const fromA = a.transfer_from || '';
-        const fromB = b.transfer_from || '';
-        if (fromA !== fromB) {
-          return fromA.localeCompare(fromB);
-        }
-        
-        const dateA = a.transfer_date || '';
-        const dateB = b.transfer_date || '';
-        return dateA.localeCompare(dateB);
-      });
-    }
-    
-    setFilteredItems(filtered);
-  }, [items, statusFilter, receivingEnabled, receivingFromFilter, receivingDateFilter]);
+  const showToast = (message) => {
+    setToastMessage(message);
+    setToastActive(true);
+  };
 
-  useEffect(() => {
-    fetchItems();
-    fetchReceivingOptions();
-  }, []);
-
-  useEffect(() => {
-    applyFilters();
-  }, [items, statusFilter, receivingEnabled, receivingFromFilter, receivingDateFilter, applyFilters]);
-
-  const fetchItems = async () => {
+  const fetchItems = useCallback(async () => {
     try {
       const response = await axios.get('/api/transfer/items');
       setItems(response.data);
@@ -109,28 +51,63 @@ const Transfer = () => {
       console.error('Error fetching transfer items:', error);
       showToast('Error loading transfer items');
     }
-  };
+  }, []);
 
-  const fetchReceivingOptions = async () => {
-    try {
-      const response = await axios.get('/api/transfer/receiving-options');
-      setReceivingOptions(response.data);
-    } catch (error) {
-      console.error('Error fetching receiving options:', error);
-    }
-  };
+  useEffect(() => {
+    fetchItems();
+  }, [fetchItems]);
 
-  const handleReceivingToggle = (checked) => {
-    if (checked) {
-      setPreviousStatusFilter(statusFilter);
-      setStatusFilter(['waiting', 'received']);
-    } else {
-      setStatusFilter(previousStatusFilter);
-      setReceivingFromFilter([]);
-      setReceivingDateFilter([]);
+  // ── Grouping logic ──────────────────────────────────────────────────────────
+
+  const getGroupedItems = useCallback(() => {
+    let filtered = items;
+
+    // If tag filter is active, filter all items by that tag
+    if (taskDateFilter) {
+      filtered = filtered.filter(i => i.connecteam_task_title_date === taskDateFilter);
     }
-    setReceivingEnabled(checked);
-  };
+    if (shopifyTransferFilter) {
+      filtered = filtered.filter(i => i.shopify_transfer_number === shopifyTransferFilter);
+    }
+
+    // Group 1: transferring + out_of_stock
+    const group1 = filtered.filter(
+      i => i.out_of_stock === 1 || i.status === 'transferring'
+    );
+    // Sort: out_of_stock first, then transferring
+    group1.sort((a, b) => {
+      if (a.out_of_stock === 1 && b.out_of_stock !== 1) return -1;
+      if (a.out_of_stock !== 1 && b.out_of_stock === 1) return 1;
+      return 0;
+    });
+
+    // Group 2+: waiting + received, grouped by transfer_from (ascending)
+    const waitingReceived = filtered.filter(
+      i => i.out_of_stock !== 1 && (i.status === 'waiting' || i.status === 'received' || i.status === 'found')
+    );
+
+    const locationGroups = {};
+    for (const item of waitingReceived) {
+      const loc = item.transfer_from || 'Unknown';
+      if (!locationGroups[loc]) locationGroups[loc] = [];
+      locationGroups[loc].push(item);
+    }
+
+    // Sort each location group: waiting first, then received
+    for (const loc of Object.keys(locationGroups)) {
+      locationGroups[loc].sort((a, b) => {
+        const aIsWaiting = a.status === 'waiting' ? 0 : 1;
+        const bIsWaiting = b.status === 'waiting' ? 0 : 1;
+        return aIsWaiting - bIsWaiting;
+      });
+    }
+
+    const sortedLocations = Object.keys(locationGroups).sort();
+
+    return { group1, locationGroups, sortedLocations };
+  }, [items, taskDateFilter, shopifyTransferFilter]);
+
+  // ── Handlers ────────────────────────────────────────────────────────────────
 
   const handleCopy = async (itemId) => {
     try {
@@ -138,7 +115,6 @@ const Transfer = () => {
       navigator.clipboard.writeText(response.data.copyText);
       showToast('Copied to clipboard!');
     } catch (error) {
-      console.error('Error copying text:', error);
       showToast('Error copying text');
     }
   };
@@ -149,61 +125,31 @@ const Transfer = () => {
     showToast('SKU copied!');
   };
 
-  const showToast = (message) => {
-    setToastMessage(message);
-    setToastActive(true);
-  };
-
   const handleClearToggle = () => {
     setClearMode(!clearMode);
     setSelectedItems([]);
   };
 
   const handleItemSelect = (itemId) => {
-    if (selectedItems.includes(itemId)) {
-      setSelectedItems(selectedItems.filter(id => id !== itemId));
-    } else {
-      setSelectedItems([...selectedItems, itemId]);
-    }
+    setSelectedItems(prev =>
+      prev.includes(itemId) ? prev.filter(id => id !== itemId) : [...prev, itemId]
+    );
   };
 
-  // 🔧 修复并发删除问题
   const handleClearSelected = async () => {
     if (selectedItems.length === 0) return;
-    
     try {
-      console.log(`Attempting to delete ${selectedItems.length} items:`, selectedItems);
-      
-      const response = await axios.post('/api/transfer/items/bulk-delete', {
-        ids: selectedItems
-      });
-
-      console.log('Delete response:', response.data);
-
-      // 重新获取数据
+      const response = await axios.post('/api/transfer/items/bulk-delete', { ids: selectedItems });
       await fetchItems();
       setSelectedItems([]);
       setClearMode(false);
-
-      // 显示更详细的消息
       const { deleted, notFound } = response.data;
-      if (notFound > 0) {
-        showToast(`Deleted ${deleted} items (${notFound} already deleted by another user)`);
-      } else {
-        showToast(`Deleted ${deleted} items`);
-      }
+      showToast(notFound > 0
+        ? `Deleted ${deleted} items (${notFound} already deleted)`
+        : `Deleted ${deleted} items`
+      );
     } catch (error) {
-      console.error('Error clearing items:', error);
-      
-      // 更好的错误处理
-      if (error.response?.status === 500) {
-        showToast('Server error. Refreshing data...');
-        await fetchItems();
-        setSelectedItems([]);
-        setClearMode(false);
-      } else {
-        showToast('Failed to delete items. Please try again.');
-      }
+      showToast('Failed to delete items. Please try again.');
     }
   };
 
@@ -212,66 +158,55 @@ const Transfer = () => {
     try {
       await axios.patch(`/api/transfer/items/${item.id}`, { status: newStatus });
       await fetchItems();
-    } catch (error) {
-      console.error('Error updating status:', error);
+    } catch {
       showToast('Error updating status');
     }
   };
 
   const handleBlueClick = (item) => {
-    const currentDate = new Date();
     setTransferModal(item);
     setTransferData({
       transferQuantity: item.quantity ? item.quantity.toString() : '1',
       transferFrom: '',
-      estimateDay: currentDate.getDate().toString()
+      estimateDay: new Date().getDate().toString()
     });
   };
 
   const handleWaitingBadgeClick = (item) => {
-    const currentDate = new Date();
     setTransferModal(item);
     setTransferData({
       transferQuantity: item.quantity ? item.quantity.toString() : '1',
       transferFrom: item.transfer_from || '',
-      estimateDay: item.estimate_day ? item.estimate_day.toString() : currentDate.getDate().toString()
+      estimateDay: item.estimate_day ? item.estimate_day.toString() : new Date().getDate().toString()
     });
   };
 
   const handleReceivedUndo = async (item) => {
     try {
-      await axios.patch(`/api/transfer/items/${item.id}`, { status: 'transferring' });
+      await axios.patch(`/api/transfer/items/${item.id}`, { status: 'waiting' });
       await fetchItems();
-      showToast('Status changed to Transferring');
-    } catch (error) {
-      console.error('Error undoing received status:', error);
+      showToast('Status changed to Waiting');
+    } catch {
       showToast('Error updating status');
     }
   };
 
   const handleOutClick = async (item) => {
     try {
-      await axios.patch(`/api/transfer/items/${item.id}`, { 
-        out_of_stock: 1
-      });
+      await axios.patch(`/api/transfer/items/${item.id}`, { out_of_stock: 1 });
       await fetchItems();
       showToast('Marked as Out of Stock');
-    } catch (error) {
-      console.error('Error setting out of stock:', error);
+    } catch {
       showToast('Error updating status');
     }
   };
 
   const handleOutUndo = async (item) => {
     try {
-      await axios.patch(`/api/transfer/items/${item.id}`, { 
-        out_of_stock: 0, 
-        status: 'transferring' 
-      });
+      await axios.patch(`/api/transfer/items/${item.id}`, { out_of_stock: 0, status: 'transferring' });
       await fetchItems();
       showToast('Out of Stock status removed');
-    } catch (error) {
-      console.error('Error removing out of stock:', error);
+    } catch {
       showToast('Error updating status');
     }
   };
@@ -281,7 +216,6 @@ const Transfer = () => {
     const currentMonth = currentDate.getMonth() + 1;
     const day = parseInt(transferData.estimateDay);
     let month = currentMonth;
-
     if (day < currentDate.getDate()) {
       month = currentMonth === 12 ? 1 : currentMonth + 1;
     }
@@ -293,6 +227,8 @@ const Transfer = () => {
 
     try {
       const qty = parseInt(transferData.transferQuantity);
+      const originalFrom = transferModal.transfer_from;
+
       if (qty < transferModal.quantity) {
         await axios.post(`/api/transfer/items/${transferModal.id}/split`, {
           transferQuantity: qty,
@@ -308,11 +244,16 @@ const Transfer = () => {
           estimate_day: day
         });
       }
+
+      // If from location changed and item was already tasked/transferred, mark stale
+      const fromChanged = originalFrom && originalFrom !== transferData.transferFrom;
+      if (fromChanged && (transferModal.connecteam_tasked || transferModal.shopify_transferred)) {
+        await axios.patch(`/api/transfer/items/${transferModal.id}`, { from_location_changed: 1 });
+      }
+
       await fetchItems();
-      await fetchReceivingOptions();
       setTransferModal(null);
-    } catch (error) {
-      console.error('Error updating transfer:', error);
+    } catch {
       showToast('Error updating transfer');
     }
   };
@@ -327,89 +268,58 @@ const Transfer = () => {
     }
   };
 
-  const getItemBadge = (status, item, onBadgeClick) => {
-    if (item.out_of_stock === 1) {
-      return (
-        <Badge tone="critical">Out of Stock</Badge>
-      );
-    }
-
-    switch (status) {
-      case 'waiting':
-        return (
-          <span 
-            onClick={(e) => {
-              e.stopPropagation();
-              onBadgeClick(item);
-            }}
-            style={{ cursor: 'pointer' }}
-          >
-            <Badge tone="info">Waiting</Badge>
-          </span>
-        );
-      case 'received':
-      case 'found':
-        return (
-          <span 
-            onClick={(e) => {
-              e.stopPropagation();
-              handleReceivedUndo(item);
-            }}
-            style={{ cursor: 'pointer' }}
-          >
-            <Badge tone="success">Received</Badge>
-          </span>
-        );
-      default:
-        return <Badge>Transferring</Badge>;
-    }
+  // ── Tag label click ─────────────────────────────────────────────────────────
+  const handleTaskLabelClick = (titleDate) => {
+    setShopifyTransferFilter(null);
+    setTaskDateFilter(prev => prev === titleDate ? null : titleDate);
   };
+
+  const handleShopifyLabelClick = (transferNumber) => {
+    setTaskDateFilter(null);
+    setShopifyTransferFilter(prev => prev === transferNumber ? null : transferNumber);
+  };
+
+  // ── Helpers ─────────────────────────────────────────────────────────────────
 
   const formatSKU = (sku) => {
     if (!sku) return '';
     return sku.match(/.{1,4}/g)?.join(' ') || sku;
   };
 
-  // 🔧 修复 formatDate - 添加 null 检查
   const formatDate = (month, day) => {
-    if (month == null || day == null || month === '' || day === '') {
-      return 'N/A';
-    }
-    
-    try {
-      const m = String(month).padStart(2, '0');
-      const d = String(day).padStart(2, '0');
-      return `${m}/${d}`;
-    } catch (error) {
-      console.error('Error formatting date:', { month, day, error });
-      return 'N/A';
-    }
+    if (month == null || day == null || month === '' || day === '') return 'N/A';
+    return `${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}`;
   };
 
-  // 🔧 修复 renderItem - 添加完整的 null 检查
-  const renderItem = (item) => {
-    if (!item) {
-      console.error('renderItem received null item');
-      return null;
-    }
+  // ── Render item ─────────────────────────────────────────────────────────────
 
-    const { 
-      id, 
-      quantity = 0, 
-      image_url, 
-      order_number = '', 
-      sku = '', 
-      brand = '', 
-      title = '', 
-      size = '', 
-      status, 
-      transfer_from, 
-      estimate_month, 
-      estimate_day, 
-      variant_title, 
-      out_of_stock 
+  const renderItem = (item) => {
+    if (!item) return null;
+
+    const {
+      id,
+      quantity = 0,
+      image_url,
+      order_number = '',
+      sku = '',
+      brand = '',
+      title = '',
+      size = '',
+      status,
+      transfer_from,
+      estimate_month,
+      estimate_day,
+      variant_title,
+      out_of_stock,
+      connecteam_tasked,
+      connecteam_task_title_date,
+      from_location_changed,
+      shopify_transferred,
+      shopify_transfer_number,
     } = item;
-    
+
+    const isWaitingOrReceived = status === 'waiting' || status === 'received' || status === 'found';
+
     const media = image_url ? (
       <div onClick={() => handleImageClick(item)} style={{ cursor: 'pointer' }}>
         <Thumbnail source={image_url} alt={title} size="large" />
@@ -418,482 +328,215 @@ const Transfer = () => {
       <Thumbnail source={ImageIcon} alt="No image" size="large" />
     );
 
+    // Status badge
+    const statusBadge = () => {
+      if (out_of_stock === 1) return <Badge tone="critical">Out of Stock</Badge>;
+      switch (status) {
+        case 'waiting':
+          return (
+            <span onClick={(e) => { e.stopPropagation(); handleWaitingBadgeClick(item); }} style={{ cursor: 'pointer' }}>
+              <Badge tone="info">Waiting</Badge>
+            </span>
+          );
+        case 'received':
+        case 'found':
+          return (
+            <span onClick={(e) => { e.stopPropagation(); handleReceivedUndo(item); }} style={{ cursor: 'pointer' }}>
+              <Badge tone="success">Received</Badge>
+            </span>
+          );
+        default:
+          return <Badge>Transferring</Badge>;
+      }
+    };
+
+    // Connecteam tasked tag
+    const taskedTag = connecteam_tasked && connecteam_task_title_date ? (
+      <span
+        onClick={() => handleTaskLabelClick(connecteam_task_title_date)}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '4px',
+          backgroundColor: '#2998ff',
+          color: 'white',
+          borderRadius: '12px',
+          padding: '2px 8px',
+          fontSize: '12px',
+          fontWeight: '500',
+          cursor: 'pointer',
+          userSelect: 'none',
+        }}
+      >
+        {connecteam_task_title_date}
+        {from_location_changed === 1 && (
+          <span style={{ color: '#ff4444', fontWeight: 'bold', marginLeft: '2px' }}>!</span>
+        )}
+      </span>
+    ) : null;
+
+    // Shopify transfer tag
+    const shopifyTag = shopify_transferred && shopify_transfer_number ? (
+      <span
+        onClick={() => handleShopifyLabelClick(shopify_transfer_number)}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '4px',
+          backgroundColor: '#96c046',
+          color: 'white',
+          borderRadius: '12px',
+          padding: '2px 8px',
+          fontSize: '12px',
+          fontWeight: '500',
+          cursor: 'pointer',
+          userSelect: 'none',
+        }}
+      >
+        {shopify_transfer_number}
+        {from_location_changed === 1 && (
+          <span style={{ color: '#ff4444', fontWeight: 'bold', marginLeft: '2px' }}>!</span>
+        )}
+      </span>
+    ) : null;
+
     return (
-      <div className="transfer-item-container">
-        {/* 桌面端布局 */}
+      <div className="transfer-item-container" key={id}>
+        {/* Desktop layout */}
         <div className="transfer-item-desktop">
-          <div style={{ marginRight: '16px' }}>
+          <div style={{ marginRight: '16px', flexShrink: 0 }}>
             {media}
           </div>
 
-          <div style={{ 
-            fontSize: '38px', 
-            lineHeight: 1,
-            marginRight: '20px',
-            marginTop: '5px',
-            minWidth: '50px'
-          }}>
+          <div style={{ fontSize: '38px', lineHeight: 1, marginRight: '20px', marginTop: '5px', minWidth: '50px', flexShrink: 0 }}>
             {quantity}
           </div>
 
           <div style={{ flex: 1, maxWidth: 'calc(100% - 350px)' }}>
             <BlockStack gap="1">
-              <div style={{ 
-                wordWrap: 'break-word', 
-                overflowWrap: 'break-word',
-                maxWidth: '60ch'
-              }}>
-                <Text variant="bodyLg" fontWeight="bold">
-                  {brand} {title} {size}
-                </Text>
+              <div style={{ wordWrap: 'break-word', overflowWrap: 'break-word', maxWidth: '60ch' }}>
+                <Text variant="bodyLg" fontWeight="bold">{brand} {title} {size}</Text>
               </div>
-              
-              {variant_title && (
-                <Text variant="bodyMd">
-                  {variant_title}
-                </Text>
-              )}
-              
+              {variant_title && <Text variant="bodyMd">{variant_title}</Text>}
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Text variant="bodySm">
-                  {formatSKU(sku)}
-                </Text>
-                <button
-                  onClick={() => handleSkuCopy(sku)}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: '#005bd3',
-                    cursor: 'pointer',
-                    fontSize: '12px',
-                    padding: 0
-                  }}
-                >
-                  Copy
-                </button>
+                <Text variant="bodySm">{formatSKU(sku)}</Text>
+                <button onClick={() => handleSkuCopy(sku)} style={btnLinkStyle}>Copy</button>
               </div>
-              
-              <Text variant="bodySm" tone="subdued">
-                #{order_number}
-              </Text>
+              <Text variant="bodySm" tone="subdued">#{order_number}</Text>
+
+              {/* Tasked + Shopify tags */}
+              {isWaitingOrReceived && (taskedTag || shopifyTag) && (
+                <div style={{ display: 'flex', gap: '6px', marginTop: '4px', flexWrap: 'wrap' }}>
+                  {taskedTag}
+                  {shopifyTag}
+                </div>
+              )}
             </BlockStack>
           </div>
 
-          <div style={{ 
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'flex-end',
-            gap: '17px',
-            marginLeft: 'auto'
-          }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '17px', marginLeft: 'auto' }}>
             {clearMode ? (
-              <input
-                type="checkbox"
-                checked={selectedItems.includes(id)}
-                onChange={() => handleItemSelect(id)}
-                style={{ width: '20px', height: '20px' }}
-              />
+              <input type="checkbox" checked={selectedItems.includes(id)} onChange={() => handleItemSelect(id)} style={{ width: '20px', height: '20px' }} />
             ) : (
               <>
+                {/* Status badge row */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  {(status === 'waiting' || status === 'received' || status === 'found') && 
-                   transfer_from && 
-                   out_of_stock !== 1 && 
-                   estimate_month != null && 
-                   estimate_day != null && (
+                  {isWaitingOrReceived && transfer_from && out_of_stock !== 1 && estimate_month != null && estimate_day != null && (
                     <Text variant="bodySm" fontWeight="bold" as="span" tone="info">
                       {transfer_from}, {formatDate(estimate_month, estimate_day)}
                     </Text>
                   )}
-                  {getItemBadge(status, item, handleWaitingBadgeClick)}
+                  {statusBadge()}
                 </div>
-                
+
+                {/* Action buttons */}
                 {out_of_stock !== 1 ? (
                   <>
                     {status === 'transferring' && (
                       <div style={{ display: 'flex', gap: '12px' }}>
-                        <button
-                          onClick={() => handleBlueClick(item)}
-                          style={{
-                            backgroundColor: 'white',
-                            color: '#0080FF',
-                            border: '2px solid #0080FF',
-                            borderRadius: '8px',
-                            padding: '8px 16px',
-                            fontSize: '14px',
-                            cursor: 'pointer',
-                            fontWeight: '500',
-                            minWidth: '80px'
-                          }}
-                        >
-                          Transfer
-                        </button>
-                        <button
-                          onClick={() => handleGreenClick(item)}
-                          style={{
-                            backgroundColor: '#00A047',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '8px',
-                            padding: '8px 16px',
-                            fontSize: '14px',
-                            cursor: 'pointer',
-                            fontWeight: '500',
-                            minWidth: '80px'
-                          }}
-                        >
-                          Found
-                        </button>
+                        <button onClick={() => handleBlueClick(item)} style={btnTransferStyle}>Transfer</button>
+                        <button onClick={() => handleGreenClick(item)} style={btnFoundStyle}>Found</button>
                       </div>
                     )}
-                    
                     {status === 'waiting' && (
-                      <button
-                        onClick={() => handleGreenClick(item)}
-                        style={{
-                          backgroundColor: '#0080FF',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '8px',
-                          padding: '8px 16px',
-                          fontSize: '14px',
-                          cursor: 'pointer',
-                          fontWeight: '500',
-                          minWidth: '100px'
-                        }}
-                      >
-                        Received
-                      </button>
+                      <button onClick={() => handleGreenClick(item)} style={btnReceivedStyle}>Received</button>
                     )}
                   </>
                 ) : (
-                  <button
-                    onClick={() => handleOutUndo(item)}
-                    style={{
-                      backgroundColor: '#0080FF',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '8px',
-                      padding: '8px 16px',
-                      fontSize: '14px',
-                      cursor: 'pointer',
-                      fontWeight: '500',
-                      minWidth: '100px'
-                    }}
-                  >
-                    Undo
-                  </button>
+                  <button onClick={() => handleOutUndo(item)} style={btnReceivedStyle}>Undo</button>
                 )}
-                
+
+                {/* Bottom row: Undo, OUT, Copy */}
                 <div style={{ display: 'flex', gap: '8px' }}>
                   {out_of_stock !== 1 && status === 'waiting' && (
-                    <button
-                      onClick={() => handleReceivedUndo(item)}
-                      style={{
-                        backgroundColor: 'white',
-                        color: '#6d7175',
-                        border: '1px solid #6d7175',
-                        borderRadius: '6px',
-                        padding: '4px 12px',
-                        fontSize: '13px',
-                        cursor: 'pointer',
-                        fontWeight: '500',
-                        minWidth: '60px'
-                      }}
-                    >
-                      Undo
-                    </button>
+                    <button onClick={() => handleReceivedUndo(item)} style={btnSmallStyle}>Undo</button>
                   )}
                   {out_of_stock !== 1 && (status === 'transferring' || status === 'waiting') && (
-                    <button
-                      onClick={() => handleOutClick(item)}
-                      style={{
-                        backgroundColor: 'white',
-                        color: '#D72C0D',
-                        border: '1px solid #D72C0D',
-                        borderRadius: '6px',
-                        padding: '4px 12px',
-                        fontSize: '13px',
-                        cursor: 'pointer',
-                        fontWeight: '500',
-                        minWidth: '60px'
-                      }}
-                    >
-                      OUT
-                    </button>
+                    <button onClick={() => handleOutClick(item)} style={btnOutStyle}>OUT</button>
                   )}
-                  
-                  <button
-                    onClick={() => handleCopy(id)}
-                    style={{
-                      backgroundColor: 'white',
-                      color: '#202223',
-                      border: '1px solid #c9cccf',
-                      borderRadius: '6px',
-                      padding: '4px 12px',
-                      fontSize: '13px',
-                      cursor: 'pointer',
-                      fontWeight: '500',
-                      minWidth: '60px'
-                    }}
-                  >
-                    Copy
-                  </button>
+                  <button onClick={() => handleCopy(id)} style={btnCopyStyle}>Copy</button>
                 </div>
               </>
             )}
           </div>
         </div>
 
-        {/* 移动端布局 */}
+        {/* Mobile layout */}
         <div className="transfer-item-mobile">
           <div style={{ marginBottom: '12px' }}>
-            <div style={{ 
-              fontSize: '12px',
-              color: '#6d7175',
-              marginBottom: '4px',
-              wordBreak: 'break-word'
-            }}>
-              {brand}
-            </div>
-            
-            <div style={{ 
-              fontSize: '14px',
-              fontWeight: '600',
-              marginBottom: '4px',
-              wordBreak: 'break-word',
-              lineHeight: '1.4'
-            }}>
-              {title} {size}
-            </div>
-            
-            {variant_title && (
-              <div style={{ 
-                fontSize: '12px',
-                color: '#6d7175',
-                marginBottom: '4px',
-                wordBreak: 'break-word'
-              }}>
-                {variant_title}
-              </div>
-            )}
-            
-            <div 
-              onClick={() => handleSkuCopy(sku)}
-              style={{ 
-                fontSize: '12px',
-                fontWeight: '600',
-                marginBottom: '4px',
-                wordBreak: 'break-all',
-                cursor: 'pointer',
-                color: '#0080FF'
-              }}
-            >
+            <div style={{ fontSize: '12px', color: '#6d7175', marginBottom: '4px' }}>{brand}</div>
+            <div style={{ fontSize: '14px', fontWeight: '600', marginBottom: '4px', wordBreak: 'break-word', lineHeight: '1.4' }}>{title} {size}</div>
+            {variant_title && <div style={{ fontSize: '12px', color: '#6d7175', marginBottom: '4px' }}>{variant_title}</div>}
+            <div onClick={() => handleSkuCopy(sku)} style={{ fontSize: '12px', fontWeight: '600', marginBottom: '4px', cursor: 'pointer', color: '#0080FF' }}>
               SKU: {formatSKU(sku)}
             </div>
-            
-            <div style={{ 
-              fontSize: '12px',
-              color: '#6d7175',
-              marginBottom: '8px'
-            }}>
-              Order: #{order_number}
+            <div style={{ fontSize: '12px', color: '#6d7175', marginBottom: '8px' }}>Order: #{order_number}</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '8px' }}>
+              {statusBadge()}
             </div>
-
-            <div style={{ 
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: '8px',
-              marginBottom: '8px'
-            }}>
-              {getItemBadge(status, item, handleWaitingBadgeClick)}
-              {out_of_stock === 1 && <Badge tone="critical">Out of Stock</Badge>}
-            </div>
-
-            {(status === 'waiting' || status === 'received' || status === 'found') && 
-             transfer_from && 
-             out_of_stock !== 1 && 
-             estimate_month != null && 
-             estimate_day != null && (
-              <div style={{ 
-                fontSize: '12px',
-                color: '#0080FF',
-                fontWeight: '600',
-                marginBottom: '8px',
-                wordBreak: 'break-word'
-              }}>
+            {isWaitingOrReceived && transfer_from && out_of_stock !== 1 && estimate_month != null && estimate_day != null && (
+              <div style={{ fontSize: '12px', color: '#0080FF', fontWeight: '600', marginBottom: '8px' }}>
                 From: {transfer_from}, Est: {formatDate(estimate_month, estimate_day)}
+              </div>
+            )}
+            {isWaitingOrReceived && (taskedTag || shopifyTag) && (
+              <div style={{ display: 'flex', gap: '6px', marginBottom: '8px', flexWrap: 'wrap' }}>
+                {taskedTag}
+                {shopifyTag}
               </div>
             )}
           </div>
 
-          <div style={{ 
-            display: 'flex',
-            alignItems: 'flex-start',
-            gap: '12px'
-          }}>
-            <div style={{ flexShrink: 0 }}>
-              {media}
-            </div>
-
-            <div style={{
-              fontSize: '24px',
-              fontWeight: 'bold',
-              flexShrink: 0,
-              minWidth: '30px',
-              alignSelf: 'center'
-            }}>
-              {quantity}
-            </div>
-
-            <div style={{
-              marginLeft: 'auto',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'flex-end',
-              gap: '8px'
-            }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
+            <div style={{ flexShrink: 0 }}>{media}</div>
+            <div style={{ fontSize: '24px', fontWeight: 'bold', flexShrink: 0, minWidth: '30px', alignSelf: 'center' }}>{quantity}</div>
+            <div style={{ marginLeft: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
               {clearMode ? (
-                <input
-                  type="checkbox"
-                  checked={selectedItems.includes(id)}
-                  onChange={() => handleItemSelect(id)}
-                  style={{ width: '20px', height: '20px' }}
-                />
+                <input type="checkbox" checked={selectedItems.includes(id)} onChange={() => handleItemSelect(id)} style={{ width: '20px', height: '20px' }} />
               ) : (
                 <>
                   {out_of_stock !== 1 ? (
                     <>
                       {status === 'transferring' && (
                         <>
-                          <button
-                            onClick={() => handleBlueClick(item)}
-                            style={{
-                              backgroundColor: 'white',
-                              color: '#0080FF',
-                              border: '2px solid #0080FF',
-                              borderRadius: '6px',
-                              padding: '6px 12px',
-                              fontSize: '13px',
-                              cursor: 'pointer',
-                              fontWeight: '500',
-                              minWidth: '80px'
-                            }}
-                          >
-                            Transfer
-                          </button>
-                          <button
-                            onClick={() => handleGreenClick(item)}
-                            style={{
-                              backgroundColor: '#00A047',
-                              color: 'white',
-                              border: 'none',
-                              borderRadius: '6px',
-                              padding: '6px 12px',
-                              fontSize: '13px',
-                              cursor: 'pointer',
-                              fontWeight: '500',
-                              minWidth: '80px'
-                            }}
-                          >
-                            Found
-                          </button>
+                          <button onClick={() => handleBlueClick(item)} style={btnTransferSmStyle}>Transfer</button>
+                          <button onClick={() => handleGreenClick(item)} style={btnFoundSmStyle}>Found</button>
                         </>
                       )}
-                      
                       {status === 'waiting' && (
-                        <button
-                          onClick={() => handleGreenClick(item)}
-                          style={{
-                            backgroundColor: '#0080FF',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '6px',
-                            padding: '6px 12px',
-                            fontSize: '13px',
-                            cursor: 'pointer',
-                            fontWeight: '500',
-                            minWidth: '80px'
-                          }}
-                        >
-                          Received
-                        </button>
+                        <button onClick={() => handleGreenClick(item)} style={btnReceivedSmStyle}>Received</button>
                       )}
-                      
                       {(status === 'transferring' || status === 'waiting') && (
                         <>
-                          {status === 'waiting' && (
-                            <button
-                              onClick={() => handleReceivedUndo(item)}
-                              style={{
-                                backgroundColor: 'white',
-                                color: '#6d7175',
-                                border: '1px solid #6d7175',
-                                borderRadius: '6px',
-                                padding: '4px 12px',
-                                fontSize: '13px',
-                                cursor: 'pointer',
-                                fontWeight: '500',
-                                minWidth: '60px'
-                              }}
-                            >
-                              Undo
-                            </button>
-                          )}
-                          <button
-                            onClick={() => handleOutClick(item)}
-                            style={{
-                              backgroundColor: 'white',
-                              color: '#D72C0D',
-                              border: '1px solid #D72C0D',
-                              borderRadius: '6px',
-                              padding: '4px 12px',
-                              fontSize: '13px',
-                              cursor: 'pointer',
-                              fontWeight: '500',
-                              minWidth: '60px'
-                            }}
-                          >
-                            OUT
-                          </button>
+                          {status === 'waiting' && <button onClick={() => handleReceivedUndo(item)} style={btnSmallSmStyle}>Undo</button>}
+                          <button onClick={() => handleOutClick(item)} style={btnOutSmStyle}>OUT</button>
                         </>
                       )}
                     </>
                   ) : (
-                    <button
-                      onClick={() => handleOutUndo(item)}
-                      style={{
-                        backgroundColor: '#0080FF',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '6px',
-                        padding: '6px 12px',
-                        fontSize: '13px',
-                        cursor: 'pointer',
-                        fontWeight: '500',
-                        minWidth: '80px'
-                      }}
-                    >
-                      Undo
-                    </button>
+                    <button onClick={() => handleOutUndo(item)} style={btnReceivedSmStyle}>Undo</button>
                   )}
-                  
-                  <button
-                    onClick={() => handleCopy(id)}
-                    style={{
-                      backgroundColor: 'white',
-                      color: '#202223',
-                      border: '1px solid #c9cccf',
-                      borderRadius: '6px',
-                      padding: '4px 12px',
-                      fontSize: '13px',
-                      cursor: 'pointer',
-                      fontWeight: '500',
-                      minWidth: '60px'
-                    }}
-                  >
-                    Copy
-                  </button>
+                  <button onClick={() => handleCopy(id)} style={btnCopySmStyle}>Copy</button>
                 </>
               )}
             </div>
@@ -903,253 +546,186 @@ const Transfer = () => {
     );
   };
 
-  const toastMarkup = toastActive ? (
-    <Toast content={toastMessage} onDismiss={() => setToastActive(false)} />
+  // ── Main render ─────────────────────────────────────────────────────────────
+
+  const { group1, locationGroups, sortedLocations } = getGroupedItems();
+  const toastMarkup = toastActive ? <Toast content={toastMessage} onDismiss={() => setToastActive(false)} /> : null;
+
+  const filterBanner = (taskDateFilter || shopifyTransferFilter) ? (
+    <Banner
+      tone="info"
+      onDismiss={() => { setTaskDateFilter(null); setShopifyTransferFilter(null); }}
+    >
+      {taskDateFilter
+        ? `Showing items in Connecteam task: ${taskDateFilter}`
+        : `Showing items in Shopify transfer: ${shopifyTransferFilter}`
+      }
+      {' '}<button onClick={() => { setTaskDateFilter(null); setShopifyTransferFilter(null); }} style={{ background: 'none', border: 'none', color: '#005bd3', cursor: 'pointer', padding: 0, fontSize: '14px' }}>Clear filter</button>
+    </Banner>
   ) : null;
 
   const currentMonth = new Date().getMonth() + 1;
-  const statusCounts = getStatusCounts();
 
   return (
     <>
       <style>{`
-        .transfer-item-container {
-          padding: 22px 16px;
-          border-bottom: 1px solid #e1e3e5;
-          position: relative;
-        }
-
-        .transfer-item-desktop {
-          display: flex;
-          align-items: center;
-          width: 100%;
-        }
-
-        .transfer-item-mobile {
-          display: none;
-        }
-
+        .transfer-item-container { padding: 22px 16px; border-bottom: 1px solid #e1e3e5; position: relative; }
+        .transfer-item-desktop { display: flex; align-items: center; width: 100%; }
+        .transfer-item-mobile { display: none; }
         @media (max-width: 600px) {
-          .transfer-item-container {
-            padding: 16px;
-          }
-
-          .transfer-item-desktop {
-            display: none;
-          }
-
-          .transfer-item-mobile {
-            display: block;
-            width: 100%;
-          }
+          .transfer-item-container { padding: 16px; }
+          .transfer-item-desktop { display: none; }
+          .transfer-item-mobile { display: block; width: 100%; }
         }
       `}</style>
 
       <Frame>
-      <Page
-        title="Transfer"
-        backAction={{ content: 'Dashboard', onAction: () => navigate('/') }}
-        primaryAction={{
-          content: clearMode ? 'Delete Selected' : 'Clear Mode',
-          destructive: clearMode,
-          onAction: clearMode ? handleClearSelected : handleClearToggle
-        }}
-        secondaryActions={
-          clearMode
-            ? [
-                {
-                  content: 'Cancel',
-                  onAction: () => {
-                    setClearMode(false);
-                    setSelectedItems([]);
-                  }
-                }
-              ]
-            : [
-                {
-                  content: 'Transfer Planner',
-                  onAction: () => navigate('/transfer-planner')
-                }
-              ]
-        }
-      >
-        <Layout>
-          <Layout.Section>
-            <Card>
-              <div style={{ padding: '16px' }}>
-                <BlockStack gap="4">
-                  <ChoiceList
-                    title="Show items"
-                    choices={[
-                      { label: `Transferring (${statusCounts.transferring})`, value: 'transferring' },
-                      { label: `Waiting (${statusCounts.waiting})`, value: 'waiting' },
-                      { label: `Received/Found (${statusCounts.received})`, value: 'received' }
-                    ]}
-                    selected={statusFilter}
-                    onChange={setStatusFilter}
-                    allowMultiple
-                  />
-                  
-                  <div style={{ 
-                    paddingTop: '12px', 
-                    borderTop: '1px solid #e1e3e5'
-                  }}>
-                    <div style={{ marginBottom: '12px' }}>
-                      <Checkbox
-                        label="Receiving"
-                        checked={receivingEnabled}
-                        onChange={handleReceivingToggle}
-                      />
-                    </div>
-                    
-                    {receivingEnabled && (
-                      <BlockStack gap="3">
-                        <ChoiceList
-                          title="Transfer From"
-                          choices={receivingOptions.transferFroms.map(from => ({
-                            label: from,
-                            value: from
-                          }))}
-                          selected={receivingFromFilter}
-                          onChange={setReceivingFromFilter}
-                          allowMultiple
-                        />
-                        
-                        <ChoiceList
-                          title="Transfer Date"
-                          choices={receivingOptions.transferDates.map(date => ({
-                            label: date,
-                            value: date
-                          }))}
-                          selected={receivingDateFilter}
-                          onChange={setReceivingDateFilter}
-                          allowMultiple
-                        />
-                      </BlockStack>
-                    )}
-                  </div>
-                </BlockStack>
-              </div>
-            </Card>
-          </Layout.Section>
-
-          <Layout.Section>
-            <Card>
-              <div>
-                {filteredItems.length === 0 ? (
-                  <Banner>No items to transfer</Banner>
-                ) : (
-                  filteredItems.map(item => (
-                    <div key={item.id}>
-                      {renderItem(item)}
-                    </div>
-                  ))
-                )}
-              </div>
-            </Card>
-          </Layout.Section>
-        </Layout>
-
-        <Modal
-          open={selectedImage !== null}
-          onClose={() => setSelectedImage(null)}
-          title={selectedImage?.title || 'Product Image'}
+        <Page
+          title="Transfer"
+          backAction={{ content: 'Dashboard', onAction: () => navigate('/') }}
+          primaryAction={
+            clearMode
+              ? { content: 'Delete Selected', destructive: true, onAction: handleClearSelected }
+              : undefined
+          }
+          secondaryActions={
+            clearMode
+              ? [{ content: 'Cancel', onAction: () => { setClearMode(false); setSelectedItems([]); } }]
+              : [
+                  { content: 'Transfer Planner', onAction: () => navigate('/transfer-planner') },
+                  { content: 'Clear Mode', onAction: handleClearToggle },
+                  { content: 'Connecteam Task', onAction: () => navigate('/connecteam-task') },
+                  { content: 'Shopify Transfer', onAction: () => navigate('/shopify-transfer') },
+                ]
+          }
         >
-          <Modal.Section>
-            {selectedImage && (
-              <BlockStack gap="4">
-                <img 
-                  src={selectedImage.url} 
-                  alt="Product" 
-                  style={{ width: '100%', maxHeight: '500px', objectFit: 'contain' }} 
-                />
-                <Button 
-                  url={selectedImage.link} 
-                  external
-                  variant="primary"
-                  fullWidth
-                >
-                  View Product on Website
-                </Button>
-              </BlockStack>
+          <Layout>
+            {/* Filter banner */}
+            {filterBanner && (
+              <Layout.Section>
+                {filterBanner}
+              </Layout.Section>
             )}
-          </Modal.Section>
-        </Modal>
 
-        <Modal
-          open={transferModal !== null}
-          onClose={() => setTransferModal(null)}
-          title="Transfer Information"
-          primaryAction={{
-            content: 'Submit',
-            onAction: handleTransferSubmit
-          }}
-          secondaryActions={[
-            {
-              content: 'Cancel',
-              onAction: () => setTransferModal(null)
-            }
-          ]}
-        >
-          <Modal.Section>
-            {transferModal && (
-              <BlockStack gap="4">
-                {transferModal.quantity > 1 && (
+            {/* Card 1: Transferring + Out of Stock */}
+            {group1.length > 0 && (
+              <Layout.Section>
+                <Card>
+                  <div style={{ padding: '12px 16px', borderBottom: '1px solid #e1e3e5' }}>
+                    <Text variant="headingSm" as="h3">Transferring & Out of Stock</Text>
+                  </div>
+                  <div>
+                    {group1.map(item => renderItem(item))}
+                  </div>
+                </Card>
+              </Layout.Section>
+            )}
+
+            {/* Cards by location */}
+            {sortedLocations.map(loc => (
+              <Layout.Section key={loc}>
+                <Card>
+                  <div style={{ padding: '12px 16px', borderBottom: '1px solid #e1e3e5' }}>
+                    <Text variant="headingSm" as="h3">MTL{loc}</Text>
+                  </div>
+                  <div>
+                    {locationGroups[loc].map(item => renderItem(item))}
+                  </div>
+                </Card>
+              </Layout.Section>
+            ))}
+
+            {/* Empty state */}
+            {group1.length === 0 && sortedLocations.length === 0 && (
+              <Layout.Section>
+                <Card>
+                  <Banner>No items to transfer</Banner>
+                </Card>
+              </Layout.Section>
+            )}
+          </Layout>
+
+          {/* Image modal */}
+          <Modal open={selectedImage !== null} onClose={() => setSelectedImage(null)} title={selectedImage?.title || 'Product Image'}>
+            <Modal.Section>
+              {selectedImage && (
+                <BlockStack gap="4">
+                  <img src={selectedImage.url} alt="Product" style={{ width: '100%', maxHeight: '500px', objectFit: 'contain' }} />
+                  <Button url={selectedImage.link} external variant="primary" fullWidth>View Product on Website</Button>
+                </BlockStack>
+              )}
+            </Modal.Section>
+          </Modal>
+
+          {/* Transfer info modal */}
+          <Modal
+            open={transferModal !== null}
+            onClose={() => setTransferModal(null)}
+            title="Transfer Information"
+            primaryAction={{ content: 'Submit', onAction: handleTransferSubmit }}
+            secondaryActions={[{ content: 'Cancel', onAction: () => setTransferModal(null) }]}
+          >
+            <Modal.Section>
+              {transferModal && (
+                <BlockStack gap="4">
+                  {transferModal.quantity > 1 && (
+                    <TextField
+                      label="Transfer Quantity"
+                      type="number"
+                      value={transferData.transferQuantity}
+                      onChange={(value) => setTransferData({ ...transferData, transferQuantity: value })}
+                      max={transferModal.quantity}
+                      autoComplete="off"
+                    />
+                  )}
                   <TextField
-                    label="Transfer Quantity"
-                    type="number"
-                    value={transferData.transferQuantity}
-                    onChange={(value) => setTransferData({ ...transferData, transferQuantity: value })}
-                    max={transferModal.quantity}
+                    label="Transfer From (warehouse number)"
+                    value={transferData.transferFrom}
+                    onChange={(value) => setTransferData({ ...transferData, transferFrom: value })}
+                    placeholder="e.g., 01, 02, 03"
                     autoComplete="off"
                   />
-                )}
-                <TextField
-                  label="Transfer From (warehouse number)"
-                  value={transferData.transferFrom}
-                  onChange={(value) => setTransferData({ ...transferData, transferFrom: value })}
-                  placeholder="e.g., 01, 02, 03"
-                  autoComplete="off"
-                />
-                <div>
-                  <Text variant="bodyMd" as="p" fontWeight="semibold">
-                    Estimated Arrival (Month/Day)
-                  </Text>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
-                    <div style={{ flex: 1 }}>
-                      <TextField
-                        type="number"
-                        value={currentMonth.toString()}
-                        onChange={() => {}}
-                        disabled
-                        prefix="Month:"
-                        autoComplete="off"
-                      />
-                    </div>
-                    <Text variant="bodyLg">/</Text>
-                    <div style={{ flex: 1 }}>
-                      <TextField
-                        type="number"
-                        value={transferData.estimateDay}
-                        onChange={(value) => setTransferData({ ...transferData, estimateDay: value })}
-                        min={1}
-                        max={31}
-                        prefix="Day:"
-                        autoComplete="off"
-                      />
+                  <div>
+                    <Text variant="bodyMd" as="p" fontWeight="semibold">Estimated Arrival (Month/Day)</Text>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
+                      <div style={{ flex: 1 }}>
+                        <TextField type="number" value={currentMonth.toString()} onChange={() => {}} disabled prefix="Month:" autoComplete="off" />
+                      </div>
+                      <Text variant="bodyLg">/</Text>
+                      <div style={{ flex: 1 }}>
+                        <TextField type="number" value={transferData.estimateDay} onChange={(value) => setTransferData({ ...transferData, estimateDay: value })} min={1} max={31} prefix="Day:" autoComplete="off" />
+                      </div>
                     </div>
                   </div>
-                </div>
-              </BlockStack>
-            )}
-          </Modal.Section>
-        </Modal>
+                </BlockStack>
+              )}
+            </Modal.Section>
+          </Modal>
 
-        {toastMarkup}
-      </Page>
-    </Frame>
-  </>
+          {toastMarkup}
+        </Page>
+      </Frame>
+    </>
   );
 };
+
+// ── Button styles ─────────────────────────────────────────────────────────────
+
+const btnLinkStyle = { background: 'none', border: 'none', color: '#005bd3', cursor: 'pointer', fontSize: '12px', padding: 0 };
+
+const btnTransferStyle = { backgroundColor: 'white', color: '#0080FF', border: '2px solid #0080FF', borderRadius: '8px', padding: '8px 16px', fontSize: '14px', cursor: 'pointer', fontWeight: '500', minWidth: '80px' };
+const btnFoundStyle = { backgroundColor: '#00A047', color: 'white', border: 'none', borderRadius: '8px', padding: '8px 16px', fontSize: '14px', cursor: 'pointer', fontWeight: '500', minWidth: '80px' };
+const btnReceivedStyle = { backgroundColor: '#0080FF', color: 'white', border: 'none', borderRadius: '8px', padding: '8px 16px', fontSize: '14px', cursor: 'pointer', fontWeight: '500', minWidth: '100px' };
+const btnSmallStyle = { backgroundColor: 'white', color: '#6d7175', border: '1px solid #6d7175', borderRadius: '6px', padding: '4px 12px', fontSize: '13px', cursor: 'pointer', fontWeight: '500', minWidth: '60px' };
+const btnOutStyle = { backgroundColor: 'white', color: '#D72C0D', border: '1px solid #D72C0D', borderRadius: '6px', padding: '4px 12px', fontSize: '13px', cursor: 'pointer', fontWeight: '500', minWidth: '60px' };
+const btnCopyStyle = { backgroundColor: 'white', color: '#202223', border: '1px solid #c9cccf', borderRadius: '6px', padding: '4px 12px', fontSize: '13px', cursor: 'pointer', fontWeight: '500', minWidth: '60px' };
+
+// Mobile variants
+const btnTransferSmStyle = { ...btnTransferStyle, padding: '6px 12px', fontSize: '13px' };
+const btnFoundSmStyle = { ...btnFoundStyle, padding: '6px 12px', fontSize: '13px' };
+const btnReceivedSmStyle = { ...btnReceivedStyle, padding: '6px 12px', fontSize: '13px' };
+const btnSmallSmStyle = { ...btnSmallStyle };
+const btnOutSmStyle = { ...btnOutStyle };
+const btnCopySmStyle = { ...btnCopyStyle };
 
 export default Transfer;
