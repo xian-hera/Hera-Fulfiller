@@ -94,7 +94,15 @@ async function initPostgres() {
       transfer_date TEXT,
       estimate_month INTEGER,
       estimate_day INTEGER,
+      out_of_stock INTEGER DEFAULT 0,
       status TEXT DEFAULT 'transferring',
+      connecteam_tasked INTEGER DEFAULT 0,
+      connecteam_task_id TEXT,
+      connecteam_task_title_date TEXT,
+      shopify_transferred INTEGER DEFAULT 0,
+      shopify_transfer_id TEXT,
+      shopify_transfer_number TEXT,
+      from_location_changed INTEGER DEFAULT 0,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
@@ -132,132 +140,167 @@ async function initPostgres() {
     )
   `);
 
-  // 🆕 Add new columns to existing tables (migrations)
+  // 🆕 Connecteam tasks table — records all tasks published via Fulfiller
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS connecteam_tasks (
+      id SERIAL PRIMARY KEY,
+      task_id TEXT UNIQUE NOT NULL,
+      title TEXT NOT NULL,
+      title_date TEXT NOT NULL,
+      locations TEXT,
+      item_count INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'published',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // 🆕 Shopify transfers table — records all transfers created via Fulfiller
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS shopify_transfers (
+      id SERIAL PRIMARY KEY,
+      transfer_id TEXT UNIQUE NOT NULL,
+      transfer_number TEXT NOT NULL,
+      from_location TEXT NOT NULL,
+      destination TEXT DEFAULT 'MTL10',
+      reference_name TEXT DEFAULT 'Online Transfer',
+      tags TEXT DEFAULT '["Online Transfer","WEB"]',
+      status TEXT DEFAULT 'draft',
+      item_count INTEGER DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // 🆕 Connecteam settings table
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS connecteam_settings (
+      id SERIAL PRIMARY KEY,
+      key TEXT UNIQUE NOT NULL,
+      value TEXT,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // 🆕 Shopify transfer settings table
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS shopify_transfer_settings (
+      id SERIAL PRIMARY KEY,
+      key TEXT UNIQUE NOT NULL,
+      value TEXT,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // 🆕 Connecteam users cache table — synced from Connecteam API
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS connecteam_users (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER UNIQUE NOT NULL,
+      first_name TEXT,
+      last_name TEXT,
+      email TEXT,
+      user_type TEXT,
+      is_archived INTEGER DEFAULT 0,
+      synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // ── Migrations for existing tables ────────────────────────────────────────
   console.log('Running database migrations...');
 
-  try {
-    // Add packer_note to orders
-    await client.query(`
-      ALTER TABLE orders ADD COLUMN IF NOT EXISTS packer_note TEXT
-    `);
-    console.log('✓ Added packer_note column to orders');
-  } catch (error) {
-    console.log('✓ Column packer_note already exists in orders');
-  }
+  const migrations = [
+    // Existing migrations
+    [`ALTER TABLE orders ADD COLUMN IF NOT EXISTS packer_note TEXT`, 'packer_note to orders'],
+    [`ALTER TABLE line_items ADD COLUMN IF NOT EXISTS wig_number TEXT`, 'wig_number to line_items'],
+    [`ALTER TABLE line_items ADD COLUMN IF NOT EXISTS custom_name TEXT`, 'custom_name to line_items'],
+    [`ALTER TABLE transfer_items ADD COLUMN IF NOT EXISTS custom_name TEXT`, 'custom_name to transfer_items'],
+    [`ALTER TABLE transfer_items ADD COLUMN IF NOT EXISTS transfer_date TEXT`, 'transfer_date to transfer_items'],
+    [`ALTER TABLE box_types ADD COLUMN IF NOT EXISTS usage_count INTEGER DEFAULT 0`, 'usage_count to box_types'],
+    [`ALTER TABLE box_types ADD COLUMN IF NOT EXISTS quantity INTEGER DEFAULT 0`, 'quantity to box_types'],
+    [`ALTER TABLE transfer_items ADD COLUMN IF NOT EXISTS out_of_stock INTEGER DEFAULT 0`, 'out_of_stock to transfer_items'],
+    // 🆕 New Transfer redesign migrations
+    [`ALTER TABLE transfer_items ADD COLUMN IF NOT EXISTS connecteam_tasked INTEGER DEFAULT 0`, 'connecteam_tasked to transfer_items'],
+    [`ALTER TABLE transfer_items ADD COLUMN IF NOT EXISTS connecteam_task_id TEXT`, 'connecteam_task_id to transfer_items'],
+    [`ALTER TABLE transfer_items ADD COLUMN IF NOT EXISTS connecteam_task_title_date TEXT`, 'connecteam_task_title_date to transfer_items'],
+    [`ALTER TABLE transfer_items ADD COLUMN IF NOT EXISTS shopify_transferred INTEGER DEFAULT 0`, 'shopify_transferred to transfer_items'],
+    [`ALTER TABLE transfer_items ADD COLUMN IF NOT EXISTS shopify_transfer_id TEXT`, 'shopify_transfer_id to transfer_items'],
+    [`ALTER TABLE transfer_items ADD COLUMN IF NOT EXISTS shopify_transfer_number TEXT`, 'shopify_transfer_number to transfer_items'],
+    [`ALTER TABLE transfer_items ADD COLUMN IF NOT EXISTS from_location_changed INTEGER DEFAULT 0`, 'from_location_changed to transfer_items'],
+  ];
 
-  try {
-    // Add wig_number to line_items
-    await client.query(`
-      ALTER TABLE line_items ADD COLUMN IF NOT EXISTS wig_number TEXT
-    `);
-    console.log('✓ Added wig_number column to line_items');
-  } catch (error) {
-    console.log('✓ Column wig_number already exists in line_items');
-  }
-
-  try {
-    // Add custom_name to line_items
-    await client.query(`
-      ALTER TABLE line_items ADD COLUMN IF NOT EXISTS custom_name TEXT
-    `);
-    console.log('✓ Added custom_name column to line_items');
-  } catch (error) {
-    console.log('✓ Column custom_name already exists in line_items');
-  }
-
-  try {
-    // Add custom_name to transfer_items
-    await client.query(`
-      ALTER TABLE transfer_items ADD COLUMN IF NOT EXISTS custom_name TEXT
-    `);
-    console.log('✓ Added custom_name column to transfer_items');
-  } catch (error) {
-    console.log('✓ Column custom_name already exists in transfer_items');
-  }
-
-  try {
-    // Add transfer_date to transfer_items
-    await client.query(`
-      ALTER TABLE transfer_items ADD COLUMN IF NOT EXISTS transfer_date TEXT
-    `);
-    console.log('✓ Added transfer_date column to transfer_items');
-  } catch (error) {
-    console.log('✓ Column transfer_date already exists in transfer_items');
-  }
-
-  try {
-    // 🆕 Add usage_count to box_types
-    await client.query(`
-      ALTER TABLE box_types ADD COLUMN IF NOT EXISTS usage_count INTEGER DEFAULT 0
-    `);
-    console.log('✓ Added usage_count column to box_types');
-  } catch (error) {
-    console.log('✓ Column usage_count already exists in box_types');
-  }
-
-  try {
-    // 🆕 Add quantity to box_types
-    await client.query(`
-      ALTER TABLE box_types ADD COLUMN IF NOT EXISTS quantity INTEGER DEFAULT 0
-    `);
-    console.log('✓ Added quantity column to box_types');
-  } catch (error) {
-    console.log('✓ Column quantity already exists in box_types');
-  }
-
-  try {
-    // 🆕 Add out_of_stock to transfer_items
-    await client.query(`
-      ALTER TABLE transfer_items ADD COLUMN IF NOT EXISTS out_of_stock INTEGER DEFAULT 0
-    `);
-    console.log('✓ Added out_of_stock column to transfer_items');
-  } catch (error) {
-    console.log('✓ Column out_of_stock already exists in transfer_items');
+  for (const [sql, desc] of migrations) {
+    try {
+      await client.query(sql);
+      console.log(`✓ Added ${desc}`);
+    } catch (error) {
+      console.log(`✓ ${desc} already exists`);
+    }
   }
 
   console.log('Migrations completed!');
 
-  // Insert default box types ONLY if table is empty
+  // ── Default data ───────────────────────────────────────────────────────────
+
+  // Box types
   const boxTypeCountResult = await client.query('SELECT COUNT(*) as count FROM box_types');
   const boxTypeCount = parseInt(boxTypeCountResult.rows[0].count);
 
   if (boxTypeCount === 0) {
     console.log('Box types table is empty, inserting default values...');
-    
     const boxTypes = [
-      ['A', '5x20x5'],
-      ['B', '18x10x4'],
-      ['C', '18x10x5'],
-      ['D', '18x12x4'],
-      ['E', '18x12x8'],
-      ['F', '18x14x5'],
-      ['G', '26x8x8'],
-      ['H', '12x6x6']
+      ['A', '5x20x5'], ['B', '18x10x4'], ['C', '18x10x5'], ['D', '18x12x4'],
+      ['E', '18x12x8'], ['F', '18x14x5'], ['G', '26x8x8'],  ['H', '12x6x6']
     ];
-
     for (const [code, dimensions] of boxTypes) {
       await client.query(
         'INSERT INTO box_types (code, dimensions, usage_count, quantity) VALUES ($1, $2, 0, 0)',
         [code, dimensions]
       );
     }
-    
     console.log('✓ Default box types inserted');
-  } else {
-    console.log(`✓ Box types table already has ${boxTypeCount} entries, skipping defaults`);
   }
 
-  // Insert default settings
-  const settings = [
+  // App settings
+  const appSettings = [
     ['transfer_csv_column', 'D'],
     ['picker_wig_column', 'E'],
     ['sku_column', 'A'],
-    ['csv_uploaded_at', '']
+    ['csv_uploaded_at', ''],
   ];
-
-  for (const [key, value] of settings) {
+  for (const [key, value] of appSettings) {
     await client.query(
       'INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING',
+      [key, value]
+    );
+  }
+
+  // 🆕 Default Connecteam settings
+  const connecteamDefaults = [
+    ['default_assignee_ids', JSON.stringify([10952088, 8922246, 14153542, 6785478, 6793918])],
+    // Betty Tsui, Xian Wang, Hannah Thibeaud, Jungwook Choi, Sung Yeon Hwang
+    ['default_description', 'Please double check the SKU and quantity, Thank you.'],
+    ['location_members', JSON.stringify({
+      '01': [], '02': [], '03': [], '04': [], '05': [],
+      '06': [], '07': [], '08': [], '09': [], '11': []
+    })],
+  ];
+  for (const [key, value] of connecteamDefaults) {
+    await client.query(
+      'INSERT INTO connecteam_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING',
+      [key, value]
+    );
+  }
+
+  // 🆕 Default Shopify transfer settings
+  const shopifyDefaults = [
+    ['default_destination', 'MTL10'],
+    ['default_reference_name', 'Online Transfer'],
+    ['default_tags', JSON.stringify(['Online Transfer', 'WEB'])],
+  ];
+  for (const [key, value] of shopifyDefaults) {
+    await client.query(
+      'INSERT INTO shopify_transfer_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING',
       [key, value]
     );
   }
@@ -268,6 +311,9 @@ async function initPostgres() {
   await client.query('CREATE INDEX IF NOT EXISTS idx_line_items_picker_status ON line_items(picker_status)');
   await client.query('CREATE INDEX IF NOT EXISTS idx_line_items_packer_status ON line_items(packer_status)');
   await client.query('CREATE INDEX IF NOT EXISTS idx_transfer_items_status ON transfer_items(status)');
+  await client.query('CREATE INDEX IF NOT EXISTS idx_transfer_items_connecteam_tasked ON transfer_items(connecteam_tasked)');
+  await client.query('CREATE INDEX IF NOT EXISTS idx_transfer_items_shopify_transferred ON transfer_items(shopify_transferred)');
+  await client.query('CREATE INDEX IF NOT EXISTS idx_transfer_items_from ON transfer_items(transfer_from)');
 
   console.log('PostgreSQL database initialized successfully');
 

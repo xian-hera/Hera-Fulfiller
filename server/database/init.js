@@ -1,18 +1,17 @@
 const DatabaseAdapter = require('./adapter');
-const path = require('path');
 
 const db = new DatabaseAdapter();
 
 const initDatabase = async () => {
   try {
     if (db.type === 'postgres') {
-      // PostgreSQL: 使用异步初始化
       await db.connect();
       const initPostgres = require('./init-postgres');
       await initPostgres();
       console.log('PostgreSQL database initialized successfully');
     } else {
       // SQLite: 同步初始化
+
       // Orders table
       db.db.exec(`
         CREATE TABLE IF NOT EXISTS orders (
@@ -92,18 +91,17 @@ const initDatabase = async () => {
           transfer_date TEXT,
           out_of_stock INTEGER DEFAULT 0,
           status TEXT DEFAULT 'transferring',
+          connecteam_tasked INTEGER DEFAULT 0,
+          connecteam_task_id TEXT,
+          connecteam_task_title_date TEXT,
+          shopify_transferred INTEGER DEFAULT 0,
+          shopify_transfer_id TEXT,
+          shopify_transfer_number TEXT,
+          from_location_changed INTEGER DEFAULT 0,
           created_at TEXT DEFAULT CURRENT_TIMESTAMP,
           updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
       `);
-
-      // 🆕 添加 out_of_stock 列（如果不存在）
-      try {
-        db.db.exec(`ALTER TABLE transfer_items ADD COLUMN out_of_stock INTEGER DEFAULT 0`);
-        console.log('✓ Added out_of_stock column to transfer_items');
-      } catch (error) {
-        console.log('✓ Column out_of_stock already exists in transfer_items');
-      }
 
       // Settings table
       db.db.exec(`
@@ -137,57 +135,134 @@ const initDatabase = async () => {
         )
       `);
 
-      // 🆕 添加 usage_count 列（如果表已存在但没有该列）
-      try {
-        db.db.exec(`ALTER TABLE box_types ADD COLUMN usage_count INTEGER DEFAULT 0`);
-        console.log('✓ Added usage_count column to box_types');
-      } catch (error) {
-        // 列已存在，忽略错误
-        console.log('✓ Column usage_count already exists in box_types');
-      }
-
-      // 🆕 添加 quantity 列（如果表已存在但没有该列）
-      try {
-        db.db.exec(`ALTER TABLE box_types ADD COLUMN quantity INTEGER DEFAULT 0`);
-        console.log('✓ Added quantity column to box_types');
-      } catch (error) {
-        // 列已存在，忽略错误
-        console.log('✓ Column quantity already exists in box_types');
-      }
-
-      // Insert default box types ONLY if table is empty
-      const boxTypeCount = db.db.prepare('SELECT COUNT(*) as count FROM box_types').get();
-
-      if (boxTypeCount.count === 0) {
-        console.log('Box types table is empty, inserting default values...');
-        
-        const insertBoxType = db.db.prepare(`
-          INSERT INTO box_types (code, dimensions, usage_count, quantity) VALUES (?, ?, 0, 0)
-        `);
-
-        insertBoxType.run('A', '5x20x5');
-        insertBoxType.run('B', '18x10x4');
-        insertBoxType.run('C', '18x10x5');
-        insertBoxType.run('D', '18x12x4');
-        insertBoxType.run('E', '18x12x8');
-        insertBoxType.run('F', '18x14x5');
-        insertBoxType.run('G', '26x8x8');
-        insertBoxType.run('H', '12x6x6');
-        
-        console.log('✓ Default box types inserted');
-      } else {
-        console.log(`✓ Box types table already has ${boxTypeCount.count} entries, skipping defaults`);
-      }
-
-      // Insert default settings
-      const insertSetting = db.db.prepare(`
-        INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)
+      // 🆕 Connecteam tasks table
+      db.db.exec(`
+        CREATE TABLE IF NOT EXISTS connecteam_tasks (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          task_id TEXT UNIQUE NOT NULL,
+          title TEXT NOT NULL,
+          title_date TEXT NOT NULL,
+          locations TEXT,
+          item_count INTEGER DEFAULT 0,
+          status TEXT DEFAULT 'published',
+          created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
       `);
 
+      // 🆕 Shopify transfers table
+      db.db.exec(`
+        CREATE TABLE IF NOT EXISTS shopify_transfers (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          transfer_id TEXT UNIQUE NOT NULL,
+          transfer_number TEXT NOT NULL,
+          from_location TEXT NOT NULL,
+          destination TEXT DEFAULT 'MTL10',
+          reference_name TEXT DEFAULT 'Online Transfer',
+          tags TEXT DEFAULT '["Online Transfer","WEB"]',
+          status TEXT DEFAULT 'draft',
+          item_count INTEGER DEFAULT 0,
+          created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      // 🆕 Connecteam settings table
+      db.db.exec(`
+        CREATE TABLE IF NOT EXISTS connecteam_settings (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          key TEXT UNIQUE NOT NULL,
+          value TEXT,
+          updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      // 🆕 Shopify transfer settings table
+      db.db.exec(`
+        CREATE TABLE IF NOT EXISTS shopify_transfer_settings (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          key TEXT UNIQUE NOT NULL,
+          value TEXT,
+          updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      // 🆕 Connecteam users cache table
+      db.db.exec(`
+        CREATE TABLE IF NOT EXISTS connecteam_users (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER UNIQUE NOT NULL,
+          first_name TEXT,
+          last_name TEXT,
+          email TEXT,
+          user_type TEXT,
+          is_archived INTEGER DEFAULT 0,
+          synced_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      // ── Migrations ──────────────────────────────────────────────────────────
+      const addColumnIfNotExists = (table, column, definition) => {
+        try {
+          db.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+          console.log(`✓ Added ${column} to ${table}`);
+        } catch {
+          console.log(`✓ ${column} already exists in ${table}`);
+        }
+      };
+
+      // Existing migrations
+      addColumnIfNotExists('transfer_items', 'custom_name', 'TEXT');
+      addColumnIfNotExists('line_items', 'custom_name', 'TEXT');
+      addColumnIfNotExists('box_types', 'usage_count', 'INTEGER DEFAULT 0');
+      addColumnIfNotExists('box_types', 'quantity', 'INTEGER DEFAULT 0');
+      addColumnIfNotExists('transfer_items', 'out_of_stock', 'INTEGER DEFAULT 0');
+
+      // 🆕 New Transfer redesign migrations
+      addColumnIfNotExists('transfer_items', 'connecteam_tasked', 'INTEGER DEFAULT 0');
+      addColumnIfNotExists('transfer_items', 'connecteam_task_id', 'TEXT');
+      addColumnIfNotExists('transfer_items', 'connecteam_task_title_date', 'TEXT');
+      addColumnIfNotExists('transfer_items', 'shopify_transferred', 'INTEGER DEFAULT 0');
+      addColumnIfNotExists('transfer_items', 'shopify_transfer_id', 'TEXT');
+      addColumnIfNotExists('transfer_items', 'shopify_transfer_number', 'TEXT');
+      addColumnIfNotExists('transfer_items', 'from_location_changed', 'INTEGER DEFAULT 0');
+
+      // ── Default data ────────────────────────────────────────────────────────
+
+      // Box types
+      const boxTypeCount = db.db.prepare('SELECT COUNT(*) as count FROM box_types').get();
+      if (boxTypeCount.count === 0) {
+        const insertBoxType = db.db.prepare(
+          'INSERT INTO box_types (code, dimensions, usage_count, quantity) VALUES (?, ?, 0, 0)'
+        );
+        ['A','B','C','D','E','F','G','H'].forEach((code, i) => {
+          const dims = ['5x20x5','18x10x4','18x10x5','18x12x4','18x12x8','18x14x5','26x8x8','12x6x6'][i];
+          insertBoxType.run(code, dims);
+        });
+        console.log('✓ Default box types inserted');
+      }
+
+      // App settings
+      const insertSetting = db.db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
       insertSetting.run('transfer_csv_column', 'D');
       insertSetting.run('picker_wig_column', 'E');
       insertSetting.run('sku_column', 'A');
       insertSetting.run('csv_uploaded_at', '');
+
+      // 🆕 Default Connecteam settings
+      const insertCtSetting = db.db.prepare('INSERT OR IGNORE INTO connecteam_settings (key, value) VALUES (?, ?)');
+      insertCtSetting.run('default_assignee_ids', JSON.stringify([10952088, 8922246, 14153542, 6785478, 6793918]));
+      insertCtSetting.run('default_description', 'Please double check the SKU and quantity, Thank you.');
+      insertCtSetting.run('location_members', JSON.stringify({
+        '01': [], '02': [], '03': [], '04': [], '05': [],
+        '06': [], '07': [], '08': [], '09': [], '11': []
+      }));
+
+      // 🆕 Default Shopify transfer settings
+      const insertStSetting = db.db.prepare('INSERT OR IGNORE INTO shopify_transfer_settings (key, value) VALUES (?, ?)');
+      insertStSetting.run('default_destination', 'MTL10');
+      insertStSetting.run('default_reference_name', 'Online Transfer');
+      insertStSetting.run('default_tags', JSON.stringify(['Online Transfer', 'WEB']));
 
       console.log('SQLite database initialized successfully');
     }
