@@ -15,6 +15,7 @@ import {
   Banner,
   Toast,
   Frame,
+  ChoiceList,
 } from '@shopify/polaris';
 import { ImageIcon } from '@shopify/polaris-icons';
 
@@ -32,6 +33,7 @@ const Transfer = () => {
   const [selectedImage, setSelectedImage] = useState(null);
   const [toastActive, setToastActive] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
+  const [statusFilter, setStatusFilter] = useState(['transferring', 'waiting', 'received']);
 
   // ── Tag filter state ────────────────────────────────────────────────────────
   // null = no filter, otherwise filter by this value
@@ -61,6 +63,15 @@ const Transfer = () => {
 
   const getGroupedItems = useCallback(() => {
     let filtered = items;
+
+    // Status filter
+    filtered = filtered.filter(item => {
+      if (item.out_of_stock === 1) return true; // always show OOS
+      if (item.status === 'transferring') return statusFilter.includes('transferring');
+      if (item.status === 'waiting') return statusFilter.includes('waiting');
+      if (item.status === 'received' || item.status === 'found') return statusFilter.includes('received');
+      return true;
+    });
 
     // If tag filter is active, filter all items by that tag
     if (taskDateFilter) {
@@ -105,7 +116,7 @@ const Transfer = () => {
     const sortedLocations = Object.keys(locationGroups).sort();
 
     return { group1, locationGroups, sortedLocations };
-  }, [items, taskDateFilter, shopifyTransferFilter]);
+  }, [items, taskDateFilter, shopifyTransferFilter, statusFilter]);
 
   // ── Handlers ────────────────────────────────────────────────────────────────
 
@@ -551,6 +562,13 @@ const Transfer = () => {
   const { group1, locationGroups, sortedLocations } = getGroupedItems();
   const toastMarkup = toastActive ? <Toast content={toastMessage} onDismiss={() => setToastActive(false)} /> : null;
 
+  // Status counts (from all items, ignoring current filter)
+  const statusCounts = {
+    transferring: items.filter(i => i.status === 'transferring' && i.out_of_stock !== 1).length,
+    waiting: items.filter(i => i.status === 'waiting').length,
+    received: items.filter(i => i.status === 'received' || i.status === 'found').length,
+  };
+
   const filterBanner = (taskDateFilter || shopifyTransferFilter) ? (
     <Banner
       tone="info"
@@ -600,6 +618,25 @@ const Transfer = () => {
           }
         >
           <Layout>
+            {/* Status filter card */}
+            <Layout.Section>
+              <Card>
+                <div style={{ padding: '16px' }}>
+                  <ChoiceList
+                    title="Show items"
+                    choices={[
+                      { label: `Transferring (${statusCounts.transferring})`, value: 'transferring' },
+                      { label: `Waiting (${statusCounts.waiting})`, value: 'waiting' },
+                      { label: `Received (${statusCounts.received})`, value: 'received' },
+                    ]}
+                    selected={statusFilter}
+                    onChange={setStatusFilter}
+                    allowMultiple
+                  />
+                </div>
+              </Card>
+            </Layout.Section>
+
             {/* Filter banner */}
             {filterBanner && (
               <Layout.Section>

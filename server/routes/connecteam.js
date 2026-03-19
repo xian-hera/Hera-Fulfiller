@@ -261,7 +261,7 @@ router.post('/settings', async (req, res) => {
     const { key, value } = req.body;
     const valueStr = typeof value === 'string' ? value : JSON.stringify(value);
     await db.prepare(
-      'INSERT OR REPLACE INTO connecteam_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)'
+      'INSERT INTO connecteam_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP'
     ).run(key, valueStr);
     res.json({ success: true });
   } catch (err) {
@@ -302,9 +302,16 @@ router.post('/sync-users', async (req, res) => {
     for (const user of allUsers) {
       const userId = user.id || user.userId;
       await db.prepare(`
-        INSERT OR REPLACE INTO connecteam_users 
+        INSERT INTO connecteam_users 
           (user_id, first_name, last_name, email, user_type, is_archived, synced_at)
         VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT (user_id) DO UPDATE SET
+          first_name = EXCLUDED.first_name,
+          last_name = EXCLUDED.last_name,
+          email = EXCLUDED.email,
+          user_type = EXCLUDED.user_type,
+          is_archived = EXCLUDED.is_archived,
+          synced_at = CURRENT_TIMESTAMP
       `).run(
         userId,
         user.firstName || '',

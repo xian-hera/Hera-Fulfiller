@@ -377,11 +377,11 @@ const ShopifyTransfer = () => {
 
                   {/* Settings summary */}
                   <div style={{ padding: '10px 12px', backgroundColor: '#f6f6f7', borderRadius: '6px' }}>
-                    <Text variant="bodySm" tone="subdued">
-                      Destination: <strong>{settings.default_destination}</strong> ·
-                      Reference: <strong>{settings.default_reference_name}</strong> ·
-                      Tags: <strong>{(settings.default_tags || []).join(', ')}</strong>
-                    </Text>
+                    <BlockStack gap="1">
+                      <Text variant="bodySm" tone="subdued">Destination: <strong>{settings.default_destination}</strong></Text>
+                      <Text variant="bodySm" tone="subdued">Reference: <strong>{settings.default_reference_name}</strong></Text>
+                      <Text variant="bodySm" tone="subdued">Tags: <strong>{(settings.default_tags || []).join(', ')}</strong></Text>
+                    </BlockStack>
                   </div>
 
                   {/* Result banner */}
@@ -405,20 +405,20 @@ const ShopifyTransfer = () => {
                     </Button>
 
                     <Button
-                      onClick={() => handleAddToTransfer(selectedItemIds)}
-                      disabled={selectedItemIds.length === 0 || isAdding}
-                      loading={isAdding}
-                    >
-                      Add Selected to Transfer
-                    </Button>
-
-                    <Button
                       variant="primary"
                       onClick={() => handleCreate(items.map(i => i.id))}
                       disabled={items.length === 0 || isCreating}
                       loading={isCreating}
                     >
                       Create All ({items.length})
+                    </Button>
+
+                    <Button
+                      onClick={() => handleAddToTransfer(selectedItemIds)}
+                      disabled={selectedItemIds.length === 0 || isAdding}
+                      loading={isAdding}
+                    >
+                      Add Selected to Transfer
                     </Button>
 
                     <Button

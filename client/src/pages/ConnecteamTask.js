@@ -153,22 +153,37 @@ const DateSelector = ({ value, onChange }) => {
 
 const SettingsModal = ({ open, onClose, settings, onSave }) => {
   const [localSettings, setLocalSettings] = useState(settings);
-  const [userSearch, setUserSearch] = useState('');
-  const [searchResults, setSearchResults] = useState([]);
+  const [defaultSearch, setDefaultSearch] = useState('');
+  const [defaultSearchResults, setDefaultSearchResults] = useState([]);
+  const [locationSearch, setLocationSearch] = useState('');
+  const [locationSearchResults, setLocationSearchResults] = useState([]);
   const [activeLocationTab, setActiveLocationTab] = useState('01');
 
   useEffect(() => {
     setLocalSettings(settings);
   }, [settings]);
 
-  const handleUserSearch = async (query) => {
-    setUserSearch(query);
-    if (query.length < 2) { setSearchResults([]); return; }
+  // Search for default assignees
+  const handleDefaultSearch = async (query) => {
+    setDefaultSearch(query);
+    if (query.length < 2) { setDefaultSearchResults([]); return; }
     try {
       const res = await axios.get('/api/connecteam/search-user', { params: { name: query } });
-      setSearchResults(res.data);
+      setDefaultSearchResults(res.data);
     } catch {
-      setSearchResults([]);
+      setDefaultSearchResults([]);
+    }
+  };
+
+  // Search for location members
+  const handleLocationSearch = async (query) => {
+    setLocationSearch(query);
+    if (query.length < 2) { setLocationSearchResults([]); return; }
+    try {
+      const res = await axios.get('/api/connecteam/search-user', { params: { name: query } });
+      setLocationSearchResults(res.data);
+    } catch {
+      setLocationSearchResults([]);
     }
   };
 
@@ -177,8 +192,8 @@ const SettingsModal = ({ open, onClose, settings, onSave }) => {
     if (!ids.includes(user.user_id)) {
       setLocalSettings({ ...localSettings, default_assignee_ids: [...ids, user.user_id] });
     }
-    setUserSearch('');
-    setSearchResults([]);
+    setDefaultSearch('');
+    setDefaultSearchResults([]);
   };
 
   const handleRemoveDefaultAssignee = (userId) => {
@@ -195,8 +210,8 @@ const SettingsModal = ({ open, onClose, settings, onSave }) => {
         location_members: { ...members, [activeLocationTab]: [...locMembers, user.user_id] }
       });
     }
-    setUserSearch('');
-    setSearchResults([]);
+    setLocationSearch('');
+    setLocationSearchResults([]);
   };
 
   const handleRemoveLocationMember = (userId) => {
@@ -206,6 +221,15 @@ const SettingsModal = ({ open, onClose, settings, onSave }) => {
       ...localSettings,
       location_members: { ...members, [activeLocationTab]: locMembers }
     });
+  };
+
+  const handleSyncUsers = async () => {
+    try {
+      await axios.post('/api/connecteam/sync-users');
+      alert('Users synced successfully! You can now search by name.');
+    } catch {
+      alert('Failed to sync users. Please try again.');
+    }
   };
 
   return (
@@ -228,27 +252,29 @@ const SettingsModal = ({ open, onClose, settings, onSave }) => {
           {/* Default Assignees */}
           <div>
             <Text variant="bodyMd" fontWeight="semibold">Default Assignees</Text>
+            <Text variant="bodySm" tone="subdued">These people are assigned to every task by default.</Text>
             <AssigneeList
               userIds={localSettings.default_assignee_ids || []}
               onRemove={handleRemoveDefaultAssignee}
             />
-            <div style={{ marginTop: '8px' }}>
+            <div style={{ marginTop: '10px' }}>
               <TextField
                 label=""
                 placeholder="Search by name to add..."
-                value={userSearch}
-                onChange={handleUserSearch}
+                value={defaultSearch}
+                onChange={handleDefaultSearch}
                 autoComplete="off"
               />
-              {searchResults.length > 0 && (
-                <div style={{ border: '1px solid #c9cccf', borderRadius: '6px', marginTop: '4px' }}>
-                  {searchResults.map(u => (
+              {defaultSearchResults.length > 0 && (
+                <div style={{ border: '1px solid #c9cccf', borderRadius: '6px', marginTop: '4px', backgroundColor: 'white' }}>
+                  {defaultSearchResults.map(u => (
                     <div
                       key={u.user_id}
                       onClick={() => handleAddDefaultAssignee(u)}
                       style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid #e1e3e5' }}
                     >
-                      {u.first_name} {u.last_name} <span style={{ color: '#6d7175', fontSize: '12px' }}>{u.email}</span>
+                      {u.first_name} {u.last_name}
+                      {u.email && <span style={{ color: '#6d7175', fontSize: '12px', marginLeft: '8px' }}>{u.email}</span>}
                     </div>
                   ))}
                 </div>
@@ -259,14 +285,14 @@ const SettingsModal = ({ open, onClose, settings, onSave }) => {
           {/* Location Members */}
           <div>
             <Text variant="bodyMd" fontWeight="semibold">Location Members</Text>
-            <Text variant="bodySm" tone="subdued">Configure which Connecteam users belong to each store location.</Text>
+            <Text variant="bodySm" tone="subdued">When a task involves a location, its members are also assigned and notified.</Text>
 
             {/* Location tabs */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '10px' }}>
               {LOCATIONS.map(loc => (
                 <button
                   key={loc}
-                  onClick={() => setActiveLocationTab(loc)}
+                  onClick={() => { setActiveLocationTab(loc); setLocationSearch(''); setLocationSearchResults([]); }}
                   style={{
                     padding: '4px 12px', borderRadius: '6px', fontSize: '13px', cursor: 'pointer',
                     border: activeLocationTab === loc ? '2px solid #0080FF' : '2px solid #c9cccf',
@@ -285,23 +311,24 @@ const SettingsModal = ({ open, onClose, settings, onSave }) => {
                 userIds={(localSettings.location_members || {})[activeLocationTab] || []}
                 onRemove={handleRemoveLocationMember}
               />
-              <div style={{ marginTop: '8px' }}>
+              <div style={{ marginTop: '10px' }}>
                 <TextField
                   label=""
                   placeholder={`Search by name to add to location ${activeLocationTab}...`}
-                  value={userSearch}
-                  onChange={handleUserSearch}
+                  value={locationSearch}
+                  onChange={handleLocationSearch}
                   autoComplete="off"
                 />
-                {searchResults.length > 0 && (
-                  <div style={{ border: '1px solid #c9cccf', borderRadius: '6px', marginTop: '4px' }}>
-                    {searchResults.map(u => (
+                {locationSearchResults.length > 0 && (
+                  <div style={{ border: '1px solid #c9cccf', borderRadius: '6px', marginTop: '4px', backgroundColor: 'white' }}>
+                    {locationSearchResults.map(u => (
                       <div
                         key={u.user_id}
                         onClick={() => handleAddLocationMember(u)}
                         style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid #e1e3e5' }}
                       >
-                        {u.first_name} {u.last_name} <span style={{ color: '#6d7175', fontSize: '12px' }}>{u.email}</span>
+                        {u.first_name} {u.last_name}
+                        {u.email && <span style={{ color: '#6d7175', fontSize: '12px', marginLeft: '8px' }}>{u.email}</span>}
                       </div>
                     ))}
                   </div>
@@ -310,20 +337,13 @@ const SettingsModal = ({ open, onClose, settings, onSave }) => {
             </div>
           </div>
 
-          {/* Sync users button */}
-          <div>
-            <Button onClick={async () => {
-              try {
-                await axios.post('/api/connecteam/sync-users');
-                alert('Users synced successfully!');
-              } catch {
-                alert('Failed to sync users. Please try again.');
-              }
-            }}>
-              Sync Users from Connecteam
-            </Button>
-            <div style={{ marginTop: '4px' }}>
-              <Text variant="bodySm" tone="subdued">Sync the latest user list from Connecteam before searching by name.</Text>
+          {/* Sync users */}
+          <div style={{ paddingTop: '8px', borderTop: '1px solid #e1e3e5' }}>
+            <Text variant="bodySm" tone="subdued">
+              Before searching by name, sync the latest user list from Connecteam first.
+            </Text>
+            <div style={{ marginTop: '10px' }}>
+              <Button onClick={handleSyncUsers}>Sync Users from Connecteam</Button>
             </div>
           </div>
 
@@ -585,7 +605,7 @@ const ConnecteamTask = () => {
           <Layout.Section>
             <Card>
               <div style={{ padding: '16px' }}>
-                <BlockStack gap="4">
+                <BlockStack gap="5">
 
                   {/* Location order */}
                   <LocationOrderSelector
@@ -619,20 +639,20 @@ const ConnecteamTask = () => {
                     </Button>
 
                     <Button
-                      onClick={() => handleAddToTask(selectedItemIds)}
-                      disabled={selectedItemIds.length === 0 || isAdding || !latestTask}
-                      loading={isAdding}
-                    >
-                      Add Selected to Task
-                    </Button>
-
-                    <Button
                       variant="primary"
                       onClick={() => handlePublish(items.map(i => i.id))}
                       disabled={items.length === 0 || isPublishing}
                       loading={isPublishing}
                     >
                       Publish All ({items.length})
+                    </Button>
+
+                    <Button
+                      onClick={() => handleAddToTask(selectedItemIds)}
+                      disabled={selectedItemIds.length === 0 || isAdding || !latestTask}
+                      loading={isAdding}
+                    >
+                      Add Selected to Task
                     </Button>
 
                     <Button
