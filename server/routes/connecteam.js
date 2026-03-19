@@ -499,8 +499,14 @@ router.post('/publish-task', async (req, res) => {
 
     // Save task to DB
     await db.prepare(`
-      INSERT OR REPLACE INTO connecteam_tasks (task_id, title, title_date, locations, item_count, status, updated_at)
+      INSERT INTO connecteam_tasks (task_id, title, title_date, locations, item_count, status, updated_at)
       VALUES (?, ?, ?, ?, ?, 'published', CURRENT_TIMESTAMP)
+      ON CONFLICT (task_id) DO UPDATE SET
+        title = EXCLUDED.title,
+        title_date = EXCLUDED.title_date,
+        locations = EXCLUDED.locations,
+        item_count = EXCLUDED.item_count,
+        updated_at = CURRENT_TIMESTAMP
     `).run(taskId, title, titleDate, JSON.stringify(sortedLocationOrder), items.length);
 
     // Update transfer_items
