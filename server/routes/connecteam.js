@@ -136,8 +136,8 @@ function extractLocationsFromTitle(title) {
 
 // ── Helper: get due date timestamps ─────────────────────────────────────────
 function getTaskDates(dateChoice) {
-  const startDate = new Date();
-  startDate.setHours(9, 0, 0, 0);
+  // startTime = right now (cannot be in the past)
+  const startTime = Math.floor(Date.now() / 1000);
 
   const dueDate = new Date();
   if (dateChoice === 'today') {
@@ -152,7 +152,7 @@ function getTaskDates(dateChoice) {
   dueDate.setHours(21, 0, 0, 0);
 
   return {
-    startTime: Math.floor(startDate.getTime() / 1000),
+    startTime,
     dueDate: Math.floor(dueDate.getTime() / 1000),
   };
 }
