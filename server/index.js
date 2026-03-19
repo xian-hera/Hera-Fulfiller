@@ -10,6 +10,8 @@ const transferRoutes = require('./routes/transfer');
 const packerRoutes = require('./routes/packer');
 const settingsRoutes = require('./routes/settings');
 const webhookRoutes = require('./routes/webhooks');
+const connecteamRoutes = require('./routes/connecteam');
+const shopifyTransferRoutes = require('./routes/shopify-transfer');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -25,6 +27,8 @@ app.use('/api/transfer', transferRoutes);
 app.use('/api/packer', packerRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/webhooks', webhookRoutes);
+app.use('/api/connecteam', connecteamRoutes);
+app.use('/api/shopify-transfer', shopifyTransferRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
