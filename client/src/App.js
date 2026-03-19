@@ -11,6 +11,8 @@ import OrderDetail from './pages/OrderDetail';
 import Settings from './pages/Settings';
 import ErrorBoundary from './components/ErrorBoundary';
 import TransferPlanner from './pages/TransferPlanner';
+import ConnecteamTask from './pages/ConnecteamTask';
+import ShopifyTransfer from './pages/ShopifyTransfer';
 
 function App() {
   return (
@@ -25,6 +27,8 @@ function App() {
             <Route path="/packer/:shopifyOrderId" element={<OrderDetail />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/transfer-planner" element={<TransferPlanner />} />
+            <Route path="/connecteam-task" element={<ConnecteamTask />} />
+            <Route path="/shopify-transfer" element={<ShopifyTransfer />} />
           </Routes>
         </Router>
       </ErrorBoundary>
