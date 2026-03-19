@@ -255,7 +255,7 @@ router.post('/settings', async (req, res) => {
     const { key, value } = req.body;
     const valueStr = typeof value === 'string' ? value : JSON.stringify(value);
     await db.prepare(
-      'INSERT OR REPLACE INTO shopify_transfer_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)'
+      'INSERT INTO shopify_transfer_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP'
     ).run(key, valueStr);
     res.json({ success: true });
   } catch (err) {
@@ -352,9 +352,14 @@ router.post('/create', async (req, res) => {
         const transferNumber = transfer.name?.replace('#', '') || '';
 
         await db.prepare(`
-          INSERT OR REPLACE INTO shopify_transfers
+          INSERT INTO shopify_transfers
             (transfer_id, transfer_number, from_location, destination, reference_name, tags, status, item_count)
           VALUES (?, ?, ?, ?, ?, ?, 'draft', ?)
+          ON CONFLICT (transfer_id) DO UPDATE SET
+            transfer_number = EXCLUDED.transfer_number,
+            status = EXCLUDED.status,
+            item_count = EXCLUDED.item_count,
+            updated_at = CURRENT_TIMESTAMP
         `).run(
           transferId,
           transferNumber,

@@ -491,7 +491,10 @@ const ConnecteamTask = () => {
       await fetchLatestTask();
       setSelectedItemIds([]);
     } catch (err) {
-      showToast(`Failed to publish task: ${err.response?.data?.error || err.message}`);
+      const detail = err.response?.data?.details
+        ? JSON.stringify(err.response.data.details)
+        : (err.response?.data?.error || err.message);
+      showToast(`Failed to publish task: ${detail}`);
     } finally {
       setIsPublishing(false);
     }

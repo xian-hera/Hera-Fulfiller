@@ -372,8 +372,8 @@ const ShopifyTransfer = () => {
           {/* Controls */}
           <Layout.Section>
             <Card>
-              <div style={{ padding: '16px' }}>
-                <BlockStack gap="4">
+              <div style={{ padding: '20px' }}>
+                <BlockStack gap="5">
 
                   {/* Settings summary */}
                   <div style={{ padding: '10px 12px', backgroundColor: '#f6f6f7', borderRadius: '6px' }}>

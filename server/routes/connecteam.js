@@ -537,7 +537,16 @@ router.post('/publish-task', async (req, res) => {
     });
 
   } catch (err) {
-    console.error('Error publishing Connecteam task:', err);
+    console.error('Error publishing Connecteam task:', err.message);
+    if (err.response) {
+      console.error('Connecteam API status:', err.response.status);
+      console.error('Connecteam API response:', JSON.stringify(err.response.data, null, 2));
+      return res.status(500).json({
+        error: err.message,
+        details: err.response.data,
+        status: err.response.status,
+      });
+    }
     res.status(500).json({ error: err.message });
   }
 });
