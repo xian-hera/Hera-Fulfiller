@@ -14,8 +14,6 @@ import {
   Banner,
   Toast,
   Frame,
-  Badge,
-  Spinner,
 } from '@shopify/polaris';
 import { ImageIcon } from '@shopify/polaris-icons';
 
