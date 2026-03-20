@@ -84,15 +84,27 @@ router.get('/items/:id/copy-text', async (req, res) => {
     // 🆕 变量定义
     // A = emoji + transfer_from + emoji (只在 waiting 状态使用)
     // B = quantity (如果 > 1，用 "pcs"，否则用 "pc")
-    // C = custom_name (优先级: custom_name > title)
+    // C = custom_name (优先级: custom_name > title)，WIG 类型在前面加 wig_number
     // D = SKU
     // E = order_number (只在 waiting 状态使用)
 
     const B = item.quantity;
     const pcText = B > 1 ? 'pcs' : 'pc';
-    const C = item.custom_name || item.title || '';
     const D = item.sku || '';
     const E = item.order_number || '';
+
+    // 对 WIG 类型，从 line_items 查 wig_number 并加在产品名前面
+    let wigPrefix = '';
+    if (item.product_type && item.product_type.toUpperCase() === 'WIG') {
+      const lineItem = await db.prepare(
+        'SELECT wig_number FROM line_items WHERE id = ?'
+      ).get(item.line_item_id);
+      if (lineItem?.wig_number) {
+        wigPrefix = `${lineItem.wig_number} `;
+      }
+    }
+
+    const C = `${wigPrefix}${item.custom_name || item.title || ''}`;
 
     let copyText = '';
 

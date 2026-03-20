@@ -36,6 +36,7 @@ class OrderWebhookHandler {
       };
 
       // Insert order
+      // 🔒 FIX: ON CONFLICT 不覆写已是 'fulfilled' 的状态，防止 stale webhook 复活已完成的订单
       const insertOrder = db.prepare(`
         INSERT INTO orders (
           shopify_order_id, order_number, name, fulfillment_status, 
@@ -46,7 +47,10 @@ class OrderWebhookHandler {
         ON CONFLICT (shopify_order_id) DO UPDATE SET
           order_number = EXCLUDED.order_number,
           name = EXCLUDED.name,
-          fulfillment_status = EXCLUDED.fulfillment_status,
+          fulfillment_status = CASE
+            WHEN orders.fulfillment_status = 'fulfilled' THEN 'fulfilled'
+            ELSE EXCLUDED.fulfillment_status
+          END,
           total_quantity = EXCLUDED.total_quantity,
           subtotal_price = EXCLUDED.subtotal_price,
           shipping_title = EXCLUDED.shipping_title,
@@ -181,7 +185,16 @@ class OrderWebhookHandler {
       const existingOrder = await db.prepare('SELECT * FROM orders WHERE shopify_order_id = ?')
         .get(orderData.id.toString());
 
+      // 🔒 FIX: 订单不在 DB 中，说明已经被 fulfilled/cancelled 删除过了
+      // 只有当 Shopify 传来的状态确实是 unfulfilled 且没有 cancelled 时，才重新创建
+      // 这防止了已完成订单因后续 webhook 而复活
       if (!existingOrder) {
+        if (orderData.fulfillment_status === 'fulfilled' || orderData.cancelled_at) {
+          console.log(`Order ${orderData.name} not in DB and is fulfilled/cancelled — ignoring`);
+          return { success: true, order_number: orderData.name };
+        }
+        // 订单真的不在 DB 中（比如 APP 重启前创建的订单漏掉了），正常创建
+        console.log(`Order ${orderData.name} not in DB, treating as new order`);
         return await this.handleOrderCreated(orderData);
       }
 
@@ -328,6 +341,7 @@ class OrderWebhookHandler {
         }
 
         if (existingGroup.length === 0) {
+          // 新增的 item（订单编辑后加了新产品）
           console.log(`  Action: NEW ITEM`);
           const insertLineItem = db.prepare(`
             INSERT INTO line_items (
@@ -361,6 +375,7 @@ class OrderWebhookHandler {
             'packing'
           );
         } else if (item.quantity > totalExistingQty) {
+          // 数量增加（订单编辑后增加了数量）
           const diff = item.quantity - totalExistingQty;
           console.log(`  Action: INCREASE (diff: ${diff})`);
           
@@ -396,6 +411,7 @@ class OrderWebhookHandler {
             'packing'
           );
         } else if (item.quantity < totalExistingQty) {
+          // 数量减少（订单编辑后减少了数量）
           console.log(`  Action: DECREASE`);
           
           let remaining = totalExistingQty - item.quantity;
@@ -407,10 +423,6 @@ class OrderWebhookHandler {
             if (existingItem.quantity <= remaining) {
               console.log(`    Deleting line_item ${existingItem.id} (qty: ${existingItem.quantity})`);
               await db.prepare('DELETE FROM line_items WHERE id = ?').run(existingItem.id);
-              
-              // 🆕 完全不删除 transfer_items，无论任何状态
-              // Transfer items 只能通过 Transfer 页面的 Clear Mode 手动删除
-              
               remaining -= existingItem.quantity;
             } else {
               const newQty = existingItem.quantity - remaining;
@@ -435,16 +447,35 @@ class OrderWebhookHandler {
           console.log(`  Action: ITEM REMOVED - ${baseId}`);
           for (const item of group) {
             console.log(`    Deleting line_item ${item.id}`);
-            
             await db.prepare('DELETE FROM line_items WHERE id = ?').run(item.id);
-            
-            // 🆕 完全不删除 transfer_items，无论任何状态
             // Transfer items 只能通过 Transfer 页面的 Clear Mode 手动删除
           }
         }
       }
 
-      // 更新订单信息
+      // 🔒 FIX: 更新订单时不允许把 fulfillment_status 从 'fulfilled' 降级回去
+      const newFulfillmentStatus = orderData.fulfillment_status || 'unfulfilled';
+      const protectedStatus = existingOrder.fulfillment_status === 'fulfilled'
+        ? 'fulfilled'
+        : newFulfillmentStatus;
+
+      // 重置所有现有 line_items 的 packer_status 为 'packing'
+      // 任何订单 update（增加或减少 item）都需要打包工重新核对，所以全部 uncheck
+      await db.prepare(`
+        UPDATE line_items
+        SET packer_status = 'packing', updated_at = CURRENT_TIMESTAMP
+        WHERE shopify_order_id = ?
+      `).run(orderData.id.toString());
+
+      // 如果订单状态是 'ready'，重置回 'packing'
+      // holding 和 waiting 状态不受影响
+      if (existingOrder.status === 'ready') {
+        await db.prepare(`
+          UPDATE orders SET status = 'packing', updated_at = CURRENT_TIMESTAMP
+          WHERE shopify_order_id = ?
+        `).run(orderData.id.toString());
+      }
+
       await db.prepare(`
         UPDATE orders SET 
           total_quantity = ?,
@@ -453,7 +484,7 @@ class OrderWebhookHandler {
         WHERE shopify_order_id = ?
       `).run(
         activeLineItems.reduce((sum, item) => sum + item.quantity, 0),
-        orderData.fulfillment_status || 'unfulfilled',
+        protectedStatus,
         orderData.id.toString()
       );
 
@@ -500,10 +531,7 @@ class OrderWebhookHandler {
           if (dbItem.quantity <= remainingToDelete) {
             console.log(`    ✗ Deleting item ${dbItem.id} (qty: ${dbItem.quantity})`);
             await db.prepare('DELETE FROM line_items WHERE id = ?').run(dbItem.id);
-            
-            // 🆕 完全不删除 transfer_items，无论任何状态
             // Transfer items 只能通过 Transfer 页面的 Clear Mode 手动删除
-            
             remainingToDelete -= dbItem.quantity;
           } else {
             const newQty = dbItem.quantity - remainingToDelete;
@@ -579,21 +607,14 @@ class OrderWebhookHandler {
     }
   }
 
-  // Handle order cancelled (🆕 完全不删除 transfer_items)
+  // Handle order cancelled
   static async handleOrderCancelled(orderData) {
     try {
       const shopifyOrderId = orderData.id.toString();
       
-      // 🆕 完全不删除 transfer_items，只能手动清理
       // Transfer items 只能通过 Transfer 页面的 Clear Mode 手动删除
-      
-      // 删除 line_items
-      await db.prepare('DELETE FROM line_items WHERE shopify_order_id = ?')
-        .run(shopifyOrderId);
-      
-      // 删除 order
-      await db.prepare('DELETE FROM orders WHERE shopify_order_id = ?')
-        .run(shopifyOrderId);
+      await db.prepare('DELETE FROM line_items WHERE shopify_order_id = ?').run(shopifyOrderId);
+      await db.prepare('DELETE FROM orders WHERE shopify_order_id = ?').run(shopifyOrderId);
       
       console.log(`Order ${orderData.name} cancelled - order and line_items removed, transfer_items preserved`);
       return { success: true, order_number: orderData.name };
@@ -603,21 +624,14 @@ class OrderWebhookHandler {
     }
   }
 
-  // Handle order fulfilled (🆕 完全不删除 transfer_items)
+  // Handle order fulfilled
   static async handleOrderFulfilled(orderData) {
     try {
       const shopifyOrderId = orderData.id.toString();
       
-      // 🆕 完全不删除 transfer_items，只能手动清理
       // Transfer items 只能通过 Transfer 页面的 Clear Mode 手动删除
-      
-      // 删除 line_items
-      await db.prepare('DELETE FROM line_items WHERE shopify_order_id = ?')
-        .run(shopifyOrderId);
-      
-      // 删除 order
-      await db.prepare('DELETE FROM orders WHERE shopify_order_id = ?')
-        .run(shopifyOrderId);
+      await db.prepare('DELETE FROM line_items WHERE shopify_order_id = ?').run(shopifyOrderId);
+      await db.prepare('DELETE FROM orders WHERE shopify_order_id = ?').run(shopifyOrderId);
 
       console.log(`Order ${orderData.name} fulfilled - order and line_items removed, transfer_items preserved`);
       return { success: true, order_number: orderData.name };
