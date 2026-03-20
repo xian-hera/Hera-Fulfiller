@@ -382,12 +382,29 @@ router.get('/not-tasked', async (req, res) => {
 
 // POST /api/connecteam/publish-task
 // Body: { itemIds, locationOrder, dateChoice }
+
+// Simple in-memory dedup guard: store recent request hashes
+const recentPublishRequests = new Map();
+
 router.post('/publish-task', async (req, res) => {
   try {
     const { itemIds, locationOrder, dateChoice } = req.body;
 
     if (!itemIds || itemIds.length === 0) {
       return res.status(400).json({ error: 'No items selected' });
+    }
+
+    // Dedup guard: same itemIds within 10 seconds = duplicate request
+    const requestKey = JSON.stringify([...itemIds].sort());
+    const lastRequest = recentPublishRequests.get(requestKey);
+    if (lastRequest && Date.now() - lastRequest < 10000) {
+      console.log('Duplicate publish-task request blocked:', requestKey);
+      return res.status(429).json({ error: 'Duplicate request. Please wait a moment before trying again.' });
+    }
+    recentPublishRequests.set(requestKey, Date.now());
+    // Clean up old entries
+    for (const [key, time] of recentPublishRequests.entries()) {
+      if (Date.now() - time > 30000) recentPublishRequests.delete(key);
     }
 
     // Fetch items from DB
