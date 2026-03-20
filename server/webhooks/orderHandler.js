@@ -186,15 +186,30 @@ class OrderWebhookHandler {
         .get(orderData.id.toString());
 
       // 🔒 FIX: 订单不在 DB 中，说明已经被 fulfilled/cancelled 删除过了
-      // 只有当 Shopify 传来的状态确实是 unfulfilled 且没有 cancelled 时，才重新创建
-      // 这防止了已完成订单因后续 webhook 而复活
+      // 去 Shopify API 查询真实状态，确认是否真的是活跃的 unfulfilled 订单
       if (!existingOrder) {
+        // 先用 webhook 数据做快速检查
         if (orderData.fulfillment_status === 'fulfilled' || orderData.cancelled_at) {
-          console.log(`Order ${orderData.name} not in DB and is fulfilled/cancelled — ignoring`);
+          console.log(`Order ${orderData.name} not in DB and webhook shows fulfilled/cancelled — ignoring`);
           return { success: true, order_number: orderData.name };
         }
-        // 订单真的不在 DB 中（比如 APP 重启前创建的订单漏掉了），正常创建
-        console.log(`Order ${orderData.name} not in DB, treating as new order`);
+
+        // webhook 数据不可靠，去 Shopify API 查真实状态
+        console.log(`Order ${orderData.name} not in DB — verifying with Shopify API...`);
+        try {
+          const shopifyOrder = await shopifyClient.getOrder(orderData.id.toString());
+          if (shopifyOrder.fulfillment_status === 'fulfilled' || shopifyOrder.cancelled_at || shopifyOrder.closed_at) {
+            console.log(`Order ${orderData.name} confirmed fulfilled/cancelled/closed by Shopify API — ignoring`);
+            return { success: true, order_number: orderData.name };
+          }
+          console.log(`Order ${orderData.name} confirmed active by Shopify API — treating as new order`);
+        } catch (apiErr) {
+          // Shopify API 查询失败，保守处理：忽略，不重建
+          // 避免因 stale webhook 误建订单，真正漏掉的订单可通过 Shopify 手动重发 webhook 补救
+          console.error(`Order ${orderData.name} — Shopify API check failed: ${apiErr.message} — ignoring to be safe`);
+          return { success: true, order_number: orderData.name };
+        }
+
         return await this.handleOrderCreated(orderData);
       }
 
@@ -254,6 +269,7 @@ class OrderWebhookHandler {
       });
 
       const currentItemIds = new Set();
+      let itemsChanged = false; // 追踪是否真的有 item 增减
 
       console.log('\n=== Processing Updated Order ===');
       console.log('Incoming items from Shopify (after refunds):', activeLineItems.length);
@@ -343,6 +359,7 @@ class OrderWebhookHandler {
         if (existingGroup.length === 0) {
           // 新增的 item（订单编辑后加了新产品）
           console.log(`  Action: NEW ITEM`);
+          itemsChanged = true;
           const insertLineItem = db.prepare(`
             INSERT INTO line_items (
               shopify_order_id, order_number, shopify_line_item_id, quantity,
@@ -378,6 +395,7 @@ class OrderWebhookHandler {
           // 数量增加（订单编辑后增加了数量）
           const diff = item.quantity - totalExistingQty;
           console.log(`  Action: INCREASE (diff: ${diff})`);
+          itemsChanged = true;
           
           const insertLineItem = db.prepare(`
             INSERT INTO line_items (
@@ -413,6 +431,7 @@ class OrderWebhookHandler {
         } else if (item.quantity < totalExistingQty) {
           // 数量减少（订单编辑后减少了数量）
           console.log(`  Action: DECREASE`);
+          itemsChanged = true;
           
           let remaining = totalExistingQty - item.quantity;
           existingGroup.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
@@ -445,6 +464,7 @@ class OrderWebhookHandler {
         console.log(`Checking ${baseId}: in currentItemIds? ${currentItemIds.has(baseId)}`);
         if (!currentItemIds.has(baseId)) {
           console.log(`  Action: ITEM REMOVED - ${baseId}`);
+          itemsChanged = true;
           for (const item of group) {
             console.log(`    Deleting line_item ${item.id}`);
             await db.prepare('DELETE FROM line_items WHERE id = ?').run(item.id);
@@ -459,21 +479,28 @@ class OrderWebhookHandler {
         ? 'fulfilled'
         : newFulfillmentStatus;
 
-      // 重置所有现有 line_items 的 packer_status 为 'packing'
-      // 任何订单 update（增加或减少 item）都需要打包工重新核对，所以全部 uncheck
-      await db.prepare(`
-        UPDATE line_items
-        SET packer_status = 'packing', updated_at = CURRENT_TIMESTAMP
-        WHERE shopify_order_id = ?
-      `).run(orderData.id.toString());
+      // 只有当 item 真的发生了增减，才重置 packer 状态
+      // 如果 orders/updated 只是支付确认、备注修改等与 item 无关的变化，不重置
+      if (itemsChanged) {
+        console.log(`Items changed — resetting packer status for order ${orderData.name}`);
 
-      // 如果订单状态是 'ready'，重置回 'packing'
-      // holding 和 waiting 状态不受影响
-      if (existingOrder.status === 'ready') {
+        // 重置所有现有 line_items 的 packer_status 为 'packing'
         await db.prepare(`
-          UPDATE orders SET status = 'packing', updated_at = CURRENT_TIMESTAMP
+          UPDATE line_items
+          SET packer_status = 'packing', updated_at = CURRENT_TIMESTAMP
           WHERE shopify_order_id = ?
         `).run(orderData.id.toString());
+
+        // 如果订单状态是 'ready'，重置回 'packing'
+        // holding 和 waiting 状态不受影响
+        if (existingOrder.status === 'ready') {
+          await db.prepare(`
+            UPDATE orders SET status = 'packing', updated_at = CURRENT_TIMESTAMP
+            WHERE shopify_order_id = ?
+          `).run(orderData.id.toString());
+        }
+      } else {
+        console.log(`No item changes detected — packer status preserved for order ${orderData.name}`);
       }
 
       await db.prepare(`
