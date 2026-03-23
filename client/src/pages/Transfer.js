@@ -39,6 +39,9 @@ const Transfer = () => {
   // null = no filter, otherwise filter by this value
   const [taskDateFilter, setTaskDateFilter] = useState(null);
   const [shopifyTransferFilter, setShopifyTransferFilter] = useState(null);
+  const [transferValidation, setTransferValidation] = useState(null); // result from validate API
+  const [isValidating, setIsValidating] = useState(false);
+  const [isMarkingTransferred, setIsMarkingTransferred] = useState(false);
 
   const showToast = (message) => {
     setToastMessage(message);
@@ -285,9 +288,41 @@ const Transfer = () => {
     setTaskDateFilter(prev => prev === titleDate ? null : titleDate);
   };
 
-  const handleShopifyLabelClick = (transferNumber) => {
+  const handleShopifyLabelClick = async (transferNumber) => {
     setTaskDateFilter(null);
-    setShopifyTransferFilter(prev => prev === transferNumber ? null : transferNumber);
+    const isDeselecting = shopifyTransferFilter === transferNumber;
+    setShopifyTransferFilter(isDeselecting ? null : transferNumber);
+    setTransferValidation(null);
+
+    if (!isDeselecting) {
+      setIsValidating(true);
+      try {
+        const res = await axios.get(`/api/shopify-transfer/validate/${transferNumber}`);
+        setTransferValidation(res.data);
+      } catch (err) {
+        setTransferValidation({ error: err.response?.data?.error || 'Failed to validate transfer' });
+      } finally {
+        setIsValidating(false);
+      }
+    }
+  };
+
+  const handleMarkAsTransferred = async () => {
+    if (!shopifyTransferFilter) return;
+    setIsMarkingTransferred(true);
+    try {
+      await axios.post('/api/shopify-transfer/mark-transferred', {
+        transferNumber: shopifyTransferFilter
+      });
+      showToast(`Transfer #${shopifyTransferFilter} marked as transferred`);
+      setShopifyTransferFilter(null);
+      setTransferValidation(null);
+      await fetchItems();
+    } catch (err) {
+      showToast(`Failed: ${err.response?.data?.error || err.message}`);
+    } finally {
+      setIsMarkingTransferred(false);
+    }
   };
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -569,16 +604,83 @@ const Transfer = () => {
     received: items.filter(i => i.status === 'received' || i.status === 'found').length,
   };
 
+  // ── Shopify transfer validation banner ──────────────────────────────────────
+  const shopifyValidationBanner = shopifyTransferFilter ? (() => {
+    if (isValidating) {
+      return (
+        <Banner tone="info">
+          Checking transfer #{shopifyTransferFilter} in Shopify...
+        </Banner>
+      );
+    }
+    if (!transferValidation) return null;
+    if (transferValidation.error) {
+      return <Banner tone="critical">{transferValidation.error}</Banner>;
+    }
+
+    const { isValid, allReceived, canMarkAsTransferred, mismatches, shopifyStatus } = transferValidation;
+
+    // All received + match → show Mark as Transferred button (only if draft)
+    if (canMarkAsTransferred && shopifyStatus === 'DRAFT') {
+      return (
+        <Banner tone="success">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+            <span>All items received and match Shopify transfer #{shopifyTransferFilter}.</span>
+            <button
+              onClick={handleMarkAsTransferred}
+              disabled={isMarkingTransferred}
+              style={{
+                backgroundColor: '#008060',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                padding: '6px 14px',
+                fontSize: '13px',
+                fontWeight: '600',
+                cursor: isMarkingTransferred ? 'not-allowed' : 'pointer',
+                opacity: isMarkingTransferred ? 0.7 : 1,
+              }}
+            >
+              {isMarkingTransferred ? 'Processing...' : 'Mark as Transferred'}
+            </button>
+          </div>
+        </Banner>
+      );
+    }
+
+    // All received but content doesn't match
+    if (allReceived && !isValid) {
+      return (
+        <Banner tone="critical">
+          Content does not match Shopify transfer #{shopifyTransferFilter}.
+          {mismatches && mismatches.length > 0 && (
+            <div style={{ marginTop: '4px' }}>
+              {mismatches.map((m, i) => <div key={i} style={{ fontSize: '12px' }}>{m}</div>)}
+            </div>
+          )}
+        </Banner>
+      );
+    }
+
+    // Not all received yet — show nothing (per requirement)
+    return null;
+  })() : null;
+
   const filterBanner = (taskDateFilter || shopifyTransferFilter) ? (
     <Banner
       tone="info"
-      onDismiss={() => { setTaskDateFilter(null); setShopifyTransferFilter(null); }}
+      onDismiss={() => { setTaskDateFilter(null); setShopifyTransferFilter(null); setTransferValidation(null); }}
     >
       {taskDateFilter
         ? `Showing items in Connecteam task: ${taskDateFilter}`
-        : `Showing items in Shopify transfer: ${shopifyTransferFilter}`
+        : `Showing items in Shopify transfer: #${shopifyTransferFilter}`
       }
-      {' '}<button onClick={() => { setTaskDateFilter(null); setShopifyTransferFilter(null); }} style={{ background: 'none', border: 'none', color: '#005bd3', cursor: 'pointer', padding: 0, fontSize: '14px' }}>Clear filter</button>
+      {' '}<button
+        onClick={() => { setTaskDateFilter(null); setShopifyTransferFilter(null); setTransferValidation(null); }}
+        style={{ background: 'none', border: 'none', color: '#005bd3', cursor: 'pointer', padding: 0, fontSize: '14px' }}
+      >
+        Clear filter
+      </button>
     </Banner>
   ) : null;
 
@@ -641,6 +743,13 @@ const Transfer = () => {
             {filterBanner && (
               <Layout.Section>
                 {filterBanner}
+              </Layout.Section>
+            )}
+
+            {/* Shopify transfer validation banner */}
+            {shopifyValidationBanner && (
+              <Layout.Section>
+                {shopifyValidationBanner}
               </Layout.Section>
             )}
 
