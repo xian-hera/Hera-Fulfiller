@@ -14,6 +14,40 @@ const API_KEY = process.env.CONNECTEAM_API_KEY || '81e988c4-e5b0-4cf0-ab66-52223
 const TASK_BOARD_ID = 6434396;
 const CUSTOM_PUBLISHER_ID = 2095242; // "Online Transfer" publisher
 
+const EMOJI_MAP = {
+  '01': '🟫', '02': '🟧', '03': '🟨', '04': '🟩', '05': '⬛',
+  '06': '🟪', '07': '🟥', '08': '⬜', '09': '🟦', '11': '🔳'
+};
+
+// ── Helper: build subtask title for one transfer item ────────────────────────
+// For WIG type items, prepends wig_number from line_items table
+async function buildSubtaskTitle(item, loc) {
+  const B = item.quantity;
+  const pcText = B > 1 ? 'pcs' : 'pc';
+  const D = item.sku || '';
+  const E = item.order_number || '';
+  const emoji = EMOJI_MAP[loc] || '⬜';
+  const A = `${emoji}${loc}${emoji}`;
+
+  // For WIG type, look up wig_number from line_items
+  let wigPrefix = '';
+  if (item.product_type && item.product_type.toUpperCase() === 'WIG') {
+    try {
+      const lineItem = await db.prepare(
+        'SELECT wig_number FROM line_items WHERE id = ?'
+      ).get(item.line_item_id);
+      if (lineItem?.wig_number) {
+        wigPrefix = `${lineItem.wig_number} `;
+      }
+    } catch (err) {
+      console.error(`Failed to fetch wig_number for line_item ${item.line_item_id}:`, err.message);
+    }
+  }
+
+  const C = `${wigPrefix}${item.custom_name || item.title || ''}`;
+  return `${A}  ${B} ${pcText} ----- ${C} SKU ${D}  #${E}`;
+}
+
 // Label IDs (confirmed via API testing)
 const LABEL_IDS = {
   'WEB':                  '660eedbd18d2595ee1c36e9b',
@@ -455,19 +489,7 @@ router.post('/publish-task', async (req, res) => {
     for (const loc of sortedLocationOrder) {
       const locItems = items.filter(i => i.transfer_from === loc);
       for (const item of locItems) {
-        // Get copy text for this item
-        const B = item.quantity;
-        const pcText = B > 1 ? 'pcs' : 'pc';
-        const C = item.custom_name || item.title || '';
-        const D = item.sku || '';
-        const E = item.order_number || '';
-        const EMOJI_MAP = {
-          '01': '🟫', '02': '🟧', '03': '🟨', '04': '🟩', '05': '⬛',
-          '06': '🟪', '07': '🟥', '08': '⬜', '09': '🟦', '11': '🔳'
-        };
-        const emoji = EMOJI_MAP[loc] || '⬜';
-        const A = `${emoji}${loc}${emoji}`;
-        const subtaskTitle = `${A}  ${B} ${pcText} ----- ${C} SKU ${D}  #${E}`;
+        const subtaskTitle = await buildSubtaskTitle(item, loc);
         subtasks.push(subtaskTitle);
       }
     }
@@ -674,9 +696,14 @@ router.post('/add-to-task', async (req, res) => {
       labelIds: newLabelIds,
       description: convertDescriptionForPut(existingTask.description),
     };
+    // 删除不应该在 PUT 里传的字段
     delete updatePayload.id;
     delete updatePayload.isArchived;
     delete updatePayload.subTasks;
+    // startTime 和 dueDate 如果是过去的时间会被 Connecteam 拒绝（400）
+    // PUT update 时不传这两个字段，让 Connecteam 保留原来的值
+    delete updatePayload.startTime;
+    delete updatePayload.dueDate;
 
     await api.put(
       `/tasks/v1/taskboards/${TASK_BOARD_ID}/tasks/${latestTask.task_id}`,
@@ -684,11 +711,6 @@ router.post('/add-to-task', async (req, res) => {
     );
 
     // ── Add subtasks ──────────────────────────────────────────────────────────
-    const EMOJI_MAP = {
-      '01': '🟫', '02': '🟧', '03': '🟨', '04': '🟩', '05': '⬛',
-      '06': '🟪', '07': '🟥', '08': '⬜', '09': '🟦', '11': '🔳'
-    };
-
     const subtaskOrder = locationOrder && locationOrder.length > 0
       ? locationOrder.filter(l => newLocations.includes(l))
       : [...newLocations].sort();
@@ -697,14 +719,7 @@ router.post('/add-to-task', async (req, res) => {
     for (const loc of subtaskOrder) {
       const locItems = items.filter(i => i.transfer_from === loc);
       for (const item of locItems) {
-        const B = item.quantity;
-        const pcText = B > 1 ? 'pcs' : 'pc';
-        const C = item.custom_name || item.title || '';
-        const D = item.sku || '';
-        const E = item.order_number || '';
-        const emoji = EMOJI_MAP[loc] || '⬜';
-        const A = `${emoji}${loc}${emoji}`;
-        const subtaskTitle = `${A}  ${B} ${pcText} ----- ${C} SKU ${D}  #${E}`;
+        const subtaskTitle = await buildSubtaskTitle(item, loc);
 
         try {
           await api.post(
@@ -759,7 +774,16 @@ router.post('/add-to-task', async (req, res) => {
     });
 
   } catch (err) {
-    console.error('Error adding to Connecteam task:', err);
+    console.error('Error adding to Connecteam task:', err.message);
+    if (err.response) {
+      console.error('Connecteam API status:', err.response.status);
+      console.error('Connecteam API response:', JSON.stringify(err.response.data, null, 2));
+      return res.status(500).json({
+        error: err.message,
+        details: err.response.data,
+        status: err.response.status,
+      });
+    }
     res.status(500).json({ error: err.message });
   }
 });
