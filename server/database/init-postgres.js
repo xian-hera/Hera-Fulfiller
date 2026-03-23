@@ -65,8 +65,17 @@ async function initPostgres() {
       variant_title TEXT,
       picker_status TEXT DEFAULT 'picking',
       packer_status TEXT DEFAULT 'packing',
+      version INTEGER DEFAULT 0,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Picker sessions table — tracks active users for smart polling
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS picker_sessions (
+      session_id TEXT PRIMARY KEY,
+      last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
 
@@ -227,6 +236,8 @@ async function initPostgres() {
     [`ALTER TABLE transfer_items ADD COLUMN IF NOT EXISTS shopify_transfer_id TEXT`, 'shopify_transfer_id to transfer_items'],
     [`ALTER TABLE transfer_items ADD COLUMN IF NOT EXISTS shopify_transfer_number TEXT`, 'shopify_transfer_number to transfer_items'],
     [`ALTER TABLE transfer_items ADD COLUMN IF NOT EXISTS from_location_changed INTEGER DEFAULT 0`, 'from_location_changed to transfer_items'],
+    // 🆕 Picker optimistic locking
+    [`ALTER TABLE line_items ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 0`, 'version to line_items'],
   ];
 
   for (const [sql, desc] of migrations) {

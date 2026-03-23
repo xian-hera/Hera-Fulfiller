@@ -181,45 +181,171 @@ router.get('/items', async (req, res) => {
   }
 });
 
-// Update item status
+// Update item status — with optimistic locking and transfer cleanup
 router.patch('/items/:id/status', async (req, res) => {
   try {
     const { id } = req.params;
-    const { status } = req.body;
+    const { status, version } = req.body;
 
+    // ── Optimistic locking ──────────────────────────────────────────────────
+    // If version is provided, check for conflicts
+    if (version !== undefined && version !== null) {
+      const current = await db.prepare('SELECT * FROM line_items WHERE id = ?').get(id);
+      if (!current) return res.status(404).json({ error: 'Item not found' });
+
+      if (current.version !== version) {
+        // Conflict — return current state so frontend can show the right message
+        return res.status(409).json({
+          conflict: true,
+          currentStatus: current.picker_status,
+          currentVersion: current.version,
+          message: `Item status has been changed by another user`
+        });
+      }
+    }
+
+    // Fetch current item before update
+    const item = await db.prepare('SELECT * FROM line_items WHERE id = ?').get(id);
+    if (!item) return res.status(404).json({ error: 'Item not found' });
+
+    const previousStatus = item.picker_status;
+
+    // Update status and increment version
     await db.prepare(`
       UPDATE line_items 
-      SET picker_status = ?, updated_at = CURRENT_TIMESTAMP
+      SET picker_status = ?, version = version + 1, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(status, id);
 
-    // If status is 'missing', create transfer item
+    // ── Handle missing → create transfer item ───────────────────────────────
     if (status === 'missing') {
-      const item = await db.prepare('SELECT * FROM line_items WHERE id = ?').get(id);
-      
-      await db.prepare(`
-        INSERT INTO transfer_items (
-          line_item_id, shopify_order_id, order_number, quantity, sku, 
-          image_url, title, name, brand, size, weight, weight_unit,
-          url_handle, product_type, variant_title, custom_name, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'transferring')
-      `).run(
-        item.id, item.shopify_order_id, item.order_number, item.quantity, item.sku,
-        item.image_url, item.title, item.name, item.brand, item.size, item.weight, item.weight_unit,
-        item.url_handle, item.product_type, item.variant_title, item.custom_name
-      );
+      // Check if a transferring item already exists to avoid duplicates
+      const existingTransfer = await db.prepare(
+        'SELECT id FROM transfer_items WHERE line_item_id = ? AND status = ?'
+      ).get(id, 'transferring');
+
+      if (!existingTransfer) {
+        await db.prepare(`
+          INSERT INTO transfer_items (
+            line_item_id, shopify_order_id, order_number, quantity, sku, 
+            image_url, title, name, brand, size, weight, weight_unit,
+            url_handle, product_type, variant_title, custom_name, status
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'transferring')
+        `).run(
+          item.id, item.shopify_order_id, item.order_number, item.quantity, item.sku,
+          item.image_url, item.title, item.name, item.brand, item.size, item.weight, item.weight_unit,
+          item.url_handle, item.product_type, item.variant_title, item.custom_name
+        );
+      }
     }
 
-    // 🆕 当状态从 'missing' 改为 'picked' 时，不删除 transfer_items
-    // Transfer items 只能通过 Transfer 页面的 Clear Mode 手动删除
-    // if (status === 'picked') {
-    //   await db.prepare('DELETE FROM transfer_items WHERE line_item_id = ?').run(id);
-    // }
+    // ── Handle picked → check transfer items ────────────────────────────────
+    let transferWarning = null;
+    if (status === 'picked') {
+      // Check for transferring items (auto-delete)
+      const transferringItem = await db.prepare(
+        "SELECT id FROM transfer_items WHERE line_item_id = ? AND status = 'transferring'"
+      ).get(id);
+      if (transferringItem) {
+        await db.prepare("DELETE FROM transfer_items WHERE id = ?").run(transferringItem.id);
+      }
 
-    res.json({ success: true });
+      // Check for waiting items (warn user)
+      const waitingItem = await db.prepare(
+        "SELECT transfer_from FROM transfer_items WHERE line_item_id = ? AND status = 'waiting'"
+      ).get(id);
+      if (waitingItem) {
+        transferWarning = {
+          type: 'waiting',
+          location: waitingItem.transfer_from
+        };
+      }
+    }
+
+    // Get updated item with new version
+    const updated = await db.prepare('SELECT version, picker_status FROM line_items WHERE id = ?').get(id);
+
+    res.json({ success: true, newVersion: updated.version, transferWarning });
   } catch (error) {
     console.error('Error updating item status:', error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/picker/active-users — returns count of active picker sessions
+router.get('/active-users', async (req, res) => {
+  try {
+    // Clean up sessions older than 30 seconds
+    try {
+      await db.prepare(
+        "DELETE FROM picker_sessions WHERE last_seen < NOW() - INTERVAL '30 seconds'"
+      ).run();
+    } catch {
+      await db.prepare(
+        "DELETE FROM picker_sessions WHERE last_seen < datetime('now', '-30 seconds')"
+      ).run();
+    }
+
+    const result = await db.prepare('SELECT COUNT(*) as count FROM picker_sessions').get();
+    res.json({ count: parseInt(result.count) || 0 });
+  } catch (error) {
+    res.json({ count: 0 });
+  }
+});
+
+// POST /api/picker/heartbeat — register/refresh active session
+router.post('/heartbeat', async (req, res) => {
+  try {
+    const { sessionId } = req.body;
+    if (!sessionId) return res.json({ success: false });
+
+    await db.prepare(`
+      INSERT INTO picker_sessions (session_id, last_seen)
+      VALUES (?, CURRENT_TIMESTAMP)
+      ON CONFLICT (session_id) DO UPDATE SET last_seen = CURRENT_TIMESTAMP
+    `).run(sessionId);
+
+    // Clean up old sessions while we're here
+    try {
+      await db.prepare(
+        "DELETE FROM picker_sessions WHERE last_seen < NOW() - INTERVAL '30 seconds'"
+      ).run();
+    } catch {
+      await db.prepare(
+        "DELETE FROM picker_sessions WHERE last_seen < datetime('now', '-30 seconds')"
+      ).run();
+    }
+
+    const result = await db.prepare('SELECT COUNT(*) as count FROM picker_sessions').get();
+    res.json({ success: true, activeUsers: parseInt(result.count) || 0 });
+  } catch (error) {
+    res.json({ success: false, activeUsers: 1 });
+  }
+});
+
+// DELETE /api/picker/heartbeat — remove session on page unload
+router.delete('/heartbeat', async (req, res) => {
+  try {
+    const { sessionId } = req.body;
+    if (sessionId) {
+      await db.prepare('DELETE FROM picker_sessions WHERE session_id = ?').run(sessionId);
+    }
+    res.json({ success: true });
+  } catch {
+    res.json({ success: false });
+  }
+});
+
+// POST /api/picker/heartbeat/remove — remove session (used by sendBeacon and axios on unmount)
+router.post('/heartbeat/remove', async (req, res) => {
+  try {
+    const { sessionId } = req.body;
+    if (sessionId) {
+      await db.prepare('DELETE FROM picker_sessions WHERE session_id = ?').run(sessionId);
+    }
+    res.json({ success: true });
+  } catch {
+    res.json({ success: false });
   }
 });
 

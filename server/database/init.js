@@ -61,8 +61,17 @@ const initDatabase = async () => {
           variant_title TEXT,
           picker_status TEXT DEFAULT 'picking',
           packer_status TEXT DEFAULT 'packing',
+          version INTEGER DEFAULT 0,
           created_at TEXT DEFAULT CURRENT_TIMESTAMP,
           updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      // Picker sessions table
+      db.db.exec(`
+        CREATE TABLE IF NOT EXISTS picker_sessions (
+          session_id TEXT PRIMARY KEY,
+          last_seen TEXT DEFAULT CURRENT_TIMESTAMP
         )
       `);
 
@@ -226,6 +235,8 @@ const initDatabase = async () => {
       addColumnIfNotExists('transfer_items', 'shopify_transfer_id', 'TEXT');
       addColumnIfNotExists('transfer_items', 'shopify_transfer_number', 'TEXT');
       addColumnIfNotExists('transfer_items', 'from_location_changed', 'INTEGER DEFAULT 0');
+      // 🆕 Picker optimistic locking
+      addColumnIfNotExists('line_items', 'version', 'INTEGER DEFAULT 0');
 
       // ── Default data ────────────────────────────────────────────────────────
 

@@ -17,7 +17,9 @@ import {
   BlockStack,
   Banner,
   InlineStack,
-  Box
+  Box,
+  Toast,
+  Frame
 } from '@shopify/polaris';
 import { SortIcon, ImageIcon } from '@shopify/polaris-icons';
 import NumericKeypad from '../components/NumericKeypad';
@@ -27,19 +29,30 @@ const Picker = () => {
   const [items, setItems] = useState([]);
   const [filteredItems, setFilteredItems] = useState([]);
   const [isSorted, setIsSorted] = useState(() => {
-    // 🆕 从 localStorage 恢复排序状态
     return localStorage.getItem('pickerSortEnabled') === 'true';
   });
   const [statusFilter, setStatusFilter] = useState(['picking', 'missing', 'picked']);
   const [selectedImage, setSelectedImage] = useState(null);
   const [quantityModal, setQuantityModal] = useState(null);
   const [pickedQuantity, setPickedQuantity] = useState('');
-  // 🆕 MTL10 库存相关
   const [mtl10Inventory, setMtl10Inventory] = useState({});
   const [isLoadingInventory, setIsLoadingInventory] = useState(false);
-  // 🆕 Clean 功能相关
   const [cleanModal, setCleanModal] = useState(null);
   const [isCheckingClean, setIsCheckingClean] = useState(false);
+  // 🆕 Conflict toast
+  const [conflictToast, setConflictToast] = useState(null); // { message }
+  // 🆕 Transfer warning toast
+  const [transferToast, setTransferToast] = useState(null); // { message }
+  // 🆕 Session ID for heartbeat (stable across renders)
+  const sessionIdRef = React.useRef(
+    localStorage.getItem('pickerSessionId') || (() => {
+      const id = 'sess_' + Math.random().toString(36).slice(2) + '_' + Date.now();
+      localStorage.setItem('pickerSessionId', id);
+      return id;
+    })()
+  );
+  const pollingRef = React.useRef(null);
+  const activeUsersRef = React.useRef(1);
 
   // 🆕 计算每个状态的实时数量（按 quantity 累加）
   const getStatusCounts = useCallback(() => {
@@ -90,9 +103,85 @@ const Picker = () => {
     setFilteredItems(filtered);
   }, [items, statusFilter, isSorted, sortItems]);
 
+  // 🆕 Smart polling: start/stop based on active user count
+  const startPolling = useCallback(() => {
+    if (pollingRef.current) return;
+    pollingRef.current = setInterval(async () => {
+      try {
+        const response = await axios.get('/api/picker/items');
+        // Merge: preserve local version numbers, update server data
+        setItems(prev => {
+          const prevMap = new Map(prev.map(i => [i.id, i]));
+          return response.data.map(serverItem => {
+            const local = prevMap.get(serverItem.id);
+            return serverItem;
+          });
+        });
+      } catch {}
+    }, 5000);
+  }, []);
+
+  const stopPolling = useCallback(() => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+  }, []);
+
+  // 🆕 Heartbeat: register presence and check active user count
+  const sendHeartbeat = useCallback(async () => {
+    try {
+      const res = await axios.post('/api/picker/heartbeat', {
+        sessionId: sessionIdRef.current
+      });
+      const count = res.data.activeUsers || 1;
+      activeUsersRef.current = count;
+      if (count >= 2) {
+        startPolling();
+      } else {
+        stopPolling();
+      }
+    } catch {}
+  }, [startPolling, stopPolling]);
+
   useEffect(() => {
     fetchItems();
-  }, []);
+    sendHeartbeat();
+
+    // Send heartbeat every 15 seconds
+    const heartbeatInterval = setInterval(sendHeartbeat, 15000);
+
+    // Handle page visibility (phone switching apps / lock screen)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchItems(); // Immediate refresh when coming back
+        sendHeartbeat();
+      } else {
+        stopPolling();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // Remove session on page close
+    const handleUnload = () => {
+      // sendBeacon is the only reliable way to send on page close
+      const blob = new Blob([JSON.stringify({ sessionId: sessionIdRef.current })], 
+        { type: 'application/json' });
+      navigator.sendBeacon('/api/picker/heartbeat/remove', blob);
+    };
+    window.addEventListener('beforeunload', handleUnload);
+
+    return () => {
+      clearInterval(heartbeatInterval);
+      stopPolling();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('beforeunload', handleUnload);
+      // Clean up session on component unmount
+      axios.post('/api/picker/heartbeat/remove', {
+        sessionId: sessionIdRef.current
+      }).catch(() => {});
+    };
+  }, [sendHeartbeat, stopPolling]);
 
   useEffect(() => {
     applyFilters();
@@ -226,14 +315,65 @@ const Picker = () => {
   };
 
   const updateItemStatus = async (itemId, newStatus) => {
+    // Find current item to get its version
+    const currentItem = items.find(i => i.id === itemId);
+    const currentVersion = currentItem?.version ?? 0;
+
     try {
-      await axios.patch(`/api/picker/items/${itemId}/status`, { status: newStatus });
-      setItems(items.map(item => 
-        item.id === itemId ? { ...item, picker_status: newStatus } : item
+      const res = await axios.patch(`/api/picker/items/${itemId}/status`, {
+        status: newStatus,
+        version: currentVersion
+      });
+
+      // Update local state with new version
+      setItems(prev => prev.map(item =>
+        item.id === itemId
+          ? { ...item, picker_status: newStatus, version: res.data.newVersion ?? (currentVersion + 1) }
+          : item
       ));
-      // isSorted 状态会保持，applyFilters 会自动重新排序
+
+      // Transfer warning: item is waiting for transfer
+      if (res.data.transferWarning?.type === 'waiting') {
+        const loc = res.data.transferWarning.location;
+        setTransferToast({
+          message: `⚠️ Item is waiting for transfer from MTL${loc}`
+        });
+        setTimeout(() => setTransferToast(null), 5000);
+      }
+
     } catch (error) {
-      console.error('Error updating status:', error);
+      if (error.response?.status === 409) {
+        // Conflict — another user changed this item
+        const currentStatus = error.response.data.currentStatus;
+        const newVersion = error.response.data.currentVersion;
+
+        // Update local state to reflect actual current status
+        setItems(prev => prev.map(item =>
+          item.id === itemId
+            ? { ...item, picker_status: currentStatus, version: newVersion }
+            : item
+        ));
+
+        // Show appropriate conflict message
+        let msg = '';
+        if (currentStatus === 'picked') {
+          msg = 'Item has already been picked';
+        } else if (currentStatus === 'missing') {
+          msg = 'Item has already been marked as missing';
+        } else {
+          msg = `Item status changed to: ${currentStatus}`;
+        }
+
+        // Special case: was missing, B picked it → also clean up transfer
+        if (currentStatus === 'picked' && newStatus === 'picked') {
+          msg = 'Status changed from missing to picked by another user';
+        }
+
+        setConflictToast({ message: msg });
+        setTimeout(() => setConflictToast(null), 5000);
+      } else {
+        console.error('Error updating status:', error);
+      }
     }
   };
 
@@ -525,7 +665,8 @@ const Picker = () => {
   const statusCounts = getStatusCounts();
 
   return (
-    <>
+    <Frame>
+      <>
       <style>{`
         /* Picker 响应式样式 */
         .picker-item-container {
@@ -924,6 +1065,22 @@ const Picker = () => {
         </Modal>
       )}
     </>
+      {/* Conflict toast */}
+      {conflictToast && (
+        <Toast
+          content={conflictToast.message}
+          error
+          onDismiss={() => setConflictToast(null)}
+        />
+      )}
+      {/* Transfer warning toast */}
+      {transferToast && (
+        <Toast
+          content={transferToast.message}
+          onDismiss={() => setTransferToast(null)}
+        />
+      )}
+    </Frame>
   );
 };
 
