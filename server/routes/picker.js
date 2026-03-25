@@ -217,6 +217,18 @@ router.patch('/items/:id/status', async (req, res) => {
       WHERE id = ?
     `).run(status, id);
 
+    // ── Handle picking (undo) → delete transferring item immediately ──────────
+    // When a missing item is undone, immediately remove its transferring entry
+    if (status === 'picking') {
+      const transferringItem = await db.prepare(
+        "SELECT id FROM transfer_items WHERE line_item_id = ? AND status = 'transferring'"
+      ).get(id);
+      if (transferringItem) {
+        await db.prepare("DELETE FROM transfer_items WHERE id = ?").run(transferringItem.id);
+        console.log(`Undo: deleted transferring item for line_item ${id}`);
+      }
+    }
+
     // ── Handle missing → create transfer item ───────────────────────────────
     if (status === 'missing') {
       // Check if a transferring item already exists to avoid duplicates
@@ -239,18 +251,10 @@ router.patch('/items/:id/status', async (req, res) => {
       }
     }
 
-    // ── Handle picked → check transfer items ────────────────────────────────
+    // ── Handle picked → warn if waiting transfer exists ─────────────────────
+    // Note: no auto-delete of transferring here — undo (picking) handles that
     let transferWarning = null;
     if (status === 'picked') {
-      // Check for transferring items (auto-delete)
-      const transferringItem = await db.prepare(
-        "SELECT id FROM transfer_items WHERE line_item_id = ? AND status = 'transferring'"
-      ).get(id);
-      if (transferringItem) {
-        await db.prepare("DELETE FROM transfer_items WHERE id = ?").run(transferringItem.id);
-      }
-
-      // Check for waiting items (warn user)
       const waitingItem = await db.prepare(
         "SELECT transfer_from FROM transfer_items WHERE line_item_id = ? AND status = 'waiting'"
       ).get(id);
