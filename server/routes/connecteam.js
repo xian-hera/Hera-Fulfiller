@@ -139,7 +139,7 @@ function convertDescriptionForPut(raw) {
 function buildTaskTitle(locationOrder, dateChoice) {
   // locationOrder: ['05', '01', '02'] → "5 - 1 - 2 - [WEB] Mar.07"
   const locNumbers = locationOrder.map(loc => parseInt(loc, 10).toString());
-  
+
   const date = new Date();
   if (dateChoice === 'tomorrow') {
     date.setDate(date.getDate() + 1);
@@ -651,12 +651,10 @@ router.post('/add-to-task', async (req, res) => {
     // Merge new locations into title order based on locationOrder provided
     for (const loc of (locationOrder || newLocations.sort())) {
       if (!newTitleLocations.includes(loc) && newLocations.includes(loc)) {
-        // Find the right insertion point based on locationOrder
         const orderIndex = (locationOrder || []).indexOf(loc);
         if (orderIndex === 0) {
           newTitleLocations.unshift(loc);
         } else {
-          // Insert after the previous location in locationOrder
           const prevLoc = (locationOrder || [])[orderIndex - 1];
           const prevIndex = newTitleLocations.indexOf(prevLoc);
           if (prevIndex >= 0) {
@@ -689,28 +687,22 @@ router.post('/add-to-task', async (req, res) => {
     }
 
     // ── PUT update the task ───────────────────────────────────────────────────
+    // 明确只传需要的字段，绝对不包含 subTasks，避免 PUT 清空旧 subtask
     const updatePayload = {
-      ...existingTask,
       title: newTitle,
+      status: existingTask.status,
+      type: existingTask.type,
       userIds: [...existingUserIds],
       labelIds: newLabelIds,
       description: convertDescriptionForPut(existingTask.description),
     };
-    // 删除不应该在 PUT 里传的字段
-    delete updatePayload.id;
-    delete updatePayload.isArchived;
-    delete updatePayload.subTasks;
-    // startTime 和 dueDate 如果是过去的时间会被 Connecteam 拒绝（400）
-    // PUT update 时不传这两个字段，让 Connecteam 保留原来的值
-    delete updatePayload.startTime;
-    delete updatePayload.dueDate;
 
     await api.put(
       `/tasks/v1/taskboards/${TASK_BOARD_ID}/tasks/${latestTask.task_id}`,
       updatePayload
     );
 
-    // ── Add subtasks ──────────────────────────────────────────────────────────
+    // ── Add new subtasks (旧 subtask 不受影响，直接追加新的) ─────────────────
     const subtaskOrder = locationOrder && locationOrder.length > 0
       ? locationOrder.filter(l => newLocations.includes(l))
       : [...newLocations].sort();
@@ -720,7 +712,6 @@ router.post('/add-to-task', async (req, res) => {
       const locItems = items.filter(i => i.transfer_from === loc);
       for (const item of locItems) {
         const subtaskTitle = await buildSubtaskTitle(item, loc);
-
         try {
           await api.post(
             `/tasks/v1/taskboards/${TASK_BOARD_ID}/tasks/${latestTask.task_id}/sub-tasks`,
