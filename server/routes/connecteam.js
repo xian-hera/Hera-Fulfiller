@@ -697,6 +697,8 @@ router.post('/add-to-task', async (req, res) => {
       description: convertDescriptionForPut(existingTask.description),
     };
 
+    console.log('PUT payload:', JSON.stringify(updatePayload, null, 2));
+    
     await api.put(
       `/tasks/v1/taskboards/${TASK_BOARD_ID}/tasks/${latestTask.task_id}`,
       updatePayload
