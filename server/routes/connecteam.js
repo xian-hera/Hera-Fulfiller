@@ -20,7 +20,6 @@ const EMOJI_MAP = {
 };
 
 // ── Helper: build subtask title for one transfer item ────────────────────────
-// For WIG type items, prepends wig_number from line_items table
 async function buildSubtaskTitle(item, loc) {
   const B = item.quantity;
   const pcText = B > 1 ? 'pcs' : 'pc';
@@ -29,7 +28,6 @@ async function buildSubtaskTitle(item, loc) {
   const emoji = EMOJI_MAP[loc] || '⬜';
   const A = `${emoji}${loc}${emoji}`;
 
-  // For WIG type, look up wig_number from line_items
   let wigPrefix = '';
   if (item.product_type && item.product_type.toUpperCase() === 'WIG') {
     try {
@@ -84,7 +82,6 @@ let tokenExpiry = null;
 // ── OAuth Token ──────────────────────────────────────────────────────────────
 
 async function getAccessToken() {
-  // Reuse token if still valid (with 60s buffer)
   if (accessToken && tokenExpiry && Date.now() < tokenExpiry - 60000) {
     return accessToken;
   }
@@ -105,7 +102,6 @@ async function getAccessToken() {
   );
 
   accessToken = response.data.access_token;
-  // Tokens typically last 1 hour
   tokenExpiry = Date.now() + (response.data.expires_in || 3600) * 1000;
   return accessToken;
 }
@@ -122,7 +118,6 @@ async function getApiClient() {
 }
 
 // ── Helper: description format conversion ────────────────────────────────────
-// GET returns description as array of html blocks, PUT needs { content: string }
 function convertDescriptionForPut(raw) {
   if (!raw) return { content: '' };
   if (!Array.isArray(raw)) return raw;
@@ -137,7 +132,6 @@ function convertDescriptionForPut(raw) {
 
 // ── Helper: build task title ─────────────────────────────────────────────────
 function buildTaskTitle(locationOrder, dateChoice) {
-  // locationOrder: ['05', '01', '02'] → "5 - 1 - 2 - [WEB] Mar.07"
   const locNumbers = locationOrder.map(loc => parseInt(loc, 10).toString());
 
   const date = new Date();
@@ -156,13 +150,11 @@ function buildTaskTitle(locationOrder, dateChoice) {
 }
 
 function extractTitleDate(title) {
-  // "5 - 1 - 2 - [WEB] Mar.07" → "Mar.07"
   const match = title.match(/\[WEB\]\s*([A-Za-z]+\.\d+)/);
   return match ? match[1] : '';
 }
 
 function extractLocationsFromTitle(title) {
-  // "5 - 1 - 2 - [WEB] Mar.07" → ['05', '01', '02']
   const match = title.match(/^([\d\s\-]+)\s*-\s*\[WEB\]/);
   if (!match) return [];
   return match[1].split('-').map(n => n.trim().padStart(2, '0')).filter(Boolean);
@@ -170,7 +162,6 @@ function extractLocationsFromTitle(title) {
 
 // ── Helper: get due date timestamps ─────────────────────────────────────────
 function getTaskDates(dateChoice) {
-  // startTime = right now (cannot be in the past)
   const startTime = Math.floor(Date.now() / 1000);
 
   const dueDate = new Date();
@@ -304,7 +295,7 @@ router.post('/settings', async (req, res) => {
   }
 });
 
-// GET /api/connecteam/users  — get cached user list
+// GET /api/connecteam/users
 router.get('/users', async (req, res) => {
   try {
     const users = await db.prepare(
@@ -316,7 +307,7 @@ router.get('/users', async (req, res) => {
   }
 });
 
-// POST /api/connecteam/sync-users  — sync users from Connecteam API
+// POST /api/connecteam/sync-users
 router.post('/sync-users', async (req, res) => {
   try {
     const api = await getApiClient();
@@ -332,7 +323,6 @@ router.post('/sync-users', async (req, res) => {
       offset += limit;
     }
 
-    // Upsert into local cache
     for (const user of allUsers) {
       const userId = user.id || user.userId;
       await db.prepare(`
@@ -364,7 +354,7 @@ router.post('/sync-users', async (req, res) => {
   }
 });
 
-// GET /api/connecteam/search-user?name=xxx  — search user by name (for settings)
+// GET /api/connecteam/search-user?name=xxx
 router.get('/search-user', async (req, res) => {
   try {
     const { name } = req.query;
@@ -388,7 +378,7 @@ router.get('/search-user', async (req, res) => {
   }
 });
 
-// GET /api/connecteam/latest-task  — get the most recent WEB task from our DB
+// GET /api/connecteam/latest-task
 router.get('/latest-task', async (req, res) => {
   try {
     const task = await db.prepare(
@@ -400,7 +390,7 @@ router.get('/latest-task', async (req, res) => {
   }
 });
 
-// GET /api/connecteam/not-tasked  — get waiting items that are NOT tasked
+// GET /api/connecteam/not-tasked
 router.get('/not-tasked', async (req, res) => {
   try {
     const items = await db.prepare(`
@@ -417,7 +407,6 @@ router.get('/not-tasked', async (req, res) => {
 // POST /api/connecteam/publish-task
 // Body: { itemIds, locationOrder, dateChoice }
 
-// Simple in-memory dedup guard: store recent request hashes
 const recentPublishRequests = new Map();
 
 router.post('/publish-task', async (req, res) => {
@@ -428,7 +417,7 @@ router.post('/publish-task', async (req, res) => {
       return res.status(400).json({ error: 'No items selected' });
     }
 
-    // Dedup guard: same itemIds within 10 seconds = duplicate request
+    // Dedup guard
     const requestKey = JSON.stringify([...itemIds].sort());
     const lastRequest = recentPublishRequests.get(requestKey);
     if (lastRequest && Date.now() - lastRequest < 10000) {
@@ -436,18 +425,15 @@ router.post('/publish-task', async (req, res) => {
       return res.status(429).json({ error: 'Duplicate request. Please wait a moment before trying again.' });
     }
     recentPublishRequests.set(requestKey, Date.now());
-    // Clean up old entries
     for (const [key, time] of recentPublishRequests.entries()) {
       if (Date.now() - time > 30000) recentPublishRequests.delete(key);
     }
 
-    // Fetch items from DB
     const placeholders = itemIds.map(() => '?').join(',');
     const items = await db.prepare(
       `SELECT * FROM transfer_items WHERE id IN (${placeholders})`
     ).all(...itemIds);
 
-    // Get settings
     const settingsRows = await db.prepare('SELECT key, value FROM connecteam_settings').all();
     const settings = {};
     settingsRows.forEach(r => {
@@ -458,33 +444,27 @@ router.post('/publish-task', async (req, res) => {
     const defaultDescription = settings.default_description || 'Please double check the SKU and quantity, Thank you.';
     const locationMembersMap = settings.location_members || {};
 
-    // Determine unique locations from items
     const uniqueLocations = [...new Set(items.map(i => i.transfer_from).filter(Boolean))];
 
-    // Sort location order: use provided order, fallback to ascending
     const sortedLocationOrder = locationOrder && locationOrder.length > 0
       ? locationOrder.filter(l => uniqueLocations.includes(l))
       : [...uniqueLocations].sort();
-    // Add any locations not in the provided order
     uniqueLocations.forEach(loc => {
       if (!sortedLocationOrder.includes(loc)) sortedLocationOrder.push(loc);
     });
 
-    // Build assignee IDs: default + location members
     const assigneeIds = new Set(defaultAssigneeIds.map(Number));
     for (const loc of uniqueLocations) {
       const members = locationMembersMap[loc] || [];
       members.forEach(id => assigneeIds.add(Number(id)));
     }
 
-    // Build label IDs
     const labelIds = [LABEL_IDS['WAREHOUSE / DELIVERY'], LABEL_IDS['WEB']];
     uniqueLocations.forEach(loc => {
       const locLabel = LABEL_IDS[`MTL${loc}`];
       if (locLabel) labelIds.push(locLabel);
     });
 
-    // Build subtasks: grouped by location order, each item = one subtask
     const subtasks = [];
     for (const loc of sortedLocationOrder) {
       const locItems = items.filter(i => i.transfer_from === loc);
@@ -494,15 +474,12 @@ router.post('/publish-task', async (req, res) => {
       }
     }
 
-    // Build title
     const title = buildTaskTitle(sortedLocationOrder, dateChoice || 'today');
     const titleDate = extractTitleDate(title);
     const { startTime, dueDate } = getTaskDates(dateChoice || 'today');
 
-    // Call Connecteam API
     const api = await getApiClient();
 
-    // Create task
     const taskResponse = await api.post(
       `/tasks/v1/taskboards/${TASK_BOARD_ID}/tasks`,
       {
@@ -524,7 +501,6 @@ router.post('/publish-task', async (req, res) => {
       throw new Error('Task created but no ID returned');
     }
 
-    // Add subtasks
     for (const subtaskTitle of subtasks) {
       try {
         await api.post(
@@ -536,7 +512,6 @@ router.post('/publish-task', async (req, res) => {
       }
     }
 
-    // Save task to DB
     await db.prepare(`
       INSERT INTO connecteam_tasks (task_id, title, title_date, locations, item_count, status, updated_at)
       VALUES (?, ?, ?, ?, ?, 'published', CURRENT_TIMESTAMP)
@@ -548,7 +523,6 @@ router.post('/publish-task', async (req, res) => {
         updated_at = CURRENT_TIMESTAMP
     `).run(taskId, title, titleDate, JSON.stringify(sortedLocationOrder), items.length);
 
-    // Update transfer_items
     for (const item of items) {
       await db.prepare(`
         UPDATE transfer_items
@@ -557,12 +531,10 @@ router.post('/publish-task', async (req, res) => {
       `).run(taskId, titleDate, item.id);
     }
 
-    // Send messages to clocked-in managers
     const clockedInIds = await getClockedInUserIds(uniqueLocations);
     if (clockedInIds.length > 0) {
       await sendMessageToUsers(clockedInIds, api);
     } else {
-      // No one clocked in — send to all location members
       const allMemberIds = new Set();
       for (const loc of uniqueLocations) {
         const members = locationMembersMap[loc] || [];
@@ -606,7 +578,6 @@ router.post('/add-to-task', async (req, res) => {
       return res.status(400).json({ error: 'No items selected' });
     }
 
-    // Get the latest task from our DB
     const latestTask = await db.prepare(
       'SELECT * FROM connecteam_tasks ORDER BY created_at DESC LIMIT 1'
     ).get();
@@ -615,13 +586,11 @@ router.post('/add-to-task', async (req, res) => {
       return res.status(404).json({ error: 'No previous task found. Please publish a new task first.' });
     }
 
-    // Fetch items
     const placeholders = itemIds.map(() => '?').join(',');
     const items = await db.prepare(
       `SELECT * FROM transfer_items WHERE id IN (${placeholders})`
     ).all(...itemIds);
 
-    // Get settings
     const settingsRows = await db.prepare('SELECT key, value FROM connecteam_settings').all();
     const settings = {};
     settingsRows.forEach(r => {
@@ -629,7 +598,6 @@ router.post('/add-to-task', async (req, res) => {
     });
     const locationMembersMap = settings.location_members || {};
 
-    // New unique locations from items
     const newLocations = [...new Set(items.map(i => i.transfer_from).filter(Boolean))];
     const existingLocations = JSON.parse(latestTask.locations || '[]');
 
@@ -648,7 +616,6 @@ router.post('/add-to-task', async (req, res) => {
     const titleDate = extractTitleDate(existingTask.title);
     const newTitleLocations = [...titleLocations];
 
-    // Merge new locations into title order based on locationOrder provided
     for (const loc of (locationOrder || newLocations.sort())) {
       if (!newTitleLocations.includes(loc) && newLocations.includes(loc)) {
         const orderIndex = (locationOrder || []).indexOf(loc);
@@ -675,7 +642,6 @@ router.post('/add-to-task', async (req, res) => {
 
     for (const loc of newLocations) {
       if (!existingLocations.includes(loc)) {
-        // New location — add members and label
         const members = locationMembersMap[loc] || [];
         members.forEach(id => existingUserIds.add(Number(id)));
 
@@ -686,8 +652,33 @@ router.post('/add-to-task', async (req, res) => {
       }
     }
 
-    // ── PUT update the task ───────────────────────────────────────────────────
-    // 明确只传需要的字段，绝对不包含 subTasks，避免 PUT 清空旧 subtask
+    // ── Build subtasks array: 旧的（带 id）+ 新的（不带 id）────────────────────
+    // 旧的 subtask 原样保留，带上 id 和 isCompleted，确保 checked 状态不丢失
+    const existingSubTasks = (existingTask.subTasks || []).map(st => ({
+      id: st.id,
+      title: st.title,
+      isCompleted: st.isCompleted ?? false,
+    }));
+
+    // 新的 subtask 按 location 顺序构建
+    const subtaskOrder = locationOrder && locationOrder.length > 0
+      ? locationOrder.filter(l => newLocations.includes(l))
+      : [...newLocations].sort();
+    newLocations.forEach(loc => { if (!subtaskOrder.includes(loc)) subtaskOrder.push(loc); });
+
+    const newSubTasks = [];
+    for (const loc of subtaskOrder) {
+      const locItems = items.filter(i => i.transfer_from === loc);
+      for (const item of locItems) {
+        const subtaskTitle = await buildSubtaskTitle(item, loc);
+        newSubTasks.push({ title: subtaskTitle, isCompleted: false }); // 新的不带 id
+      }
+    }
+
+    // 旧的在前，新的追加在后
+    const allSubTasks = [...existingSubTasks, ...newSubTasks];
+
+    // ── PUT update the task，包含完整 subTasks 数组 ───────────────────────────
     const updatePayload = {
       title: newTitle,
       status: existingTask.status,
@@ -695,35 +686,13 @@ router.post('/add-to-task', async (req, res) => {
       userIds: [...existingUserIds],
       labelIds: newLabelIds,
       description: convertDescriptionForPut(existingTask.description),
+      subTasks: allSubTasks,
     };
 
-    console.log('PUT payload:', JSON.stringify(updatePayload, null, 2));
-    
     await api.put(
       `/tasks/v1/taskboards/${TASK_BOARD_ID}/tasks/${latestTask.task_id}`,
       updatePayload
     );
-
-    // ── Add new subtasks (旧 subtask 不受影响，直接追加新的) ─────────────────
-    const subtaskOrder = locationOrder && locationOrder.length > 0
-      ? locationOrder.filter(l => newLocations.includes(l))
-      : [...newLocations].sort();
-    newLocations.forEach(loc => { if (!subtaskOrder.includes(loc)) subtaskOrder.push(loc); });
-
-    for (const loc of subtaskOrder) {
-      const locItems = items.filter(i => i.transfer_from === loc);
-      for (const item of locItems) {
-        const subtaskTitle = await buildSubtaskTitle(item, loc);
-        try {
-          await api.post(
-            `/tasks/v1/taskboards/${TASK_BOARD_ID}/tasks/${latestTask.task_id}/sub-tasks`,
-            { title: subtaskTitle, isCompleted: false }
-          );
-        } catch (err) {
-          console.error(`Failed to add subtask: ${subtaskTitle}`, err.message);
-        }
-      }
-    }
 
     // ── Update DB ─────────────────────────────────────────────────────────────
     const allLocations = [...new Set([...existingLocations, ...newLocations])];
@@ -742,7 +711,6 @@ router.post('/add-to-task', async (req, res) => {
     }
 
     // ── Send messages ─────────────────────────────────────────────────────────
-    // Only notify managers of newly added locations
     const locationsForNotification = locationsToNotify.length > 0 ? locationsToNotify : newLocations;
     const clockedInIds = await getClockedInUserIds(locationsForNotification);
     if (clockedInIds.length > 0) {
