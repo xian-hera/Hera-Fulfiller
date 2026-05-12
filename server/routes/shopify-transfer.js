@@ -327,8 +327,8 @@ router.post('/create', async (req, res) => {
     for (const loc of sortedLocations) {
       const locItems = grouped[loc];
 
-      // Build line items: SKU → inventoryItemId
-      const lineItems = [];
+      // Build line items: merge duplicate SKUs by summing quantities
+      const lineItemsMap = {};
       for (const item of locItems) {
         if (!item.sku) continue;
         const inventoryItemId = await getInventoryItemBySku(item.sku);
@@ -336,8 +336,12 @@ router.post('/create', async (req, res) => {
           errors.push(`SKU ${item.sku} not found in Shopify`);
           continue;
         }
-        lineItems.push({ inventoryItemId, quantity: item.quantity });
+        lineItemsMap[inventoryItemId] = (lineItemsMap[inventoryItemId] || 0) + item.quantity;
       }
+      const lineItems = Object.entries(lineItemsMap).map(([inventoryItemId, quantity]) => ({
+        inventoryItemId,
+        quantity,
+      }));
 
       if (lineItems.length === 0) {
         errors.push(`No valid products for location ${loc}`);
