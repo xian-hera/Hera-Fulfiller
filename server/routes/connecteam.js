@@ -130,10 +130,8 @@ function convertDescriptionForPut(raw) {
   return { content: text };
 }
 
-// ── Helper: build task title ─────────────────────────────────────────────────
-function buildTaskTitle(locationOrder, dateChoice) {
-  const locNumbers = locationOrder.map(loc => parseInt(loc, 10).toString());
-
+// ── Helper: get due date object based on dateChoice ──────────────────────────
+function getDueDate(dateChoice) {
   const date = new Date();
   if (dateChoice === 'tomorrow') {
     date.setDate(date.getDate() + 1);
@@ -142,9 +140,18 @@ function buildTaskTitle(locationOrder, dateChoice) {
     const daysUntilMonday = day === 0 ? 1 : (8 - day);
     date.setDate(date.getDate() + daysUntilMonday);
   }
+  // 'today' keeps date as-is
+  date.setHours(21, 0, 0, 0);
+  return date;
+}
 
+// ── Helper: build task title ─────────────────────────────────────────────────
+function buildTaskTitle(locationOrder, dateChoice) {
+  const locNumbers = locationOrder.map(loc => parseInt(loc, 10).toString());
+
+  const dueDate = getDueDate(dateChoice);
   const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  const dateStr = `${months[date.getMonth()]}.${String(date.getDate()).padStart(2, '0')}`;
+  const dateStr = `${months[dueDate.getMonth()]}.${String(dueDate.getDate()).padStart(2, '0')}`;
 
   return `${locNumbers.join(' - ')} - [WEB] ${dateStr}`;
 }
@@ -163,19 +170,7 @@ function extractLocationsFromTitle(title) {
 // ── Helper: get due date timestamps ─────────────────────────────────────────
 function getTaskDates(dateChoice) {
   const startTime = Math.floor(Date.now() / 1000);
-
-  const dueDate = new Date();
-  if (dateChoice === 'today') {
-    dueDate.setDate(dueDate.getDate() + 1);
-  } else if (dateChoice === 'tomorrow') {
-    dueDate.setDate(dueDate.getDate() + 2);
-  } else if (dateChoice === 'monday') {
-    const day = dueDate.getDay();
-    const daysUntilNextMonday = day === 0 ? 8 : (8 - day);
-    dueDate.setDate(dueDate.getDate() + daysUntilNextMonday);
-  }
-  dueDate.setHours(21, 0, 0, 0);
-
+  const dueDate = getDueDate(dateChoice);
   return {
     startTime,
     dueDate: Math.floor(dueDate.getTime() / 1000),
