@@ -20,28 +20,6 @@ import {
   Box,
   Toast,
   Frame
-} from '@shopify/polaris';import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
-import axios from '../api/axios';
-import {
-  Page,
-  Layout,
-  Card,
-  ResourceList,
-  ResourceItem,
-  Thumbnail,
-  Text,
-  Badge,
-  Button,
-  ButtonGroup,
-  ChoiceList,
-  Modal,
-  BlockStack,
-  Banner,
-  InlineStack,
-  Box,
-  Toast,
-  Frame
 } from '@shopify/polaris';
 import { SortIcon, ImageIcon } from '@shopify/polaris-icons';
 import NumericKeypad from '../components/NumericKeypad';
