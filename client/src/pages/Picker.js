@@ -20,6 +20,28 @@ import {
   Box,
   Toast,
   Frame
+} from '@shopify/polaris';import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import axios from '../api/axios';
+import {
+  Page,
+  Layout,
+  Card,
+  ResourceList,
+  ResourceItem,
+  Thumbnail,
+  Text,
+  Badge,
+  Button,
+  ButtonGroup,
+  ChoiceList,
+  Modal,
+  BlockStack,
+  Banner,
+  InlineStack,
+  Box,
+  Toast,
+  Frame
 } from '@shopify/polaris';
 import { SortIcon, ImageIcon } from '@shopify/polaris-icons';
 import NumericKeypad from '../components/NumericKeypad';
@@ -468,7 +490,11 @@ const Picker = () => {
 
   const renderItem = (item) => {
     const { id, quantity, image_url, order_name, display_type, sku, brand, title, size, picker_status, variant_title } = item;
-    
+
+    const displayName = display_type === 'HAIR & SKIN CARE'
+      ? `${title} ${size}`.trim()
+      : `${brand} ${title} ${size}`.trim();
+
     const media = image_url ? (
       <div onClick={() => handleImageClick(item)} style={{ cursor: 'pointer' }}>
         <Thumbnail
@@ -506,7 +532,7 @@ const Picker = () => {
                   overflowWrap: 'break-word'
                 }}>
                   <Text variant="bodyLg" fontWeight="bold">
-                    {brand} {title} {size}
+                    {displayName}
                   </Text>
                 </div>
                 
@@ -572,7 +598,7 @@ const Picker = () => {
             <div className="picker-item-mobile-text">
               <div style={{ marginBottom: '4px' }}>
                 <Text variant="bodyMd" fontWeight="bold">
-                  {brand} {title} {size}
+                  {displayName}
                 </Text>
               </div>
               

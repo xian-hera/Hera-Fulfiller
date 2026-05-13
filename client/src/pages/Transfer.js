@@ -461,7 +461,7 @@ const Transfer = () => {
           <div style={{ flex: 1, maxWidth: 'calc(100% - 350px)' }}>
             <BlockStack gap="1">
               <div style={{ wordWrap: 'break-word', overflowWrap: 'break-word', maxWidth: '60ch' }}>
-                <Text variant="bodyLg" fontWeight="bold">{brand} {title} {size}</Text>
+                <Text variant="bodyLg" fontWeight="bold">{title} {size}</Text>
               </div>
               {variant_title && <Text variant="bodyMd">{variant_title}</Text>}
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -530,7 +530,6 @@ const Transfer = () => {
         {/* Mobile layout */}
         <div className="transfer-item-mobile">
           <div style={{ marginBottom: '12px' }}>
-            <div style={{ fontSize: '12px', color: '#6d7175', marginBottom: '4px' }}>{brand}</div>
             <div style={{ fontSize: '14px', fontWeight: '600', marginBottom: '4px', wordBreak: 'break-word', lineHeight: '1.4' }}>{title} {size}</div>
             {variant_title && <div style={{ fontSize: '12px', color: '#6d7175', marginBottom: '4px' }}>{variant_title}</div>}
             <div onClick={() => handleSkuCopy(sku)} style={{ fontSize: '12px', fontWeight: '600', marginBottom: '4px', cursor: 'pointer', color: '#0080FF' }}>
