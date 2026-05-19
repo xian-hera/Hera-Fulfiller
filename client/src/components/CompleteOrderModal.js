@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Modal, Text, Button, BlockStack, InlineStack, Badge } from '@shopify/polaris';
 import NumericKeypad from './NumericKeypad';
 import BoxTypeKeypad from './BoxTypeKeypad';
+import './CompleteOrderModal.css';
 
 const CompleteOrderModal = ({ 
   open, 
@@ -60,6 +61,59 @@ const CompleteOrderModal = ({
     onClose();
   };
 
+  // 左列：输入区 + 操作按钮
+  const inputSection = (
+    <div className="complete-order-inputs">
+      {/* Box Type 输入区 */}
+      <div onClick={() => setActiveInput('boxType')} className="complete-order-field">
+        <InlineStack align="space-between" blockAlign="center">
+          <Text variant="bodySm" as="p">Box Type:</Text>
+          {activeInput === 'boxType' && <Badge tone="info">Active</Badge>}
+        </InlineStack>
+        <div className={`complete-order-display ${activeInput === 'boxType' ? 'active' : ''}`}>
+          {boxType || 'Tap to select'}
+        </div>
+      </div>
+
+      {/* Weight 输入区（仅在有 weight warning 时显示）*/}
+      {hasWeightWarning && (
+        <div onClick={() => setActiveInput('weight')} className="complete-order-field">
+          <InlineStack align="space-between" blockAlign="center">
+            <Text variant="bodySm" as="p">Total Weight (g):</Text>
+            {activeInput === 'weight' && <Badge tone="info">Active</Badge>}
+          </InlineStack>
+          <div className={`complete-order-display ${activeInput === 'weight' ? 'active' : ''}`}>
+            {orderWeight || '0'} g
+          </div>
+        </div>
+      )}
+
+      {/* 操作按钮 — 在两列布局时固定在左列底部 */}
+      <div className="complete-order-actions">
+        <Button onClick={handleClose}>Cancel</Button>
+        <Button variant="primary" onClick={handleComplete}>Complete Order</Button>
+      </div>
+    </div>
+  );
+
+  // 右列（或下方）：键盘
+  const keypadSection = (
+    <div className="complete-order-keypad">
+      {activeInput === 'boxType' ? (
+        <BoxTypeKeypad
+          boxTypes={boxTypes}
+          onBoxTypeClick={handleBoxTypeClick}
+          onBackspace={handleBoxTypeBackspace}
+        />
+      ) : (
+        <NumericKeypad
+          onNumberClick={handleWeightNumberClick}
+          onBackspace={handleWeightBackspace}
+        />
+      )}
+    </div>
+  );
+
   return (
     <Modal
       open={open}
@@ -67,92 +121,15 @@ const CompleteOrderModal = ({
       title={`Complete Order ${orderName}`}
     >
       <Modal.Section>
-        <BlockStack gap="4">
-          {/* Box Type 输入区 */}
-          <div onClick={() => setActiveInput('boxType')}>
-            <InlineStack align="space-between" blockAlign="center">
-              <Text variant="bodySm" as="p">Box Type:</Text>
-              {activeInput === 'boxType' && <Badge tone="info">Active</Badge>}
-            </InlineStack>
-            <div style={{
-              border: activeInput === 'boxType' ? '3px solid #008060' : '2px solid #c4cdd5',
-              borderRadius: '8px',
-              padding: '16px',
-              fontSize: '32px',
-              fontWeight: 'bold',
-              textAlign: 'center',
-              backgroundColor: activeInput === 'boxType' ? '#f6f6f7' : '#ffffff',
-              minHeight: '60px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginTop: '8px',
-              cursor: 'pointer',
-              transition: 'all 0.2s ease'
-            }}>
-              {boxType || 'Tap to select'}
-            </div>
-          </div>
-
-          {/* Weight 输入区（仅在有 weight warning 时显示）*/}
-          {hasWeightWarning && (
-            <div onClick={() => setActiveInput('weight')}>
-              <InlineStack align="space-between" blockAlign="center">
-                <Text variant="bodySm" as="p">Total Weight (g):</Text>
-                {activeInput === 'weight' && <Badge tone="info">Active</Badge>}
-              </InlineStack>
-              <div style={{
-                border: activeInput === 'weight' ? '3px solid #008060' : '2px solid #c4cdd5',
-                borderRadius: '8px',
-                padding: '16px',
-                fontSize: '32px',
-                fontWeight: 'bold',
-                textAlign: 'center',
-                backgroundColor: activeInput === 'weight' ? '#f6f6f7' : '#ffffff',
-                minHeight: '60px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginTop: '8px',
-                cursor: 'pointer',
-                transition: 'all 0.2s ease'
-              }}>
-                {orderWeight || '0'} g
-              </div>
-            </div>
-          )}
-
-          {/* 嵌入式键盘 */}
-          <div style={{ marginTop: '8px' }}>
-            {activeInput === 'boxType' ? (
-              <BoxTypeKeypad
-                boxTypes={boxTypes}
-                onBoxTypeClick={handleBoxTypeClick}
-                onBackspace={handleBoxTypeBackspace}
-              />
-            ) : (
-              <NumericKeypad
-                onNumberClick={handleWeightNumberClick}
-                onBackspace={handleWeightBackspace}
-              />
-            )}
-          </div>
-
-          {/* 操作按钮 */}
-          <div style={{ 
-            display: 'flex',
-            gap: '12px',
-            justifyContent: 'flex-end',
-            marginTop: '8px'
-          }}>
-            <Button onClick={handleClose}>
-              Cancel
-            </Button>
-            <Button variant="primary" onClick={handleComplete}>
-              Complete Order
-            </Button>
-          </div>
-        </BlockStack>
+        {/* 
+          .complete-order-layout:
+          - 竖屏：单列，inputs 在上，keypad 在下
+          - 横屏：两列，inputs（左）+ keypad（右）
+        */}
+        <div className="complete-order-layout">
+          {inputSection}
+          {keypadSection}
+        </div>
       </Modal.Section>
     </Modal>
   );

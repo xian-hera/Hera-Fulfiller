@@ -79,15 +79,18 @@
   height: 40px;
 }
 
-/* iPad 横屏优化 */
-@media (max-width: 1024px) and (orientation: landscape) {
+/* =====================================================
+   iPad 横屏（两列布局场景）
+   键盘在右列，高度受限，适当缩小按钮
+   ===================================================== */
+@media (orientation: landscape) and (max-height: 820px) {
   .box-keypad-button {
-    width: 110px;
-    height: 75px;
+    width: 105px;
+    height: 68px;
   }
 
   .box-code {
-    font-size: 30px;
+    font-size: 28px;
   }
 
   .box-dimensions {
@@ -95,13 +98,22 @@
   }
 
   .box-keypad-empty {
-    width: 110px;
-    height: 75px;
+    width: 105px;
+    height: 68px;
   }
 
   .box-keypad-backspace svg {
-    width: 35px;
-    height: 35px;
+    width: 32px;
+    height: 32px;
+  }
+
+  .box-keypad-row {
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .box-keypad {
+    padding: 8px;
   }
 }
 

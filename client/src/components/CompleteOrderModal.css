@@ -1,0 +1,116 @@
+/* =====================================================
+   CompleteOrderModal.css
+   竖屏：单列堆叠  |  横屏(iPad landscape)：左右两列
+   ===================================================== */
+
+/* ---------- 基础布局容器 ---------- */
+.complete-order-layout {
+  display: flex;
+  flex-direction: column;   /* 竖屏：上下堆叠 */
+  gap: 16px;
+}
+
+/* ---------- 左列 / 输入区 ---------- */
+.complete-order-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* 单个字段区块 */
+.complete-order-field {
+  cursor: pointer;
+}
+
+/* 输入显示框 */
+.complete-order-display {
+  border: 2px solid #c4cdd5;
+  border-radius: 8px;
+  padding: 16px;
+  font-size: 32px;
+  font-weight: bold;
+  text-align: center;
+  background-color: #ffffff;
+  min-height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 8px;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.complete-order-display.active {
+  border: 3px solid #008060;
+  background-color: #f6f6f7;
+}
+
+/* 操作按钮行 */
+.complete-order-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+/* ---------- 右列 / 键盘区 ---------- */
+.complete-order-keypad {
+  /* 竖屏下键盘宽度自适应 */
+  display: flex;
+  justify-content: center;
+}
+
+
+/* =====================================================
+   横屏优化：iPad landscape (≥ 600px height 且 landscape)
+   ===================================================== */
+@media (orientation: landscape) and (max-height: 820px) {
+
+  /* 切换为左右两列 */
+  .complete-order-layout {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 20px;
+  }
+
+  /* 左列：固定宽度，高度撑满，内部用 flex 把按钮推到底部 */
+  .complete-order-inputs {
+    flex: 0 0 220px;       /* 固定宽度，不随键盘变化 */
+    min-height: 100%;
+    justify-content: space-between;  /* 输入框在上，按钮在下 */
+    gap: 12px;
+  }
+
+  /* 让按钮在左列中始终靠底 */
+  .complete-order-actions {
+    margin-top: auto;
+    flex-direction: column;  /* 纵向排列按钮，宽度更宽好点击 */
+    gap: 10px;
+  }
+
+  /* 按钮全宽，更适合触屏 */
+  .complete-order-actions > * {
+    width: 100%;
+  }
+
+  /* 横屏时显示框字号略小，节省垂直空间 */
+  .complete-order-display {
+    font-size: 26px;
+    min-height: 52px;
+    padding: 12px;
+  }
+
+  /* 右列：键盘区自适应剩余空间 */
+  .complete-order-keypad {
+    flex: 1;
+    justify-content: flex-start;
+    overflow: visible;
+  }
+}
+
+/* 更大的横屏（桌面或大 iPad Pro），恢复默认列宽 */
+@media (orientation: landscape) and (min-height: 821px) {
+  .complete-order-actions {
+    flex-direction: row;
+  }
+}
