@@ -70,6 +70,12 @@ const OrderDetail = () => {
   // 🆕 单次点击提示（scanner 模式下 check 需点击4次）
   const [showScanHint, setShowScanHint] = useState(false);
   const scanHintTimerRef = useRef(null);
+  // 🆕 检查是否在4小时内已点击 "Got it"
+  const isScanHintSuppressed = () => {
+    const ts = localStorage.getItem('scanHintSuppressedUntil');
+    if (!ts) return false;
+    return Date.now() < parseInt(ts, 10);
+  };
   // 🆕 四次点击相关 refs: { [itemId]: count }
   const tapCountRef = useRef({});
   const tapTimerRef = useRef({});
@@ -412,10 +418,12 @@ const OrderDetail = () => {
     }, 2000);
 
     if (next < 4) {
-      // 不足4次：显示提示
-      setShowScanHint(true);
-      clearTimeout(scanHintTimerRef.current);
-      scanHintTimerRef.current = setTimeout(() => setShowScanHint(false), 4000);
+      // 不足4次：显示提示（除非用户已 suppress）
+      if (!isScanHintSuppressed()) {
+        setShowScanHint(true);
+        clearTimeout(scanHintTimerRef.current);
+        scanHintTimerRef.current = setTimeout(() => setShowScanHint(false), 4000);
+      }
       return;
     }
 
@@ -1084,22 +1092,56 @@ const OrderDetail = () => {
           </div>
         )}
 
-        {/* 🆕 点击提示（scanner 模式） */}
+        {/* 🆕 点击提示（scanner 模式）- 固定居中覆盖，不影响页面布局 */}
         {showScanHint && (
           <div
-            onClick={() => setShowScanHint(false)}
             style={{
-              padding: '10px 16px',
-              marginBottom: '12px',
-              backgroundColor: '#fff4e5',
-              border: '1px solid #ffb020',
-              borderRadius: '6px',
-              fontSize: '14px',
-              color: '#7d5a00',
-              cursor: 'pointer'
+              position: 'fixed',
+              top: 0, left: 0, right: 0, bottom: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 9998,
+              pointerEvents: 'none'
             }}
           >
-            Scan the item to check, or tap 4 times.
+            <div style={{
+              backgroundColor: '#fff4e5',
+              border: '1px solid #ffb020',
+              borderRadius: '12px',
+              padding: '24px 28px',
+              fontSize: '15px',
+              color: '#7d5a00',
+              fontWeight: '500',
+              boxShadow: '0 4px 24px rgba(0,0,0,0.15)',
+              textAlign: 'center',
+              maxWidth: '320px',
+              pointerEvents: 'auto'
+            }}>
+              <div style={{ marginBottom: '16px' }}>
+                Scan the item to check, or tap 4 times.
+              </div>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  localStorage.setItem('scanHintSuppressedUntil', String(Date.now() + 4 * 60 * 60 * 1000));
+                  setShowScanHint(false);
+                  clearTimeout(scanHintTimerRef.current);
+                }}
+                style={{
+                  backgroundColor: '#7d5a00',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  padding: '8px 16px',
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                  fontWeight: '500'
+                }}
+              >
+                Got it, don't remind me again
+              </button>
+            </div>
           </div>
         )}
 
