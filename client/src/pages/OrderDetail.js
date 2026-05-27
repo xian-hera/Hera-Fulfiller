@@ -67,12 +67,12 @@ const OrderDetail = () => {
   const [scanHighlight, setScanHighlight] = useState({});
   // 🆕 no match 弹窗
   const [showNoMatch, setShowNoMatch] = useState(false);
-  // 🆕 单次点击提示（scanner 模式下 check 需长按）
+  // 🆕 单次点击提示（scanner 模式下 check 需点击4次）
   const [showScanHint, setShowScanHint] = useState(false);
   const scanHintTimerRef = useRef(null);
-  // 🆕 长按相关 refs
-  const longPressTimerRef = useRef(null);
-  const longPressItemRef = useRef(null);
+  // 🆕 四次点击相关 refs: { [itemId]: count }
+  const tapCountRef = useRef({});
+  const tapTimerRef = useRef({});
   // 🆕 scanner buffer refs
   const barcodeBufferRef = useRef('');
   const barcodeTimerRef = useRef(null);
@@ -318,7 +318,7 @@ const OrderDetail = () => {
     return 'packing';
   };
 
-  // 🆕 实际执行 check/uncheck 的核心逻辑（供点击和长按共用）
+  // 🆕 实际执行 check/uncheck 的核心逻辑（供点击和扫码共用）
   const doItemCheck = useCallback(async (item) => {
     const itemId = item.id;
     const currentState = quantityConfirmStatesRef.current[itemId] || {};
@@ -383,35 +383,47 @@ const OrderDetail = () => {
     }
   }, []);
 
+  // 🆕 处理圆圈点击：scanner 模式下需点击4次才能 check，uncheck 保持单次点击
   const handleItemClick = async (item) => {
-    // 🆕 scanner 模式下，单次点击试图 check 时显示提示（uncheck 仍然正常）
-    if (scannerPackingOrdersEnabled && item.packer_status !== 'ready') {
-      // 显示提示
+    // uncheck（已 ready）：始终单次点击生效
+    if (item.packer_status === 'ready') {
+      await doItemCheck(item);
+      return;
+    }
+
+    // 非 scanner 模式：原有逻辑
+    if (!scannerPackingOrdersEnabled) {
+      await doItemCheck(item);
+      return;
+    }
+
+    // scanner 模式下，需要点击4次才能 check
+    const itemId = item.id;
+    const current = tapCountRef.current[itemId] || 0;
+    const next = current + 1;
+    tapCountRef.current[itemId] = next;
+
+    // 重置计时器：2秒内没有继续点击则清零
+    if (tapTimerRef.current[itemId]) {
+      clearTimeout(tapTimerRef.current[itemId]);
+    }
+    tapTimerRef.current[itemId] = setTimeout(() => {
+      tapCountRef.current[itemId] = 0;
+    }, 2000);
+
+    if (next < 4) {
+      // 不足4次：显示提示
       setShowScanHint(true);
       clearTimeout(scanHintTimerRef.current);
       scanHintTimerRef.current = setTimeout(() => setShowScanHint(false), 4000);
       return;
     }
+
+    // 达到4次：执行 check，重置计数
+    tapCountRef.current[itemId] = 0;
+    clearTimeout(tapTimerRef.current[itemId]);
+    setShowScanHint(false);
     await doItemCheck(item);
-  };
-
-  // 🆕 长按开始（scanner 模式下用于 check）
-  const handleLongPressStart = (item) => {
-    if (!scannerPackingOrdersEnabled) return;
-    if (item.packer_status === 'ready') return; // 已 checked，不需要长按
-    longPressItemRef.current = item;
-    longPressTimerRef.current = setTimeout(() => {
-      if (longPressItemRef.current) {
-        doItemCheck(longPressItemRef.current);
-        longPressItemRef.current = null;
-      }
-    }, 3000);
-  };
-
-  // 🆕 长按取消
-  const handleLongPressCancel = () => {
-    clearTimeout(longPressTimerRef.current);
-    longPressItemRef.current = null;
   };
 
   // 🆕 滚动到指定 item
@@ -498,7 +510,7 @@ const OrderDetail = () => {
         }));
         pendingScanConfirmRef.current = firstUnchecked.id;
         scrollToItem(firstUnchecked.id);
-        // 高亮5秒后如果没有二次扫码则清除
+        // 10秒后如果没有二次扫码则清除
         setTimeout(() => {
           setScanHighlight(prev => {
             const next = { ...prev };
@@ -515,7 +527,7 @@ const OrderDetail = () => {
       }
     }
 
-    // quantity 为 1，或者 quantity >= 2 但已经在 confirm 状态（通过长按触发过）：直接 check
+    // quantity 为 1，或者 quantity >= 2 但已经在 confirm 状态：直接 check
     await doItemCheck(firstUnchecked);
     // check 成功后高亮绿色
     setScanHighlight(prev => ({ ...prev, [firstUnchecked.id]: 'scanned' }));
@@ -678,52 +690,14 @@ const OrderDetail = () => {
     );
 
     // 状态按钮组件
-    // 🆕 scanner 模式下：check 需长按3秒，uncheck 保持单次点击
     const StatusButton = () => (
       <div
         onTouchStart={(e) => {
           e.preventDefault();
-          if (isUpdating) return;
-          if (scannerPackingOrdersEnabled && item.packer_status !== 'ready') {
-            // scanner 模式：长按开始
-            handleLongPressStart(item);
-          } else {
-            handleItemClick(item);
-          }
-        }}
-        onTouchEnd={(e) => {
-          e.preventDefault();
-          if (scannerPackingOrdersEnabled && item.packer_status !== 'ready') {
-            handleLongPressCancel();
-            // 如果是短触，显示提示
-            handleItemClick(item);
-          }
-        }}
-        onTouchMove={() => {
-          if (scannerPackingOrdersEnabled) handleLongPressCancel();
-        }}
-        onMouseDown={() => {
-          if (isUpdating) return;
-          if (scannerPackingOrdersEnabled && item.packer_status !== 'ready') {
-            handleLongPressStart(item);
-          }
-        }}
-        onMouseUp={() => {
-          if (scannerPackingOrdersEnabled && item.packer_status !== 'ready') {
-            handleLongPressCancel();
-          }
-        }}
-        onMouseLeave={() => {
-          if (scannerPackingOrdersEnabled) handleLongPressCancel();
+          if (!isUpdating) handleItemClick(item);
         }}
         onClick={(e) => {
-          if (isUpdating) return;
-          if (scannerPackingOrdersEnabled && item.packer_status !== 'ready') {
-            // 长按已由 mousedown/up 处理，click 只用来显示提示
-            handleItemClick(item);
-            return;
-          }
-          handleItemClick(item);
+          if (!isUpdating) handleItemClick(item);
         }}
         style={{ 
           cursor: isUpdating ? 'not-allowed' : 'pointer', 
@@ -1110,7 +1084,7 @@ const OrderDetail = () => {
           </div>
         )}
 
-        {/* 🆕 单次点击提示（scanner 模式） */}
+        {/* 🆕 点击提示（scanner 模式） */}
         {showScanHint && (
           <div
             onClick={() => setShowScanHint(false)}
@@ -1125,7 +1099,7 @@ const OrderDetail = () => {
               cursor: 'pointer'
             }}
           >
-            Scan the item to check, or press and hold for 3 sec.
+            Scan the item to check, or tap 4 times.
           </div>
         )}
 
