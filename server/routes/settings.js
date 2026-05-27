@@ -426,4 +426,29 @@ router.post('/reset-box-usage', async (req, res) => {
   }
 });
 
+// 🆕 Update scanner settings
+router.post('/scanner', async (req, res) => {
+  try {
+    const { scannerEnabled, scannerPicker, scannerPackingOrders, scannerPacker } = req.body;
+
+    const upsert = db.prepare(`
+      INSERT INTO settings (key, value, updated_at)
+      VALUES (?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT (key) DO UPDATE SET
+        value = EXCLUDED.value,
+        updated_at = CURRENT_TIMESTAMP
+    `);
+
+    upsert.run('scanner_enabled', scannerEnabled ? 'true' : 'false');
+    upsert.run('scanner_picker', scannerPicker ? 'true' : 'false');
+    upsert.run('scanner_packing_orders', scannerPackingOrders ? 'true' : 'false');
+    upsert.run('scanner_packer', scannerPacker ? 'true' : 'false');
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error updating scanner settings:', error);
+    res.status(500).json({ error: 'Failed to update scanner settings: ' + error.message });
+  }
+});
+
 module.exports = router;

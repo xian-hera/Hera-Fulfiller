@@ -22,6 +22,12 @@ const Settings = () => {
   // 🆕 Box 统计开始日期
   const [boxStatsStartDate, setBoxStatsStartDate] = useState(null);
 
+  // 🆕 Scanner mode 开关状态
+  const [scannerEnabled, setScannerEnabled] = useState(false);
+  const [scannerPicker, setScannerPicker] = useState(false);
+  const [scannerPackingOrders, setScannerPackingOrders] = useState(false);
+  const [scannerPacker, setScannerPacker] = useState(false);
+
   useEffect(() => {
     fetchSettings();
     fetchDbStats();
@@ -37,6 +43,13 @@ const Settings = () => {
       if (startDate) {
         setBoxStatsStartDate(startDate);
       }
+
+      // 🆕 获取 scanner settings
+      const s = response.data.settings || {};
+      setScannerEnabled(s.scanner_enabled === 'true');
+      setScannerPicker(s.scanner_picker === 'true');
+      setScannerPackingOrders(s.scanner_packing_orders === 'true');
+      setScannerPacker(s.scanner_packer === 'true');
     } catch (error) {
       console.error('Error:', error);
       showMessage('Error loading settings');
@@ -133,6 +146,50 @@ const Settings = () => {
     } catch (error) {
       console.error('Error resetting box usage:', error);
       showMessage('Failed to reset box usage: ' + (error.response?.data?.error || error.message));
+    }
+  };
+
+  // 🆕 处理 scanner 开关变动，立即保存到后端
+  const handleScannerChange = async (field, value) => {
+    // 先更新本地 state
+    let newEnabled = scannerEnabled;
+    let newPicker = scannerPicker;
+    let newPackingOrders = scannerPackingOrders;
+    let newPacker = scannerPacker;
+
+    if (field === 'scannerEnabled') {
+      newEnabled = value;
+      setScannerEnabled(value);
+      // 如果关闭主开关，同时关闭所有子项
+      if (!value) {
+        newPicker = false;
+        newPackingOrders = false;
+        newPacker = false;
+        setScannerPicker(false);
+        setScannerPackingOrders(false);
+        setScannerPacker(false);
+      }
+    } else if (field === 'scannerPicker') {
+      newPicker = value;
+      setScannerPicker(value);
+    } else if (field === 'scannerPackingOrders') {
+      newPackingOrders = value;
+      setScannerPackingOrders(value);
+    } else if (field === 'scannerPacker') {
+      newPacker = value;
+      setScannerPacker(value);
+    }
+
+    try {
+      await axios.post('/api/settings/scanner', {
+        scannerEnabled: newEnabled,
+        scannerPicker: newPicker,
+        scannerPackingOrders: newPackingOrders,
+        scannerPacker: newPacker,
+      });
+    } catch (error) {
+      console.error('Error saving scanner settings:', error);
+      showMessage('Error saving scanner settings');
     }
   };
 
@@ -503,6 +560,93 @@ const Settings = () => {
                       </Button>
                     </>
                   )}
+                </div>
+              </div>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+
+        {/* 🆕 Scanner Mode card — 位于 Box Types card 上方 */}
+        <Layout.Section>
+          <Card title="Scanner Mode" sectioned>
+            <BlockStack gap="3">
+              {/* Enable scanner 主开关 */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <input
+                  type="checkbox"
+                  id="scanner-enabled"
+                  checked={scannerEnabled}
+                  onChange={(e) => handleScannerChange('scannerEnabled', e.target.checked)}
+                  style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                />
+                <label htmlFor="scanner-enabled" style={{ cursor: 'pointer', fontSize: '14px', fontWeight: '600' }}>
+                  Enable scanner
+                </label>
+              </div>
+
+              {/* 三个子项 */}
+              <div style={{ paddingLeft: '26px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <input
+                    type="checkbox"
+                    id="scanner-picker"
+                    checked={scannerPicker}
+                    disabled={!scannerEnabled}
+                    onChange={(e) => handleScannerChange('scannerPicker', e.target.checked)}
+                    style={{ cursor: scannerEnabled ? 'pointer' : 'not-allowed', width: '16px', height: '16px' }}
+                  />
+                  <label
+                    htmlFor="scanner-picker"
+                    style={{
+                      cursor: scannerEnabled ? 'pointer' : 'not-allowed',
+                      fontSize: '14px',
+                      color: scannerEnabled ? '#202223' : '#8c9196'
+                    }}
+                  >
+                    Enable scanner in Picker
+                  </label>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <input
+                    type="checkbox"
+                    id="scanner-packing-orders"
+                    checked={scannerPackingOrders}
+                    disabled={!scannerEnabled}
+                    onChange={(e) => handleScannerChange('scannerPackingOrders', e.target.checked)}
+                    style={{ cursor: scannerEnabled ? 'pointer' : 'not-allowed', width: '16px', height: '16px' }}
+                  />
+                  <label
+                    htmlFor="scanner-packing-orders"
+                    style={{
+                      cursor: scannerEnabled ? 'pointer' : 'not-allowed',
+                      fontSize: '14px',
+                      color: scannerEnabled ? '#202223' : '#8c9196'
+                    }}
+                  >
+                    Enable scanner in Packing Orders
+                  </label>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <input
+                    type="checkbox"
+                    id="scanner-packer"
+                    checked={scannerPacker}
+                    disabled={!scannerEnabled}
+                    onChange={(e) => handleScannerChange('scannerPacker', e.target.checked)}
+                    style={{ cursor: scannerEnabled ? 'pointer' : 'not-allowed', width: '16px', height: '16px' }}
+                  />
+                  <label
+                    htmlFor="scanner-packer"
+                    style={{
+                      cursor: scannerEnabled ? 'pointer' : 'not-allowed',
+                      fontSize: '14px',
+                      color: scannerEnabled ? '#202223' : '#8c9196'
+                    }}
+                  >
+                    Enable scanner in Packer
+                  </label>
                 </div>
               </div>
             </BlockStack>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import axios from '../api/axios';
 import {
@@ -17,6 +17,28 @@ import {
 import { ImageIcon, ChevronLeftIcon, ChevronRightIcon } from '@shopify/polaris-icons';
 import WeightInputModal from '../components/WeightInputModal';
 import CompleteOrderModal from '../components/CompleteOrderModal';
+
+// 🆕 Scanner helper functions (从 ManagerRestockPlan.js 移植)
+function resolveKey(e) {
+  if (e.key && e.key !== 'Unidentified' && e.key.length === 1) return e.key;
+  if (e.code) {
+    if (e.code.startsWith('Digit')) return e.code.slice(5);
+    if (e.code.startsWith('Numpad') && e.code.length === 7) return e.code.slice(6);
+    if (e.code.startsWith('Key') && e.code.length === 4) {
+      const ch = e.code.slice(3);
+      return e.shiftKey ? ch : ch.toLowerCase();
+    }
+    const sym = { Minus:'-', Equal:'=', BracketLeft:'[', BracketRight:']',
+      Backslash:'\\', Semicolon:';', Quote:"'", Backquote:'`',
+      Comma:',', Period:'.', Slash:'/' };
+    if (sym[e.code]) return sym[e.code];
+  }
+  return null;
+}
+
+function cleanBarcode(raw) {
+  return raw.replace(/^[^0-9]+/, '');
+}
 
 const OrderDetail = () => {
   const navigate = useNavigate();
@@ -39,8 +61,41 @@ const OrderDetail = () => {
   const [noteValue, setNoteValue] = useState('');
   const [quantityConfirmStates, setQuantityConfirmStates] = useState({});
 
+  // 🆕 Scanner mode 状态
+  const [scannerPackingOrdersEnabled, setScannerPackingOrdersEnabled] = useState(false);
+  // 🆕 扫码高亮状态: { [itemId]: 'scanned' | 'already_checked' | 'confirm_needed' }
+  const [scanHighlight, setScanHighlight] = useState({});
+  // 🆕 no match 弹窗
+  const [showNoMatch, setShowNoMatch] = useState(false);
+  // 🆕 单次点击提示（scanner 模式下 check 需长按）
+  const [showScanHint, setShowScanHint] = useState(false);
+  const scanHintTimerRef = useRef(null);
+  // 🆕 长按相关 refs
+  const longPressTimerRef = useRef(null);
+  const longPressItemRef = useRef(null);
+  // 🆕 scanner buffer refs
+  const barcodeBufferRef = useRef('');
+  const barcodeTimerRef = useRef(null);
+  // 🆕 lineItems ref（供 scanner 回调中读取最新值）
+  const lineItemsRef = useRef([]);
+  // 🆕 quantityConfirmStates ref（供 scanner 回调中读取最新值）
+  const quantityConfirmStatesRef = useRef({});
+  // 🆕 pending scan-confirm: 记录等待二次扫码确认的 itemId
+  const pendingScanConfirmRef = useRef(null);
+
+  // 🆕 同步 lineItems 到 ref
+  useEffect(() => {
+    lineItemsRef.current = lineItems;
+  }, [lineItems]);
+
+  // 🆕 同步 quantityConfirmStates 到 ref
+  useEffect(() => {
+    quantityConfirmStatesRef.current = quantityConfirmStates;
+  }, [quantityConfirmStates]);
+
   useEffect(() => {
     fetchAllOrders();
+    fetchScannerSettings();
   }, []);
 
   useEffect(() => {
@@ -52,6 +107,17 @@ const OrderDetail = () => {
   useEffect(() => {
     applyPackerFilters();
   }, [allOrders]);
+
+  // 🆕 读取 scanner 设置
+  const fetchScannerSettings = async () => {
+    try {
+      const response = await axios.get('/api/settings');
+      const s = response.data.settings || {};
+      setScannerPackingOrdersEnabled(s.scanner_enabled === 'true' && s.scanner_packing_orders === 'true');
+    } catch (error) {
+      console.error('Error fetching scanner settings:', error);
+    }
+  };
 
   const fetchAllOrders = async () => {
     try {
@@ -252,11 +318,12 @@ const OrderDetail = () => {
     return 'packing';
   };
 
-  const handleItemClick = async (item) => {
+  // 🆕 实际执行 check/uncheck 的核心逻辑（供点击和长按共用）
+  const doItemCheck = useCallback(async (item) => {
     const itemId = item.id;
-    const currentState = quantityConfirmStates[itemId] || {};
-    
-    // 拦截：数量 >= 2 的第1次点击
+    const currentState = quantityConfirmStatesRef.current[itemId] || {};
+
+    // 拦截：数量 >= 2 的第1次操作
     if (item.quantity >= 2 && item.packer_status !== 'ready') {
       if (!currentState.needsConfirm) {
         setQuantityConfirmStates(prev => ({
@@ -266,21 +333,21 @@ const OrderDetail = () => {
         return;
       }
     }
-    
+
     if (item._updating) return;
-    
+
     const newStatus = item.packer_status === 'ready' ? 'packing' : 'ready';
-    
+
     try {
-      setLineItems(prev => prev.map(li => 
+      setLineItems(prev => prev.map(li =>
         li.id === item.id ? { ...li, _updating: true } : li
       ));
 
       await axios.patch(`/api/packer/items/${item.id}/packer-status`, {
         status: newStatus
       });
-      
-      const updatedItems = lineItems.map(li => 
+
+      const updatedItems = lineItemsRef.current.map(li =>
         li.id === item.id ? { ...li, packer_status: newStatus, _updating: false } : li
       );
       setLineItems(updatedItems);
@@ -302,19 +369,199 @@ const OrderDetail = () => {
       }
 
       const allReady = updatedItems.every(li => li.packer_status === 'ready');
-      
+
       if (allReady && newStatus === 'ready') {
         setCompleteModal(true);
       }
     } catch (error) {
       console.error('Error updating item status:', error);
-      setLineItems(prev => prev.map(li => 
+      setLineItems(prev => prev.map(li =>
         li.id === item.id ? { ...li, _updating: false } : li
       ));
       setMessage('Error updating item status');
       setTimeout(() => setMessage(''), 3000);
     }
+  }, []);
+
+  const handleItemClick = async (item) => {
+    // 🆕 scanner 模式下，单次点击试图 check 时显示提示（uncheck 仍然正常）
+    if (scannerPackingOrdersEnabled && item.packer_status !== 'ready') {
+      // 显示提示
+      setShowScanHint(true);
+      clearTimeout(scanHintTimerRef.current);
+      scanHintTimerRef.current = setTimeout(() => setShowScanHint(false), 4000);
+      return;
+    }
+    await doItemCheck(item);
   };
+
+  // 🆕 长按开始（scanner 模式下用于 check）
+  const handleLongPressStart = (item) => {
+    if (!scannerPackingOrdersEnabled) return;
+    if (item.packer_status === 'ready') return; // 已 checked，不需要长按
+    longPressItemRef.current = item;
+    longPressTimerRef.current = setTimeout(() => {
+      if (longPressItemRef.current) {
+        doItemCheck(longPressItemRef.current);
+        longPressItemRef.current = null;
+      }
+    }, 3000);
+  };
+
+  // 🆕 长按取消
+  const handleLongPressCancel = () => {
+    clearTimeout(longPressTimerRef.current);
+    longPressItemRef.current = null;
+  };
+
+  // 🆕 滚动到指定 item
+  const scrollToItem = (itemId) => {
+    const el = document.getElementById(`order-item-${itemId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  };
+
+  // 🆕 处理扫码匹配逻辑
+  const handleScan = useCallback(async (barcode) => {
+    const items = lineItemsRef.current;
+    const confirmStates = quantityConfirmStatesRef.current;
+
+    // 与当前 order 内所有 item 的 SKU 比对
+    const matchedItems = items.filter(item => item.sku === barcode);
+
+    if (matchedItems.length === 0) {
+      setShowNoMatch(true);
+      return;
+    }
+
+    // 检查是否是二次确认扫码（pending scan confirm）
+    if (pendingScanConfirmRef.current !== null) {
+      const pendingItemId = pendingScanConfirmRef.current;
+      const pendingItem = items.find(i => i.id === pendingItemId && i.sku === barcode);
+      if (pendingItem) {
+        // 二次扫码确认，执行 check
+        pendingScanConfirmRef.current = null;
+        setScanHighlight(prev => {
+          const next = { ...prev };
+          delete next[pendingItemId];
+          return next;
+        });
+        await doItemCheck(pendingItem);
+        // check 后背景绿色
+        setScanHighlight(prev => ({ ...prev, [pendingItemId]: 'scanned' }));
+        setTimeout(() => {
+          setScanHighlight(prev => {
+            const next = { ...prev };
+            delete next[pendingItemId];
+            return next;
+          });
+        }, 5000);
+        scrollToItem(pendingItemId);
+        return;
+      }
+    }
+
+    // 找未被 check 的 match
+    const uncheckedMatches = matchedItems.filter(item => item.packer_status !== 'ready');
+    const checkedMatches = matchedItems.filter(item => item.packer_status === 'ready');
+
+    if (uncheckedMatches.length === 0) {
+      // 所有 match 都已 checked：高亮绿色，滚动到第一个
+      checkedMatches.forEach(item => {
+        setScanHighlight(prev => ({ ...prev, [item.id]: 'already_checked' }));
+        setTimeout(() => {
+          setScanHighlight(prev => {
+            const next = { ...prev };
+            delete next[item.id];
+            return next;
+          });
+        }, 5000);
+      });
+      scrollToItem(checkedMatches[0].id);
+      return;
+    }
+
+    // 有未 checked 的 match
+    // 找第一个未 checked 的
+    const firstUnchecked = uncheckedMatches[0];
+
+    if (firstUnchecked.quantity >= 2) {
+      const confirmState = confirmStates[firstUnchecked.id] || {};
+      if (!confirmState.needsConfirm) {
+        // 第一次扫码：需要二次确认
+        // 高亮粉色，显示 confirm quantity
+        setScanHighlight(prev => ({ ...prev, [firstUnchecked.id]: 'confirm_needed' }));
+        setQuantityConfirmStates(prev => ({
+          ...prev,
+          [firstUnchecked.id]: { needsConfirm: true, confirmed: false }
+        }));
+        pendingScanConfirmRef.current = firstUnchecked.id;
+        scrollToItem(firstUnchecked.id);
+        // 高亮5秒后如果没有二次扫码则清除
+        setTimeout(() => {
+          setScanHighlight(prev => {
+            const next = { ...prev };
+            if (next[firstUnchecked.id] === 'confirm_needed') {
+              delete next[firstUnchecked.id];
+            }
+            return next;
+          });
+          if (pendingScanConfirmRef.current === firstUnchecked.id) {
+            pendingScanConfirmRef.current = null;
+          }
+        }, 10000);
+        return;
+      }
+    }
+
+    // quantity 为 1，或者 quantity >= 2 但已经在 confirm 状态（通过长按触发过）：直接 check
+    await doItemCheck(firstUnchecked);
+    // check 成功后高亮绿色
+    setScanHighlight(prev => ({ ...prev, [firstUnchecked.id]: 'scanned' }));
+    setTimeout(() => {
+      setScanHighlight(prev => {
+        const next = { ...prev };
+        delete next[firstUnchecked.id];
+        return next;
+      });
+    }, 5000);
+    scrollToItem(firstUnchecked.id);
+  }, [doItemCheck]);
+
+  // 🆕 scanner 键盘监听
+  useEffect(() => {
+    if (!scannerPackingOrdersEnabled) return;
+
+    const handleKeyDown = (e) => {
+      // 如果焦点在 input/textarea 内，忽略
+      const activeTag = document.activeElement?.tagName;
+      if (['INPUT', 'TEXTAREA'].includes(activeTag)) return;
+
+      if (e.key === 'Enter') {
+        clearTimeout(barcodeTimerRef.current);
+        const barcode = cleanBarcode(barcodeBufferRef.current.trim());
+        barcodeBufferRef.current = '';
+        if (barcode.length > 0) handleScan(barcode);
+        return;
+      }
+
+      const ch = resolveKey(e);
+      if (ch) {
+        barcodeBufferRef.current += ch;
+        clearTimeout(barcodeTimerRef.current);
+        barcodeTimerRef.current = setTimeout(() => {
+          barcodeBufferRef.current = '';
+        }, 500);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      clearTimeout(barcodeTimerRef.current);
+    };
+  }, [scannerPackingOrdersEnabled, handleScan]);
 
   const handleImageClick = (e, item) => {
     e.stopPropagation();
@@ -412,6 +659,15 @@ const OrderDetail = () => {
     const isConfirmed = confirmState.confirmed;
     const quantityColor = showConfirm ? (isConfirmed ? '#00a047' : '#d72c0d') : '#202223';
     const quantitySize = '36px';
+
+    // 🆕 扫码高亮背景色
+    const highlight = scanHighlight[item.id];
+    let itemBgColor = 'transparent';
+    if (highlight === 'scanned' || highlight === 'already_checked') {
+      itemBgColor = '#e4fef3';
+    } else if (highlight === 'confirm_needed') {
+      itemBgColor = '#fee4ef';
+    }
     
     const media = item.image_url ? (
       <div onClick={(e) => handleImageClick(e, item)} style={{ cursor: 'pointer' }}>
@@ -422,14 +678,52 @@ const OrderDetail = () => {
     );
 
     // 状态按钮组件
+    // 🆕 scanner 模式下：check 需长按3秒，uncheck 保持单次点击
     const StatusButton = () => (
-      <div 
+      <div
         onTouchStart={(e) => {
           e.preventDefault();
-          if (!isUpdating) handleItemClick(item);
+          if (isUpdating) return;
+          if (scannerPackingOrdersEnabled && item.packer_status !== 'ready') {
+            // scanner 模式：长按开始
+            handleLongPressStart(item);
+          } else {
+            handleItemClick(item);
+          }
+        }}
+        onTouchEnd={(e) => {
+          e.preventDefault();
+          if (scannerPackingOrdersEnabled && item.packer_status !== 'ready') {
+            handleLongPressCancel();
+            // 如果是短触，显示提示
+            handleItemClick(item);
+          }
+        }}
+        onTouchMove={() => {
+          if (scannerPackingOrdersEnabled) handleLongPressCancel();
+        }}
+        onMouseDown={() => {
+          if (isUpdating) return;
+          if (scannerPackingOrdersEnabled && item.packer_status !== 'ready') {
+            handleLongPressStart(item);
+          }
+        }}
+        onMouseUp={() => {
+          if (scannerPackingOrdersEnabled && item.packer_status !== 'ready') {
+            handleLongPressCancel();
+          }
+        }}
+        onMouseLeave={() => {
+          if (scannerPackingOrdersEnabled) handleLongPressCancel();
         }}
         onClick={(e) => {
-          if (!isUpdating) handleItemClick(item);
+          if (isUpdating) return;
+          if (scannerPackingOrdersEnabled && item.packer_status !== 'ready') {
+            // 长按已由 mousedown/up 处理，click 只用来显示提示
+            handleItemClick(item);
+            return;
+          }
+          handleItemClick(item);
         }}
         style={{ 
           cursor: isUpdating ? 'not-allowed' : 'pointer', 
@@ -471,7 +765,11 @@ const OrderDetail = () => {
     );
 
     return (
-      <div className="orderdetail-item-container">
+      <div
+        id={`order-item-${item.id}`}
+        className="orderdetail-item-container"
+        style={{ backgroundColor: itemBgColor, transition: 'background-color 0.3s' }}
+      >
         {/* 桌面端布局 - 完全保留原有样式 */}
         <div className="orderdetail-item-desktop">
           <div className="orderdetail-item-thumbnail">
@@ -809,6 +1107,54 @@ const OrderDetail = () => {
             color: message.includes('Error') || message.includes('error') ? '#d72c0d' : '#1a7f37'
           }}>
             {message}
+          </div>
+        )}
+
+        {/* 🆕 单次点击提示（scanner 模式） */}
+        {showScanHint && (
+          <div
+            onClick={() => setShowScanHint(false)}
+            style={{
+              padding: '10px 16px',
+              marginBottom: '12px',
+              backgroundColor: '#fff4e5',
+              border: '1px solid #ffb020',
+              borderRadius: '6px',
+              fontSize: '14px',
+              color: '#7d5a00',
+              cursor: 'pointer'
+            }}
+          >
+            Scan the item to check, or press and hold for 3 sec.
+          </div>
+        )}
+
+        {/* 🆕 No match 弹窗 */}
+        {showNoMatch && (
+          <div
+            onClick={() => setShowNoMatch(false)}
+            style={{
+              position: 'fixed',
+              top: 0, left: 0, right: 0, bottom: 0,
+              backgroundColor: 'rgba(0,0,0,0.4)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 9999,
+              cursor: 'pointer'
+            }}
+          >
+            <div style={{
+              backgroundColor: 'white',
+              borderRadius: '12px',
+              padding: '32px 40px',
+              fontSize: '18px',
+              fontWeight: '600',
+              color: '#d72c0d',
+              boxShadow: '0 4px 24px rgba(0,0,0,0.18)'
+            }}>
+              No match found
+            </div>
           </div>
         )}
 

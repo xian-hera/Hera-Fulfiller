@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from '../api/axios';
 import {
@@ -23,6 +23,28 @@ import {
 } from '@shopify/polaris';
 import { SortIcon, ImageIcon } from '@shopify/polaris-icons';
 import NumericKeypad from '../components/NumericKeypad';
+
+// 🆕 Scanner helper functions
+function resolveKey(e) {
+  if (e.key && e.key !== 'Unidentified' && e.key.length === 1) return e.key;
+  if (e.code) {
+    if (e.code.startsWith('Digit')) return e.code.slice(5);
+    if (e.code.startsWith('Numpad') && e.code.length === 7) return e.code.slice(6);
+    if (e.code.startsWith('Key') && e.code.length === 4) {
+      const ch = e.code.slice(3);
+      return e.shiftKey ? ch : ch.toLowerCase();
+    }
+    const sym = { Minus:'-', Equal:'=', BracketLeft:'[', BracketRight:']',
+      Backslash:'\\', Semicolon:';', Quote:"'", Backquote:'`',
+      Comma:',', Period:'.', Slash:'/' };
+    if (sym[e.code]) return sym[e.code];
+  }
+  return null;
+}
+
+function cleanBarcode(raw) {
+  return raw.replace(/^[^0-9]+/, '');
+}
 
 const Picker = () => {
   const navigate = useNavigate();
@@ -53,6 +75,34 @@ const Picker = () => {
   );
   const pollingRef = React.useRef(null);
   const activeUsersRef = React.useRef(1);
+
+  // 🆕 Scanner state
+  const [scannerPickerEnabled, setScannerPickerEnabled] = useState(false);
+  // 🆕 扫码高亮: { [itemId]: true }
+  const [scanHighlight, setScanHighlight] = useState({});
+  // 🆕 临时置顶的 item ids（扫码命中但当前 filter 不可见）
+  const [tempVisibleItems, setTempVisibleItems] = useState([]);
+  // 🆕 no match 弹窗
+  const [showNoMatch, setShowNoMatch] = useState(false);
+  // 🆕 scanner buffer refs
+  const barcodeBufferRef = useRef('');
+  const barcodeTimerRef = useRef(null);
+  // 🆕 items ref（供 scanner 回调读取最新值）
+  const itemsRef = useRef([]);
+  // 🆕 statusFilter ref（供 scanner 回调读取最新值）
+  const statusFilterRef = useRef(['picking', 'missing', 'picked']);
+  // 🆕 tempVisible timers: { [itemId]: timerId }
+  const tempVisibleTimersRef = useRef({});
+
+  // 🆕 同步 items 到 ref
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
+
+  // 🆕 同步 statusFilter 到 ref
+  useEffect(() => {
+    statusFilterRef.current = statusFilter;
+  }, [statusFilter]);
 
   // 🆕 计算每个状态的实时数量（按 quantity 累加）
   const getStatusCounts = useCallback(() => {
@@ -144,9 +194,21 @@ const Picker = () => {
     } catch {}
   }, [startPolling, stopPolling]);
 
+  // 🆕 读取 scanner 设置
+  const fetchScannerSettings = useCallback(async () => {
+    try {
+      const response = await axios.get('/api/settings');
+      const s = response.data.settings || {};
+      setScannerPickerEnabled(s.scanner_enabled === 'true' && s.scanner_picker === 'true');
+    } catch (error) {
+      console.error('Error fetching scanner settings:', error);
+    }
+  }, []);
+
   useEffect(() => {
     fetchItems();
     sendHeartbeat();
+    fetchScannerSettings();
 
     // Send heartbeat every 15 seconds
     const heartbeatInterval = setInterval(sendHeartbeat, 15000);
@@ -181,7 +243,7 @@ const Picker = () => {
         sessionId: sessionIdRef.current
       }).catch(() => {});
     };
-  }, [sendHeartbeat, stopPolling]);
+  }, [sendHeartbeat, stopPolling, fetchScannerSettings]);
 
   useEffect(() => {
     applyFilters();
@@ -466,6 +528,159 @@ const Picker = () => {
     return sku.match(/.{1,4}/g)?.join(' ') || sku;
   };
 
+  // 🆕 滚动到指定 item
+  const scrollToItem = (itemId) => {
+    const el = document.getElementById(`picker-item-${itemId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  };
+
+  // 🆕 清除某个 item 的临时可见状态
+  const clearTempVisible = useCallback((itemId) => {
+    setTempVisibleItems(prev => prev.filter(id => id !== itemId));
+    setScanHighlight(prev => {
+      const next = { ...prev };
+      delete next[itemId];
+      return next;
+    });
+    if (tempVisibleTimersRef.current[itemId]) {
+      clearTimeout(tempVisibleTimersRef.current[itemId]);
+      delete tempVisibleTimersRef.current[itemId];
+    }
+  }, []);
+
+  // 🆕 处理 Picker 扫码逻辑
+  const handleScan = useCallback(async (barcode) => {
+    const allItems = itemsRef.current;
+    const currentFilter = statusFilterRef.current;
+
+    // 只匹配 picking 和 missing 状态的 item
+    const matchedItems = allItems.filter(
+      item => item.sku === barcode && (item.picker_status === 'picking' || item.picker_status === 'missing')
+    );
+
+    if (matchedItems.length === 0) {
+      setShowNoMatch(true);
+      return;
+    }
+
+    // 高亮所有匹配的 item（5秒后恢复）
+    matchedItems.forEach(item => {
+      setScanHighlight(prev => ({ ...prev, [item.id]: true }));
+      setTimeout(() => {
+        setScanHighlight(prev => {
+          const next = { ...prev };
+          delete next[item.id];
+          return next;
+        });
+      }, 5000);
+    });
+
+    // 找出当前不可见的匹配 item（因为 filter 原因）
+    const hiddenMatches = matchedItems.filter(item => !currentFilter.includes(item.picker_status));
+
+    // 将隐藏的 item 加入临时可见列表，10秒后自动移除
+    hiddenMatches.forEach(item => {
+      // 如果已经有定时器，先清除
+      if (tempVisibleTimersRef.current[item.id]) {
+        clearTimeout(tempVisibleTimersRef.current[item.id]);
+      }
+      setTempVisibleItems(prev => {
+        if (prev.includes(item.id)) return prev;
+        return [item.id, ...prev];
+      });
+      tempVisibleTimersRef.current[item.id] = setTimeout(() => {
+        clearTempVisible(item.id);
+      }, 10000);
+    });
+
+    // 找 quantity 为 1 且 picking 的 item，自动 check（status → picked）
+    const autoCheckCandidates = matchedItems.filter(
+      item => item.picker_status === 'picking' && item.quantity === 1
+    );
+
+    if (autoCheckCandidates.length > 0) {
+      // 自动 check 第一个
+      const target = autoCheckCandidates[0];
+      await updateItemStatus(target.id, 'picked');
+      // 如果 picked 状态当前不可见，10秒后移除临时可见
+      if (!currentFilter.includes('picked')) {
+        if (tempVisibleTimersRef.current[target.id]) {
+          clearTimeout(tempVisibleTimersRef.current[target.id]);
+        }
+        setTempVisibleItems(prev => {
+          if (prev.includes(target.id)) return prev;
+          return [target.id, ...prev];
+        });
+        tempVisibleTimersRef.current[target.id] = setTimeout(() => {
+          clearTempVisible(target.id);
+        }, 10000);
+      }
+      scrollToItem(target.id);
+    } else {
+      // 没有自动 check，滚动到第一个匹配 item
+      scrollToItem(matchedItems[0].id);
+    }
+  }, [clearTempVisible]);
+
+  // 🆕 scanner 键盘监听
+  useEffect(() => {
+    if (!scannerPickerEnabled) return;
+
+    const handleKeyDown = (e) => {
+      // 如果焦点在 input/textarea 内，忽略
+      const activeTag = document.activeElement?.tagName;
+      if (['INPUT', 'TEXTAREA'].includes(activeTag)) return;
+
+      if (e.key === 'Enter') {
+        clearTimeout(barcodeTimerRef.current);
+        const barcode = cleanBarcode(barcodeBufferRef.current.trim());
+        barcodeBufferRef.current = '';
+        if (barcode.length > 0) handleScan(barcode);
+        return;
+      }
+
+      const ch = resolveKey(e);
+      if (ch) {
+        barcodeBufferRef.current += ch;
+        clearTimeout(barcodeTimerRef.current);
+        barcodeTimerRef.current = setTimeout(() => {
+          barcodeBufferRef.current = '';
+        }, 500);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      clearTimeout(barcodeTimerRef.current);
+    };
+  }, [scannerPickerEnabled, handleScan]);
+
+  // 🆕 当 items 状态改变时，检查 tempVisibleItems 中的 item 是否已符合当前 filter
+  useEffect(() => {
+    if (tempVisibleItems.length === 0) return;
+    tempVisibleItems.forEach(itemId => {
+      const item = items.find(i => i.id === itemId);
+      if (item && statusFilter.includes(item.picker_status)) {
+        // 已经符合当前 filter，移除临时可见
+        clearTempVisible(itemId);
+      }
+    });
+  }, [items, statusFilter, tempVisibleItems, clearTempVisible]);
+
+  // 🆕 构建最终显示列表：tempVisibleItems 置顶 + 普通 filteredItems
+  const displayItems = React.useMemo(() => {
+    if (tempVisibleItems.length === 0) return filteredItems;
+    const allCurrentItems = itemsRef.current;
+    const tempItems = tempVisibleItems
+      .map(id => allCurrentItems.find(i => i.id === id))
+      .filter(Boolean);
+    const regularItems = filteredItems.filter(item => !tempVisibleItems.includes(item.id));
+    return [...tempItems, ...regularItems];
+  }, [filteredItems, tempVisibleItems]);
+
   const renderItem = (item) => {
     const { id, quantity, image_url, order_name, display_type, sku, brand, title, size, picker_status, variant_title } = item;
 
@@ -485,8 +700,16 @@ const Picker = () => {
       <Thumbnail source={ImageIcon} alt="No image" size="large" />
     );
 
+    // 🆕 扫码高亮背景
+    const isHighlighted = !!scanHighlight[item.id];
+    const itemBgColor = isHighlighted ? '#e4fef3' : 'transparent';
+
     return (
-      <div className="picker-item-container">
+      <div
+        id={`picker-item-${item.id}`}
+        className="picker-item-container"
+        style={{ backgroundColor: itemBgColor, transition: 'background-color 0.3s' }}
+      >
         {/* 桌面端：状态标签在右上角 */}
         <div className="picker-item-badge-desktop">
           {getItemBadge(picker_status)}
@@ -917,10 +1140,10 @@ const Picker = () => {
           <Layout.Section>
             <Card>
               <div>
-                {filteredItems.length === 0 ? (
+                {displayItems.length === 0 ? (
                   <Banner>No items to pick</Banner>
                 ) : (
-                  filteredItems.map(item => (
+                  displayItems.map(item => (
                     <div key={item.id} style={{ borderBottom: '1px solid #e1e3e5' }}>
                       {renderItem(item)}
                     </div>
@@ -1067,6 +1290,35 @@ const Picker = () => {
             </BlockStack>
           </Modal.Section>
         </Modal>
+      )}
+
+      {/* 🆕 No match 弹窗 */}
+      {showNoMatch && (
+        <div
+          onClick={() => setShowNoMatch(false)}
+          style={{
+            position: 'fixed',
+            top: 0, left: 0, right: 0, bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.4)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            cursor: 'pointer'
+          }}
+        >
+          <div style={{
+            backgroundColor: 'white',
+            borderRadius: '12px',
+            padding: '32px 40px',
+            fontSize: '18px',
+            fontWeight: '600',
+            color: '#d72c0d',
+            boxShadow: '0 4px 24px rgba(0,0,0,0.18)'
+          }}>
+            No match found
+          </div>
+        </div>
       )}
     </>
       {/* Conflict toast */}
