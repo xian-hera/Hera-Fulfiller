@@ -360,6 +360,7 @@ class OrderWebhookHandler {
           // 新增的 item（订单编辑后加了新产品）
           console.log(`  Action: NEW ITEM`);
           itemsChanged = true;
+          // 🔒 FIX: ON CONFLICT 防止重复 webhook 重复插入同一个 shopify_line_item_id
           const insertLineItem = db.prepare(`
             INSERT INTO line_items (
               shopify_order_id, order_number, shopify_line_item_id, quantity,
@@ -367,6 +368,9 @@ class OrderWebhookHandler {
               url_handle, product_type, wig_number, custom_name, has_weight_warning, variant_title,
               picker_status, packer_status, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT (shopify_line_item_id) DO UPDATE SET
+              quantity = EXCLUDED.quantity,
+              updated_at = CURRENT_TIMESTAMP
           `);
 
           await insertLineItem.run(
@@ -393,41 +397,55 @@ class OrderWebhookHandler {
           );
         } else if (item.quantity > totalExistingQty) {
           // 数量增加（订单编辑后增加了数量）
-          const diff = item.quantity - totalExistingQty;
-          console.log(`  Action: INCREASE (diff: ${diff})`);
-          itemsChanged = true;
-          
-          const insertLineItem = db.prepare(`
-            INSERT INTO line_items (
-              shopify_order_id, order_number, shopify_line_item_id, quantity,
-              image_url, title, name, brand, size, weight, weight_unit, sku,
-              url_handle, product_type, wig_number, custom_name, has_weight_warning, variant_title,
-              picker_status, packer_status, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-          `);
+          console.log(`  Action: INCREASE`);
 
-          await insertLineItem.run(
-            orderData.id.toString(),
-            orderData.order_number.toString(),
-            itemId + '_' + Date.now(),
-            diff,
-            imageUrl,
-            item.title,
-            item.name,
-            item.vendor,
-            size,
-            weight,
-            weightUnit,
-            item.sku,
-            urlHandle,
-            productType,
-            wigNumber,
-            customName,
-            hasWeightWarning,
-            item.variant_title || '',
-            'picking',
-            'packing'
-          );
+          // 🔒 FIX: 幂等性检查 — 重新查一次 DB 最新数量，防止重复 webhook 多次叠加
+          // itemGroups 是在本次 webhook 开始时快照的，如果同一 webhook 被 Shopify 重复推送
+          // 两次调用可能同时读到旧快照，都认为需要 INCREASE，导致重复插入
+          const freshGroup = await db.prepare(
+            `SELECT * FROM line_items WHERE shopify_order_id = ? AND (shopify_line_item_id = ? OR shopify_line_item_id LIKE ?)`
+          ).all(orderData.id.toString(), itemId, `${itemId}_%`);
+          const freshQty = freshGroup.reduce((sum, i) => sum + i.quantity, 0);
+
+          if (freshQty >= item.quantity) {
+            console.log(`  INCREASE skipped — DB already has qty ${freshQty}, target is ${item.quantity}`);
+          } else {
+            const diff = item.quantity - freshQty;
+            console.log(`  INCREASE confirmed (fresh DB qty: ${freshQty}, target: ${item.quantity}, diff: ${diff})`);
+            itemsChanged = true;
+
+            const insertLineItem = db.prepare(`
+              INSERT INTO line_items (
+                shopify_order_id, order_number, shopify_line_item_id, quantity,
+                image_url, title, name, brand, size, weight, weight_unit, sku,
+                url_handle, product_type, wig_number, custom_name, has_weight_warning, variant_title,
+                picker_status, packer_status, created_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            `);
+
+            await insertLineItem.run(
+              orderData.id.toString(),
+              orderData.order_number.toString(),
+              itemId + '_' + Date.now(),
+              diff,
+              imageUrl,
+              item.title,
+              item.name,
+              item.vendor,
+              size,
+              weight,
+              weightUnit,
+              item.sku,
+              urlHandle,
+              productType,
+              wigNumber,
+              customName,
+              hasWeightWarning,
+              item.variant_title || '',
+              'picking',
+              'packing'
+            );
+          }
         } else if (item.quantity < totalExistingQty) {
           // 数量减少（订单编辑后减少了数量）
           console.log(`  Action: DECREASE`);

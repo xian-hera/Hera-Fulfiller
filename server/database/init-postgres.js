@@ -321,6 +321,7 @@ async function initPostgres() {
   await client.query('CREATE INDEX IF NOT EXISTS idx_line_items_shopify_order_id ON line_items(shopify_order_id)');
   await client.query('CREATE INDEX IF NOT EXISTS idx_line_items_picker_status ON line_items(picker_status)');
   await client.query('CREATE INDEX IF NOT EXISTS idx_line_items_packer_status ON line_items(packer_status)');
+  await client.query('CREATE UNIQUE INDEX IF NOT EXISTS line_items_shopify_line_item_id_unique ON line_items(shopify_line_item_id)');
   await client.query('CREATE INDEX IF NOT EXISTS idx_transfer_items_status ON transfer_items(status)');
   await client.query('CREATE INDEX IF NOT EXISTS idx_transfer_items_connecteam_tasked ON transfer_items(connecteam_tasked)');
   await client.query('CREATE INDEX IF NOT EXISTS idx_transfer_items_shopify_transferred ON transfer_items(shopify_transferred)');
