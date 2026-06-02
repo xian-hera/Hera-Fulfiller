@@ -140,11 +140,28 @@ class CanadaPostClient {
         <address-line-1>${this.escapeXml(order.shipping_address1 || '')}</address-line-1>
         ${order.shipping_address2 ? `<address-line-2>${this.escapeXml(order.shipping_address2)}</address-line-2>` : ''}
         <city>${this.escapeXml(order.shipping_city || '')}</city>
-        <prov-state>${this.escapeXml(order.shipping_province || '')}</prov-state>
+        <prov-state>${this.getProvinceCode(order.shipping_province || '')}</prov-state>
         <country-code>${this.getCountryCode(order.shipping_country_code || order.shipping_country)}</country-code>
         <postal-zip-code>${(order.shipping_zip || '').replace(/\s/g, '')}</postal-zip-code>
       </address-details>
     </destination>`;
+  }
+
+  // Convert province/state name to code
+  getProvinceCode(province) {
+    if (!province) return province;
+    if (province.length <= 3) return province.toUpperCase();
+    const map = {
+      'alberta': 'AB', 'british columbia': 'BC', 'manitoba': 'MB',
+      'new brunswick': 'NB', 'newfoundland and labrador': 'NL', 'newfoundland': 'NL',
+      'northwest territories': 'NT', 'nova scotia': 'NS', 'nunavut': 'NU',
+      'ontario': 'ON', 'prince edward island': 'PE', 'quebec': 'QC', 'québec': 'QC',
+      'saskatchewan': 'SK', 'yukon': 'YT',
+      // US states
+      'california': 'CA', 'new york': 'NY', 'texas': 'TX', 'florida': 'FL',
+      'washington': 'WA', 'illinois': 'IL', 'pennsylvania': 'PA', 'ohio': 'OH',
+    };
+    return map[province.toLowerCase().trim()] || province.substring(0, 2).toUpperCase();
   }
 
   // Convert country name to 2-letter ISO code
