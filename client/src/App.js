@@ -13,6 +13,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 import TransferPlanner from './pages/TransferPlanner';
 import ConnecteamTask from './pages/ConnecteamTask';
 import ShopifyTransfer from './pages/ShopifyTransfer';
+import Manifest from './pages/Manifest';
 
 function App() {
   return (
@@ -29,6 +30,7 @@ function App() {
             <Route path="/transfer-planner" element={<TransferPlanner />} />
             <Route path="/connecteam-task" element={<ConnecteamTask />} />
             <Route path="/shopify-transfer" element={<ShopifyTransfer />} />
+            <Route path="/manifest" element={<Manifest />} />
           </Routes>
         </Router>
       </ErrorBoundary>

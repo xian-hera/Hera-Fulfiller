@@ -55,40 +55,26 @@ router.get('/test-csv/:sku', async (req, res) => {
   }
 });
 
-// Update settings
+// Update settings — supports both legacy column fields and generic key/value
 router.post('/update', async (req, res) => {
   try {
-    const { transferCsvColumn, pickerWigColumn, skuColumn } = req.body;
+    const { transferCsvColumn, pickerWigColumn, skuColumn, key, value } = req.body;
 
-    if (transferCsvColumn) {
-      await db.prepare(`
-        INSERT INTO settings (key, value, updated_at)
-        VALUES (?, ?, CURRENT_TIMESTAMP)
-        ON CONFLICT (key) DO UPDATE SET
-          value = EXCLUDED.value,
-          updated_at = CURRENT_TIMESTAMP
-      `).run('transfer_csv_column', transferCsvColumn.toUpperCase());
-    }
+    const upsert = db.prepare(`
+      INSERT INTO settings (key, value, updated_at)
+      VALUES (?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT (key) DO UPDATE SET
+        value = EXCLUDED.value,
+        updated_at = CURRENT_TIMESTAMP
+    `);
 
-    if (pickerWigColumn) {
-      await db.prepare(`
-        INSERT INTO settings (key, value, updated_at)
-        VALUES (?, ?, CURRENT_TIMESTAMP)
-        ON CONFLICT (key) DO UPDATE SET
-          value = EXCLUDED.value,
-          updated_at = CURRENT_TIMESTAMP
-      `).run('picker_wig_column', pickerWigColumn.toUpperCase());
-    }
+    // Legacy: specific column fields
+    if (transferCsvColumn) upsert.run('transfer_csv_column', transferCsvColumn.toUpperCase());
+    if (pickerWigColumn) upsert.run('picker_wig_column', pickerWigColumn.toUpperCase());
+    if (skuColumn) upsert.run('sku_column', skuColumn.toUpperCase());
 
-    if (skuColumn) {
-      await db.prepare(`
-        INSERT INTO settings (key, value, updated_at)
-        VALUES (?, ?, CURRENT_TIMESTAMP)
-        ON CONFLICT (key) DO UPDATE SET
-          value = EXCLUDED.value,
-          updated_at = CURRENT_TIMESTAMP
-      `).run('sku_column', skuColumn.toUpperCase());
-    }
+    // Generic: key/value pair
+    if (key) upsert.run(key, value ?? '');
 
     res.json({ success: true });
   } catch (error) {
@@ -423,6 +409,34 @@ router.post('/reset-box-usage', async (req, res) => {
       success: false, 
       error: 'Failed to reset box usage: ' + error.message 
     });
+  }
+});
+
+// 🆕 Update multiple settings at once
+router.post('/update-multiple', async (req, res) => {
+  try {
+    const updates = req.body;
+
+    if (!updates || typeof updates !== 'object') {
+      return res.status(400).json({ error: 'Request body must be an object of key/value pairs' });
+    }
+
+    const upsert = db.prepare(`
+      INSERT INTO settings (key, value, updated_at)
+      VALUES (?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT (key) DO UPDATE SET
+        value = EXCLUDED.value,
+        updated_at = CURRENT_TIMESTAMP
+    `);
+
+    for (const [key, value] of Object.entries(updates)) {
+      upsert.run(key, value ?? '');
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error updating multiple settings:', error);
+    res.status(500).json({ error: 'Failed to update settings: ' + error.message });
   }
 });
 

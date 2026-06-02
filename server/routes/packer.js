@@ -269,7 +269,7 @@ router.patch('/items/:id/packer-status', async (req, res) => {
   }
 });
 
-// 🆕 Complete 订单时同时减少 box quantity 并更新 Shopify metafield
+// 🆕 Complete order - with optional Pack & Label It flow
 router.post('/orders/:shopifyOrderId/complete', async (req, res) => {
   try {
     const { shopifyOrderId } = req.params;
@@ -293,7 +293,11 @@ router.post('/orders/:shopifyOrderId/complete', async (req, res) => {
     }
 
     console.log(`Order found: ${order.name}`);
-    console.log(`shopify_order_id from DB: ${order.shopify_order_id}`);
+
+    // 获取 box type 详情（含 dimensions）
+    const boxTypeRecord = await db.prepare(
+      'SELECT * FROM box_types WHERE code = ?'
+    ).get(boxType);
 
     // 更新订单状态
     await db.prepare(`
@@ -310,97 +314,364 @@ router.post('/orders/:shopifyOrderId/complete', async (req, res) => {
       WHERE code = ?
     `).run(boxType);
 
-    console.log(`✓ Box type ${boxType} usage count updated and quantity decreased`);
+    console.log(`✓ Box type ${boxType} usage count updated`);
 
-    // 🆕 更新 Shopify Order Metafield
-    try {
-      // 从 shopify_order_id 中提取真正的 Shopify Order ID
-      // 格式：gid://shopify/Order/7109941887286 → 7109941887286
-      let realShopifyOrderId = shopifyOrderId;
-      
-      if (shopifyOrderId.includes('gid://shopify/Order/')) {
-        realShopifyOrderId = shopifyOrderId.split('gid://shopify/Order/')[1];
-        console.log(`Extracted Shopify Order ID from GID: ${realShopifyOrderId}`);
-      } else if (shopifyOrderId.includes('/')) {
-        // 如果还有其他斜杠格式，取最后一部分
-        realShopifyOrderId = shopifyOrderId.split('/').pop();
-        console.log(`Extracted Shopify Order ID from path: ${realShopifyOrderId}`);
-      }
-
-      console.log(`Using Shopify Order ID for metafield: ${realShopifyOrderId}`);
-
-      const shopifyClient = require('../shopify/client');
-      
-      // 更新 ready metafield
-      const result = await shopifyClient.updateOrderMetafield(
-        realShopifyOrderId,
-        'custom',
-        'ready',
-        'true',
-        'boolean'
-      );
-      
-      console.log(`✓ Shopify metafield 'ready' updated successfully for Order ${order.name}`);
-      console.log(`Metafield ID: ${result.id}`);
-      
-      // 🆕 更新 packed_time metafield（当前日期和时间）
-      const packedTime = new Date().toISOString();
-      const packedTimeResult = await shopifyClient.updateOrderMetafield(
-        realShopifyOrderId,
-        'custom',
-        'packed_time',
-        packedTime,
-        'date_time'
-      );
-      
-      console.log(`✓ Shopify metafield 'packed_time' updated: ${packedTime}`);
-      console.log(`Metafield ID: ${packedTimeResult.id}`);
-      
-      // 🆕 更新 custom.package metafield (box type)
-      const packageResult = await shopifyClient.updateOrderMetafield(
-        realShopifyOrderId,
-        'custom',
-        'package',
-        boxType,
-        'single_line_text_field'
-      );
-      
-      console.log(`✓ Shopify metafield 'package' updated: ${boxType}`);
-      console.log(`Metafield ID: ${packageResult.id}`);
-      
-      // 🆕 更新 custom.weight metafield (如果有输入)
-      if (weight) {
-        const weightResult = await shopifyClient.updateOrderMetafield(
-          realShopifyOrderId,
-          'custom',
-          'weight',
-          JSON.stringify({
-            value: parseFloat(weight),
-            unit: 'g'
-          }),
-          'weight'
-        );
-        
-        console.log(`✓ Shopify metafield 'weight' updated: ${weight}g`);
-        console.log(`Metafield ID: ${weightResult.id}`);
-      } else {
-        console.log(`⚠️ No weight provided, skipping weight metafield`);
-      }
-    } catch (metafieldError) {
-      console.error('⚠️ Error updating Shopify metafield (non-critical):', metafieldError.message);
-      if (metafieldError.response) {
-        console.error('Response status:', metafieldError.response.status);
-        console.error('Response data:', JSON.stringify(metafieldError.response.data, null, 2));
-      }
-      // 不阻止主流程
+    // 提取真正的 Shopify Order ID（数字格式）
+    let realShopifyOrderId = shopifyOrderId;
+    if (shopifyOrderId.includes('gid://shopify/Order/')) {
+      realShopifyOrderId = shopifyOrderId.split('gid://shopify/Order/')[1];
+    } else if (shopifyOrderId.includes('/')) {
+      realShopifyOrderId = shopifyOrderId.split('/').pop();
     }
+
+    const shopifyClient = require('../shopify/client');
+
+    // 更新 Shopify metafields（non-critical，不阻止主流程）
+    try {
+      await shopifyClient.updateOrderMetafield(realShopifyOrderId, 'custom', 'ready', 'true', 'boolean');
+      await shopifyClient.updateOrderMetafield(realShopifyOrderId, 'custom', 'packed_time', new Date().toISOString(), 'date_time');
+      await shopifyClient.updateOrderMetafield(realShopifyOrderId, 'custom', 'package', boxType, 'single_line_text_field');
+      if (weight) {
+        await shopifyClient.updateOrderMetafield(
+          realShopifyOrderId, 'custom', 'weight',
+          JSON.stringify({ value: parseFloat(weight), unit: 'g' }), 'weight'
+        );
+      }
+      console.log(`✓ Shopify metafields updated for ${order.name}`);
+    } catch (metafieldError) {
+      console.error('⚠️ Error updating Shopify metafields (non-critical):', metafieldError.message);
+    }
+
+    // ===== PACK & LABEL IT FLOW =====
+    // 检查是否启用了 pack_label_enabled
+    const packLabelSetting = await db.prepare(
+      "SELECT value FROM settings WHERE key = 'pack_label_enabled'"
+    ).get();
+    const packLabelEnabled = packLabelSetting?.value === 'true';
+
+    if (!packLabelEnabled) {
+      console.log('Pack & Label It is disabled, skipping label purchase');
+      console.log('========== ORDER COMPLETION END ==========\n');
+      return res.json({ success: true, packLabel: false });
+    }
+
+    console.log('Pack & Label It is enabled, proceeding with label purchase...');
+
+    // 获取 sender 地址设置
+    const senderSettings = await db.prepare(
+      "SELECT key, value FROM settings WHERE key IN ('sender_company','sender_contact','sender_address1','sender_address2','sender_city','sender_province','sender_postal_code')"
+    ).all();
+    const senderMap = {};
+    senderSettings.forEach(s => { senderMap[s.key] = s.value; });
+
+    const senderInfo = {
+      company: senderMap.sender_company || 'HERA BEAUTÉ',
+      contact: senderMap.sender_contact || '',
+      address1: senderMap.sender_address1 || '',
+      address2: senderMap.sender_address2 || '',
+      city: senderMap.sender_city || '',
+      province: senderMap.sender_province || '',
+      postalCode: senderMap.sender_postal_code || ''
+    };
+
+    // 获取 label options（预设的 optional services）
+    let labelOptions = {};
+    if (order.label_options) {
+      try { labelOptions = JSON.parse(order.label_options); } catch {}
+    }
+
+    // 计算实际使用的 weight（grams）
+    // 如果用户在 modal 填了 weight，用那个；否则用所有 line items 的 weight 之和
+    let totalWeightGrams = weight ? parseFloat(weight) : 0;
+    if (!totalWeightGrams) {
+      const lineItems = await db.prepare(
+        'SELECT weight, weight_unit, quantity FROM line_items WHERE shopify_order_id = ?'
+      ).all(shopifyOrderId);
+      totalWeightGrams = lineItems.reduce((sum, item) => {
+        const w = item.weight_unit === 'g' ? item.weight : item.weight * 1000;
+        return sum + (w * item.quantity);
+      }, 0);
+    }
+    // 最小 weight 50g，避免 API 报错
+    if (totalWeightGrams < 50) totalWeightGrams = 50;
+
+    // ── Step 1: Canada Post Create Shipment ──
+    let labelResult = null;
+    let labelStatus = 'failed';
+    let labelError = null;
+    let labelTrackingNumber = null;
+
+    try {
+      const canadaPostClient = require('../canadapost/client');
+      labelResult = await canadaPostClient.createShipment({
+        order,
+        boxType: boxTypeRecord,
+        weightGrams: totalWeightGrams,
+        labelOptions,
+        senderInfo
+      });
+      labelStatus = 'success';
+      labelTrackingNumber = labelResult.trackingPin;
+      console.log(`✓ Canada Post label created. Tracking: ${labelTrackingNumber}`);
+    } catch (cpError) {
+      labelError = cpError.message;
+      console.error('✗ Canada Post label creation failed:', cpError.message);
+    }
+
+    // 更新 label 状态到数据库
+    await db.prepare(`
+      UPDATE orders 
+      SET label_status = ?, label_error = ?, label_tracking_number = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE shopify_order_id = ?
+    `).run(labelStatus, labelError, labelTrackingNumber, shopifyOrderId);
+
+    // 如果 label 失败，停止流程，订单留在 fulfiller
+    if (labelStatus === 'failed') {
+      console.log('========== ORDER COMPLETION END (label failed) ==========\n');
+      return res.json({
+        success: false,
+        packLabel: true,
+        labelStatus: 'failed',
+        labelError,
+        fulfillStatus: null
+      });
+    }
+
+    // ── Step 2: Shopify Fulfill + Canada Post Fulfill（并行）──
+    let fulfillStatus = 'failed';
+    let fulfillError = null;
+
+    // 并行执行：Shopify fulfill 和 WebSocket 推送 label（打印）
+    const fulfillPromise = (async () => {
+      try {
+        const fulfillmentOrders = await shopifyClient.getFulfillmentOrders(shopifyOrderId);
+        const openFulfillmentOrder = fulfillmentOrders.find(fo => 
+          fo.status === 'OPEN' || fo.status === 'IN_PROGRESS'
+        );
+        if (!openFulfillmentOrder) {
+          throw new Error('No open fulfillment order found');
+        }
+        await shopifyClient.createFulfillment({
+          fulfillmentOrderId: openFulfillmentOrder.id,
+          trackingNumber: labelTrackingNumber
+        });
+        fulfillStatus = 'success';
+        console.log(`✓ Shopify order fulfilled with tracking: ${labelTrackingNumber}`);
+      } catch (fulfillErr) {
+        fulfillError = fulfillErr.message;
+        console.error('✗ Shopify fulfillment failed:', fulfillErr.message);
+      }
+    })();
+
+    // WebSocket 推送 label PDF 给打印机 agent（fire and forget）
+    const printPromise = (async () => {
+      try {
+        const { broadcastLabelPrint } = require('../websocket');
+        if (labelResult?.labelHref) {
+          const canadaPostClient = require('../canadapost/client');
+          const pdfBuffer = await canadaPostClient.getLabelPdf(labelResult.labelHref);
+          broadcastLabelPrint({
+            orderName: order.name,
+            trackingNumber: labelTrackingNumber,
+            pdfBase64: pdfBuffer.toString('base64')
+          });
+          console.log(`✓ Label PDF pushed to print agent for ${order.name}`);
+        }
+      } catch (printErr) {
+        console.error('⚠️ Label print push failed (non-critical):', printErr.message);
+      }
+    })();
+
+    // 等待 fulfill 完成（print 是 fire-and-forget）
+    await fulfillPromise;
+    printPromise.catch(() => {}); // suppress unhandled rejection
+
+    // 更新 fulfill 状态到数据库
+    await db.prepare(`
+      UPDATE orders 
+      SET fulfill_status = ?, fulfill_error = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE shopify_order_id = ?
+    `).run(fulfillStatus, fulfillError, shopifyOrderId);
+
+    // 如果 fulfill 成功，删除订单（webhook 会处理，但以防万一也手动删）
+    // 实际上 Shopify 的 order/fulfilled webhook 会触发删除，这里不重复删
+    // 只返回状态让前端决定如何跳转
 
     console.log('========== ORDER COMPLETION END ==========\n');
 
-    res.json({ success: true });
+    return res.json({
+      success: true,
+      packLabel: true,
+      labelStatus,
+      labelTrackingNumber,
+      fulfillStatus,
+      fulfillError: fulfillStatus === 'failed' ? fulfillError : null
+    });
+
   } catch (error) {
     console.error('Error completing order:', error);
     res.status(500).json({ error: 'Failed to complete order: ' + error.message });
+  }
+});
+
+// 🆕 Get label options for an order
+router.get('/orders/:shopifyOrderId/label-options', async (req, res) => {
+  try {
+    const { shopifyOrderId } = req.params;
+    const order = await db.prepare(
+      'SELECT label_options, label_status, label_error, label_tracking_number, fulfill_status, fulfill_error FROM orders WHERE shopify_order_id = ?'
+    ).get(shopifyOrderId);
+
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+
+    let labelOptions = {};
+    if (order.label_options) {
+      try { labelOptions = JSON.parse(order.label_options); } catch {}
+    }
+
+    res.json({
+      labelOptions,
+      labelStatus: order.label_status,
+      labelError: order.label_error,
+      labelTrackingNumber: order.label_tracking_number,
+      fulfillStatus: order.fulfill_status,
+      fulfillError: order.fulfill_error
+    });
+  } catch (error) {
+    console.error('Error fetching label options:', error);
+    res.status(500).json({ error: 'Failed to fetch label options: ' + error.message });
+  }
+});
+
+// 🆕 Save label options for an order
+router.patch('/orders/:shopifyOrderId/label-options', async (req, res) => {
+  try {
+    const { shopifyOrderId } = req.params;
+    const { labelOptions } = req.body;
+
+    await db.prepare(`
+      UPDATE orders 
+      SET label_options = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE shopify_order_id = ?
+    `).run(JSON.stringify(labelOptions || {}), shopifyOrderId);
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error saving label options:', error);
+    res.status(500).json({ error: 'Failed to save label options: ' + error.message });
+  }
+});
+
+// 🆕 Manifest management - get all untransmitted shipments grouped by date
+router.get('/manifest/pending', async (req, res) => {
+  try {
+    const orders = await db.prepare(`
+      SELECT name, label_tracking_number, label_status, created_at, box_type, weight
+      FROM orders 
+      WHERE label_status = 'success' 
+        AND fulfill_status = 'success'
+        AND manifest_transmitted = 0
+      ORDER BY created_at DESC
+    `).all();
+
+    // Group by date (group-id format HERA-YYYYMMDD)
+    const groups = {};
+    orders.forEach(order => {
+      const date = new Date(order.created_at);
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, '0');
+      const d = String(date.getDate()).padStart(2, '0');
+      const groupId = `HERA-${y}${m}${d}`;
+      if (!groups[groupId]) groups[groupId] = { groupId, date: `${y}-${m}-${d}`, orders: [] };
+      groups[groupId].orders.push(order);
+    });
+
+    res.json({ groups: Object.values(groups).sort((a, b) => a.date.localeCompare(b.date)) });
+  } catch (error) {
+    console.error('Error fetching pending manifests:', error);
+    res.status(500).json({ error: 'Failed to fetch pending manifests: ' + error.message });
+  }
+});
+
+// 🆕 Generate manifest - transmit all pending shipments
+router.post('/manifest/generate', async (req, res) => {
+  try {
+    // 获取 sender 设置
+    const senderSettings = await db.prepare(
+      "SELECT key, value FROM settings WHERE key IN ('sender_company','sender_contact','sender_address1','sender_address2','sender_city','sender_province','sender_postal_code')"
+    ).all();
+    const senderMap = {};
+    senderSettings.forEach(s => { senderMap[s.key] = s.value; });
+
+    const senderInfo = {
+      company: senderMap.sender_company || 'HERA BEAUTÉ',
+      contact: senderMap.sender_contact || '',
+      address1: senderMap.sender_address1 || '',
+      address2: senderMap.sender_address2 || '',
+      city: senderMap.sender_city || '',
+      province: senderMap.sender_province || '',
+      postalCode: senderMap.sender_postal_code || ''
+    };
+
+    // 获取所有未 transmit 的 shipment 的 group-ids
+    const orders = await db.prepare(`
+      SELECT name, label_tracking_number, created_at
+      FROM orders 
+      WHERE label_status = 'success' 
+        AND fulfill_status = 'success'
+        AND (manifest_transmitted = 0 OR manifest_transmitted IS NULL)
+    `).all();
+
+    if (orders.length === 0) {
+      return res.status(400).json({ error: 'No pending shipments to transmit' });
+    }
+
+    // 收集所有唯一的 group-ids
+    const groupIds = new Set();
+    orders.forEach(order => {
+      const date = new Date(order.created_at);
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, '0');
+      const d = String(date.getDate()).padStart(2, '0');
+      groupIds.add(`HERA-${y}${m}${d}`);
+    });
+
+    console.log(`Transmitting ${orders.length} shipments across ${groupIds.size} group(s):`, [...groupIds]);
+
+    const canadaPostClient = require('../canadapost/client');
+
+    // Transmit all groups together
+    const manifestLinks = await canadaPostClient.transmitShipments([...groupIds], senderInfo);
+
+    if (manifestLinks.length === 0) {
+      throw new Error('No manifest links returned from Canada Post');
+    }
+
+    // Download first manifest PDF
+    const manifestPdf = await canadaPostClient.getManifestPdf(manifestLinks[0]);
+
+    // Mark orders as transmitted
+    await db.prepare(`
+      UPDATE orders 
+      SET manifest_transmitted = 1, updated_at = CURRENT_TIMESTAMP
+      WHERE label_status = 'success' 
+        AND fulfill_status = 'success'
+        AND (manifest_transmitted = 0 OR manifest_transmitted IS NULL)
+    `).run();
+
+    console.log(`✓ Manifest generated. ${orders.length} shipments transmitted.`);
+
+    // Return PDF as base64 for download
+    res.json({
+      success: true,
+      shipmentCount: orders.length,
+      groupCount: groupIds.size,
+      manifestPdfBase64: manifestPdf.toString('base64')
+    });
+
+  } catch (error) {
+    console.error('Error generating manifest:', error);
+    res.status(500).json({ error: 'Failed to generate manifest: ' + error.message });
   }
 });
 

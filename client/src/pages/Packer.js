@@ -480,6 +480,12 @@ const Packer = () => {
         icon: SortIcon,
         onAction: handleSort
       }}
+      secondaryActions={[
+        {
+          content: 'Generate Manifest',
+          onAction: () => navigate('/manifest')
+        }
+      ]}
     >
       <Layout>
         <Layout.Section>

@@ -53,8 +53,15 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Start server
-app.listen(PORT, () => {
+// Start server with WebSocket support
+const http = require('http');
+const server = http.createServer(app);
+
+// Initialize WebSocket
+const { initWebSocket } = require('./websocket');
+initWebSocket(server);
+
+server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });

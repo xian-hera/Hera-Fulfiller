@@ -61,6 +61,26 @@ const OrderDetail = () => {
   const [noteValue, setNoteValue] = useState('');
   const [quantityConfirmStates, setQuantityConfirmStates] = useState({});
 
+  // 🆕 Pack & Label It 状态
+  const [packLabelEnabled, setPackLabelEnabled] = useState(false);
+  const [labelOptions, setLabelOptions] = useState({
+    signature: false,
+    cardForPickup: false,
+    leaveAtDoor: false
+  });
+  const [labelOptionsSaved, setLabelOptionsSaved] = useState({
+    signature: false,
+    cardForPickup: false,
+    leaveAtDoor: false
+  });
+  const [labelOptionsLoading, setLabelOptionsLoading] = useState(false);
+  // 错误状态 card
+  const [labelStatus, setLabelStatus] = useState(null);
+  const [labelError, setLabelError] = useState(null);
+  const [labelTrackingNumber, setLabelTrackingNumber] = useState(null);
+  const [fulfillStatus, setFulfillStatus] = useState(null);
+  const [fulfillError, setFulfillError] = useState(null);
+
   // 🆕 Scanner mode 状态
   const [scannerPackingOrdersEnabled, setScannerPackingOrdersEnabled] = useState(false);
   // 🆕 扫码高亮状态: { [itemId]: 'scanned' | 'already_checked' | 'confirm_needed' }
@@ -102,11 +122,13 @@ const OrderDetail = () => {
   useEffect(() => {
     fetchAllOrders();
     fetchScannerSettings();
+    fetchPackLabelSettings();
   }, []);
 
   useEffect(() => {
     if (shopifyOrderId) {
       fetchOrderDetail();
+      fetchLabelOptions();
     }
   }, [shopifyOrderId]);
 
@@ -122,6 +144,55 @@ const OrderDetail = () => {
       setScannerPackingOrdersEnabled(s.scanner_enabled === 'true' && s.scanner_packing_orders === 'true');
     } catch (error) {
       console.error('Error fetching scanner settings:', error);
+    }
+  };
+
+  // 🆕 读取 Pack & Label It 是否启用
+  const fetchPackLabelSettings = async () => {
+    try {
+      const response = await axios.get('/api/settings');
+      const s = response.data.settings || {};
+      setPackLabelEnabled(s.pack_label_enabled === 'true');
+    } catch (error) {
+      console.error('Error fetching pack label settings:', error);
+    }
+  };
+
+  // 🆕 读取该订单的 label options 和错误状态
+  const fetchLabelOptions = async () => {
+    if (!shopifyOrderId) return;
+    try {
+      const response = await axios.get(`/api/packer/orders/${shopifyOrderId}/label-options`);
+      const data = response.data;
+
+      if (data.labelOptions) {
+        setLabelOptions(data.labelOptions);
+        setLabelOptionsSaved(data.labelOptions);
+      }
+      setLabelStatus(data.labelStatus || null);
+      setLabelError(data.labelError || null);
+      setLabelTrackingNumber(data.labelTrackingNumber || null);
+      setFulfillStatus(data.fulfillStatus || null);
+      setFulfillError(data.fulfillError || null);
+    } catch (error) {
+      console.error('Error fetching label options:', error);
+    }
+  };
+
+  // 🆕 保存 label options
+  const handleLabelOptionsSave = async () => {
+    setLabelOptionsLoading(true);
+    try {
+      await axios.patch(`/api/packer/orders/${shopifyOrderId}/label-options`, { labelOptions });
+      setLabelOptionsSaved({ ...labelOptions });
+      setMessage('Label options saved');
+      setTimeout(() => setMessage(''), 3000);
+    } catch (error) {
+      console.error('Error saving label options:', error);
+      setMessage('Error saving label options');
+      setTimeout(() => setMessage(''), 3000);
+    } finally {
+      setLabelOptionsLoading(false);
     }
   };
 
@@ -615,27 +686,38 @@ const OrderDetail = () => {
   const handleOrderComplete = async ({ boxType, weight }) => {
     try {
       console.log('Completing order:', shopifyOrderId);
-      await axios.post(`/api/packer/orders/${shopifyOrderId}/complete`, {
+      const response = await axios.post(`/api/packer/orders/${shopifyOrderId}/complete`, {
         boxType,
         weight
       });
-      
-      console.log('Order completed, closing modal');
+
+      console.log('Order complete response:', response.data);
       setCompleteModal(false);
-      
-      await fetchAllOrders();
-      
-      const nextOrder = findNextOrder();
-      
-      console.log('Next order:', nextOrder);
-      
-      if (nextOrder) {
-        console.log('Jumping to next order:', nextOrder.shopify_order_id);
-        navigate(`/packer/${nextOrder.shopify_order_id}`);
-      } else {
-        console.log('No next order, returning to list');
-        navigate('/packer');
+
+      const { packLabel, labelStatus: ls, fulfillStatus: fs } = response.data;
+
+      // Pack & Label It 未启用，或者 label + fulfill 都成功 → 正常跳转
+      if (!packLabel || (ls === 'success' && fs === 'success')) {
+        await fetchAllOrders();
+        const nextOrder = findNextOrder();
+        if (nextOrder) {
+          navigate(`/packer/${nextOrder.shopify_order_id}`);
+        } else {
+          navigate('/packer');
+        }
+        return;
       }
+
+      // 有失败 → 停在当前页面，刷新 label options 显示错误 card
+      await fetchLabelOptions();
+      await fetchOrderDetail();
+
+      if (ls === 'failed') {
+        setMessage('Label creation failed. See details above.');
+      } else if (fs === 'failed') {
+        setMessage('Label created but order fulfillment failed. See details above.');
+      }
+      setTimeout(() => setMessage(''), 5000);
     } catch (error) {
       console.error('Error completing order:', error);
       setMessage('Error completing order');
@@ -1175,6 +1257,153 @@ const OrderDetail = () => {
         )}
 
         <Layout>
+
+          {/* 🆕 Error status card — only shown when label or fulfill failed */}
+          {(labelStatus === 'failed' || fulfillStatus === 'failed') && (
+            <Layout.Section>
+              <Card>
+                <div style={{ padding: '16px' }}>
+                  <div style={{ marginBottom: '12px' }}>
+                    <Text variant="headingSm" as="h3">Pack & Label It Status</Text>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {/* Label status */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '18px' }}>{labelStatus === 'success' ? '✅' : labelStatus === 'failed' ? '❌' : '—'}</span>
+                      <div>
+                        <Text variant="bodyMd" fontWeight="semibold">
+                          Label {labelStatus === 'success' ? 'created successfully' : labelStatus === 'failed' ? 'creation failed' : 'not attempted'}
+                        </Text>
+                        {labelStatus === 'success' && labelTrackingNumber && (
+                          <Text variant="bodySm" tone="subdued">Tracking: {labelTrackingNumber}</Text>
+                        )}
+                        {labelStatus === 'failed' && labelError && (
+                          <Text variant="bodySm" tone="critical">{labelError}</Text>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Fulfill status — only shown if label succeeded */}
+                    {labelStatus === 'success' && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '18px' }}>{fulfillStatus === 'success' ? '✅' : fulfillStatus === 'failed' ? '❌' : '—'}</span>
+                        <div>
+                          <Text variant="bodyMd" fontWeight="semibold">
+                            Order fulfillment {fulfillStatus === 'success' ? 'succeeded' : fulfillStatus === 'failed' ? 'failed' : 'not attempted'}
+                          </Text>
+                          {fulfillStatus === 'failed' && fulfillError && (
+                            <Text variant="bodySm" tone="critical">{fulfillError}</Text>
+                          )}
+                          {fulfillStatus === 'failed' && (
+                            <Text variant="bodySm" tone="subdued">
+                              You can manually fulfill this order in Shopify Admin using tracking number: {labelTrackingNumber}
+                            </Text>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </Card>
+            </Layout.Section>
+          )}
+
+          {/* 🆕 Label Options card — shown when Pack & Label It is enabled */}
+          {packLabelEnabled && (
+            <Layout.Section>
+              <Card>
+                <div style={{ padding: '16px' }}>
+                  <div style={{ marginBottom: '12px' }}>
+                    <Text variant="headingSm" as="h3">Label Options</Text>
+                    <Text variant="bodySm" tone="subdued">
+                      These options will be applied when the label is purchased.
+                    </Text>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
+                    {/* Signature */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <input
+                        type="checkbox"
+                        id="opt-signature"
+                        checked={labelOptions.signature || false}
+                        onChange={e => setLabelOptions(p => ({ ...p, signature: e.target.checked }))}
+                        style={{ cursor: 'pointer', width: '18px', height: '18px' }}
+                      />
+                      <label htmlFor="opt-signature" style={{ cursor: 'pointer', fontSize: '14px' }}>
+                        Signature Required
+                      </label>
+                    </div>
+
+                    {/* Card for pickup — mutually exclusive with Leave at Door */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <input
+                        type="checkbox"
+                        id="opt-card-pickup"
+                        checked={labelOptions.cardForPickup || false}
+                        onChange={e => {
+                          const val = e.target.checked;
+                          setLabelOptions(p => ({
+                            ...p,
+                            cardForPickup: val,
+                            leaveAtDoor: val ? false : p.leaveAtDoor
+                          }));
+                        }}
+                        style={{ cursor: 'pointer', width: '18px', height: '18px' }}
+                      />
+                      <label htmlFor="opt-card-pickup" style={{ cursor: 'pointer', fontSize: '14px' }}>
+                        Card for Pickup
+                      </label>
+                    </div>
+
+                    {/* Leave at Door — mutually exclusive with Card for Pickup */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <input
+                        type="checkbox"
+                        id="opt-leave-door"
+                        checked={labelOptions.leaveAtDoor || false}
+                        onChange={e => {
+                          const val = e.target.checked;
+                          setLabelOptions(p => ({
+                            ...p,
+                            leaveAtDoor: val,
+                            cardForPickup: val ? false : p.cardForPickup
+                          }));
+                        }}
+                        style={{ cursor: 'pointer', width: '18px', height: '18px' }}
+                      />
+                      <label htmlFor="opt-leave-door" style={{ cursor: 'pointer', fontSize: '14px' }}>
+                        Leave at Door, No Card
+                      </label>
+                    </div>
+
+                    {/* Liability Coverage — always on, display only */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <input
+                        type="checkbox"
+                        checked={true}
+                        disabled
+                        style={{ width: '18px', height: '18px' }}
+                        readOnly
+                      />
+                      <label style={{ fontSize: '14px', color: '#8c9196' }}>
+                        Liability Coverage up to $100 (always included)
+                      </label>
+                    </div>
+                  </div>
+
+                  <Button
+                    variant="primary"
+                    disabled={JSON.stringify(labelOptions) === JSON.stringify(labelOptionsSaved)}
+                    loading={labelOptionsLoading}
+                    onClick={handleLabelOptionsSave}
+                  >
+                    Save Label Options
+                  </Button>
+                </div>
+              </Card>
+            </Layout.Section>
+          )}
+
           <Layout.Section>
             <Card>
               <div style={{ padding: '16px', position: 'relative' }}>

@@ -3,31 +3,84 @@ import { useNavigate } from 'react-router-dom';
 import axios from '../api/axios';
 import { Page, Layout, Card, TextField, Button, Text, BlockStack } from '@shopify/polaris';
 
+// ── Collapsible Card helper ──────────────────────────────────
+const CollapsibleCard = ({ title, children }) => {
+  const [open, setOpen] = useState(false);
+  return (
+    <Card>
+      <div style={{ padding: '16px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Text variant="headingMd" as="h2">{title}</Text>
+          <Button onClick={() => setOpen(o => !o)}>
+            {open ? 'Collapse' : 'Expand'}
+          </Button>
+        </div>
+        {open && <div style={{ marginTop: '20px' }}>{children}</div>}
+      </div>
+    </Card>
+  );
+};
+
+// ── Save button (disabled when UI === saved state) ───────────
+const SaveButton = ({ isDirty, onSave, loading }) => (
+  <Button
+    variant="primary"
+    disabled={!isDirty}
+    loading={loading}
+    onClick={onSave}
+  >
+    Save
+  </Button>
+);
+
 const Settings = () => {
   const navigate = useNavigate();
+  const [message, setMessage] = useState('');
+
+  // ── Box types ──────────────────────────────────────────────
   const [boxTypes, setBoxTypes] = useState([]);
   const [newBoxCode, setNewBoxCode] = useState('');
   const [newBoxDimensions, setNewBoxDimensions] = useState('');
-  const [message, setMessage] = useState('');
-  
-  // 清理相关状态
-  const [cleanupPreview, setCleanupPreview] = useState(null);
-  const [dbStats, setDbStats] = useState(null);
-  const [isCleanupLoading, setIsCleanupLoading] = useState(false);
-  
-  // 清空所有数据相关状态
-  const [isClearingData, setIsClearingData] = useState(false);
-  const [showClearConfirm, setShowClearConfirm] = useState(false);
-  
-  // 🆕 Box 统计开始日期
   const [boxStatsStartDate, setBoxStatsStartDate] = useState(null);
 
-  // 🆕 Scanner mode 开关状态
-  const [scannerEnabled, setScannerEnabled] = useState(false);
-  const [scannerPicker, setScannerPicker] = useState(false);
-  const [scannerPackingOrders, setScannerPackingOrders] = useState(false);
-  const [scannerPacker, setScannerPacker] = useState(false);
+  // ── DB stats / cleanup ─────────────────────────────────────
+  const [dbStats, setDbStats] = useState(null);
+  const [cleanupPreview, setCleanupPreview] = useState(null);
+  const [isCleanupLoading, setIsCleanupLoading] = useState(false);
+  const [isClearingData, setIsClearingData] = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
 
+  // ── Scanner — UI state & saved state ──────────────────────
+  const [scannerUI, setScannerUI] = useState({
+    enabled: false, picker: false, packingOrders: false, packer: false
+  });
+  const [scannerSaved, setScannerSaved] = useState({
+    enabled: false, picker: false, packingOrders: false, packer: false
+  });
+  const [scannerSaving, setScannerSaving] = useState(false);
+  const scannerDirty =
+    scannerUI.enabled !== scannerSaved.enabled ||
+    scannerUI.picker !== scannerSaved.picker ||
+    scannerUI.packingOrders !== scannerSaved.packingOrders ||
+    scannerUI.packer !== scannerSaved.packer;
+
+  // ── Pack & Label It — UI state & saved state ───────────────
+  const [packLabelUI, setPackLabelUI] = useState({ enabled: false });
+  const [packLabelSaved, setPackLabelSaved] = useState({ enabled: false });
+  const [packLabelSaving, setPackLabelSaving] = useState(false);
+  const packLabelDirty = packLabelUI.enabled !== packLabelSaved.enabled;
+
+  // ── Fulfilment Manage (sender address) — UI & saved ────────
+  const defaultSender = {
+    company: '', contact: '', address1: '', address2: '',
+    city: '', province: '', postalCode: ''
+  };
+  const [senderUI, setSenderUI] = useState(defaultSender);
+  const [senderSaved, setSenderSaved] = useState(defaultSender);
+  const [senderSaving, setSenderSaving] = useState(false);
+  const senderDirty = JSON.stringify(senderUI) !== JSON.stringify(senderSaved);
+
+  // ── Init ───────────────────────────────────────────────────
   useEffect(() => {
     fetchSettings();
     fetchDbStats();
@@ -36,22 +89,37 @@ const Settings = () => {
   const fetchSettings = async () => {
     try {
       const response = await axios.get('/api/settings');
-      setBoxTypes(response.data.boxTypes || []);
-      
-      // 🆕 获取 box stats start date
-      const startDate = response.data.settings?.box_stats_start_date;
-      if (startDate) {
-        setBoxStatsStartDate(startDate);
-      }
-
-      // 🆕 获取 scanner settings
       const s = response.data.settings || {};
-      setScannerEnabled(s.scanner_enabled === 'true');
-      setScannerPicker(s.scanner_picker === 'true');
-      setScannerPackingOrders(s.scanner_packing_orders === 'true');
-      setScannerPacker(s.scanner_packer === 'true');
+      setBoxTypes(response.data.boxTypes || []);
+
+      if (s.box_stats_start_date) setBoxStatsStartDate(s.box_stats_start_date);
+
+      const scannerVals = {
+        enabled: s.scanner_enabled === 'true',
+        picker: s.scanner_picker === 'true',
+        packingOrders: s.scanner_packing_orders === 'true',
+        packer: s.scanner_packer === 'true'
+      };
+      setScannerUI(scannerVals);
+      setScannerSaved(scannerVals);
+
+      const packVals = { enabled: s.pack_label_enabled === 'true' };
+      setPackLabelUI(packVals);
+      setPackLabelSaved(packVals);
+
+      const senderVals = {
+        company: s.sender_company || '',
+        contact: s.sender_contact || '',
+        address1: s.sender_address1 || '',
+        address2: s.sender_address2 || '',
+        city: s.sender_city || '',
+        province: s.sender_province || '',
+        postalCode: s.sender_postal_code || ''
+      };
+      setSenderUI(senderVals);
+      setSenderSaved(senderVals);
     } catch (error) {
-      console.error('Error:', error);
+      console.error('Error fetching settings:', error);
       showMessage('Error loading settings');
     }
   };
@@ -65,140 +133,79 @@ const Settings = () => {
     }
   };
 
-  const fetchCleanupPreview = async () => {
-    setIsCleanupLoading(true);
-    try {
-      const response = await axios.get('/api/settings/cleanup-preview');
-      setCleanupPreview(response.data);
-      showMessage(`Found ${response.data.count} orders to clean up`);
-    } catch (error) {
-      console.error('Error fetching cleanup preview:', error);
-      showMessage('Error loading cleanup preview');
-    } finally {
-      setIsCleanupLoading(false);
-    }
-  };
-
-  const handleManualCleanup = async () => {
-    if (!window.confirm('Are you sure you want to delete all data older than 60 days? This action cannot be undone.')) {
-      return;
-    }
-
-    setIsCleanupLoading(true);
-    try {
-      const response = await axios.post('/api/settings/cleanup');
-      showMessage(response.data.message);
-      await fetchCleanupPreview();
-      await fetchDbStats();
-      await fetchSettings();
-    } catch (error) {
-      console.error('Error running cleanup:', error);
-      showMessage('Cleanup failed');
-    } finally {
-      setIsCleanupLoading(false);
-    }
-  };
-
-  const handleClearAllData = async () => {
-    if (!showClearConfirm) {
-      setShowClearConfirm(true);
-      return;
-    }
-
-    setIsClearingData(true);
-    try {
-      const response = await axios.post('/api/settings/clear-all-data');
-      showMessage(response.data.message);
-      setShowClearConfirm(false);
-      
-      await fetchDbStats();
-      await fetchSettings();
-      setCleanupPreview(null);
-    } catch (error) {
-      console.error('Error clearing data:', error);
-      showMessage('Failed to clear data: ' + (error.response?.data?.error || error.message));
-    } finally {
-      setIsClearingData(false);
-    }
-  };
-
-  const handleCancelClear = () => {
-    setShowClearConfirm(false);
-  };
-
-  // 🆕 重置 Box 使用统计
-  const handleResetBoxUsage = async () => {
-    if (!window.confirm('Are you sure you want to reset all box usage statistics? This will clear usage counts and quantities for all boxes.')) {
-      return;
-    }
-
-    try {
-      const response = await axios.post('/api/settings/reset-box-usage');
-      showMessage(response.data.message);
-      
-      // 🆕 更新 box stats start date
-      if (response.data.startDate) {
-        setBoxStatsStartDate(response.data.startDate);
-      }
-      
-      await fetchSettings();
-      await fetchDbStats();
-    } catch (error) {
-      console.error('Error resetting box usage:', error);
-      showMessage('Failed to reset box usage: ' + (error.response?.data?.error || error.message));
-    }
-  };
-
-  // 🆕 处理 scanner 开关变动，立即保存到后端
-  const handleScannerChange = async (field, value) => {
-    // 先更新本地 state
-    let newEnabled = scannerEnabled;
-    let newPicker = scannerPicker;
-    let newPackingOrders = scannerPackingOrders;
-    let newPacker = scannerPacker;
-
-    if (field === 'scannerEnabled') {
-      newEnabled = value;
-      setScannerEnabled(value);
-      // 如果关闭主开关，同时关闭所有子项
-      if (!value) {
-        newPicker = false;
-        newPackingOrders = false;
-        newPacker = false;
-        setScannerPicker(false);
-        setScannerPackingOrders(false);
-        setScannerPacker(false);
-      }
-    } else if (field === 'scannerPicker') {
-      newPicker = value;
-      setScannerPicker(value);
-    } else if (field === 'scannerPackingOrders') {
-      newPackingOrders = value;
-      setScannerPackingOrders(value);
-    } else if (field === 'scannerPacker') {
-      newPacker = value;
-      setScannerPacker(value);
-    }
-
+  // ── Scanner save ───────────────────────────────────────────
+  const handleScannerSave = async () => {
+    setScannerSaving(true);
     try {
       await axios.post('/api/settings/scanner', {
-        scannerEnabled: newEnabled,
-        scannerPicker: newPicker,
-        scannerPackingOrders: newPackingOrders,
-        scannerPacker: newPacker,
+        scannerEnabled: scannerUI.enabled,
+        scannerPicker: scannerUI.picker,
+        scannerPackingOrders: scannerUI.packingOrders,
+        scannerPacker: scannerUI.packer,
       });
+      setScannerSaved({ ...scannerUI });
+      showMessage('Scanner settings saved');
     } catch (error) {
-      console.error('Error saving scanner settings:', error);
       showMessage('Error saving scanner settings');
+    } finally {
+      setScannerSaving(false);
     }
   };
 
-  const handleAddBox = async () => {
-    if (!newBoxCode) {
-      showMessage('Please enter a box code');
-      return;
-    }
+  const handleScannerToggle = (field, value) => {
+    setScannerUI(prev => {
+      const next = { ...prev, [field]: value };
+      if (field === 'enabled' && !value) {
+        next.picker = false;
+        next.packingOrders = false;
+        next.packer = false;
+      }
+      return next;
+    });
+  };
 
+  // ── Pack & Label It save ───────────────────────────────────
+  const handlePackLabelSave = async () => {
+    setPackLabelSaving(true);
+    try {
+      await axios.post('/api/settings/update', {
+        key: 'pack_label_enabled',
+        value: packLabelUI.enabled ? 'true' : 'false'
+      });
+      setPackLabelSaved({ ...packLabelUI });
+      showMessage('Pack & Label It settings saved');
+    } catch (error) {
+      showMessage('Error saving Pack & Label It settings');
+    } finally {
+      setPackLabelSaving(false);
+    }
+  };
+
+  // ── Sender address save ────────────────────────────────────
+  const handleSenderSave = async () => {
+    setSenderSaving(true);
+    try {
+      await axios.post('/api/settings/update-multiple', {
+        sender_company: senderUI.company,
+        sender_contact: senderUI.contact,
+        sender_address1: senderUI.address1,
+        sender_address2: senderUI.address2,
+        sender_city: senderUI.city,
+        sender_province: senderUI.province,
+        sender_postal_code: senderUI.postalCode
+      });
+      setSenderSaved({ ...senderUI });
+      showMessage('Fulfilment settings saved');
+    } catch (error) {
+      showMessage('Error saving Fulfilment settings');
+    } finally {
+      setSenderSaving(false);
+    }
+  };
+
+  // ── Box types ──────────────────────────────────────────────
+  const handleAddBox = async () => {
+    if (!newBoxCode) { showMessage('Please enter a box code'); return; }
     try {
       await axios.post('/api/settings/box-types', {
         code: newBoxCode.toUpperCase(),
@@ -224,7 +231,6 @@ const Settings = () => {
     }
   };
 
-  // 🆕 保存单个 box type（包括 quantity）
   const handleBoxSave = async (box) => {
     try {
       await axios.patch(`/api/settings/box-types/${box.id}`, {
@@ -240,6 +246,67 @@ const Settings = () => {
     }
   };
 
+  // ── Cleanup ────────────────────────────────────────────────
+  const fetchCleanupPreview = async () => {
+    setIsCleanupLoading(true);
+    try {
+      const response = await axios.get('/api/settings/cleanup-preview');
+      setCleanupPreview(response.data);
+      showMessage(`Found ${response.data.count} orders to clean up`);
+    } catch (error) {
+      showMessage('Error loading cleanup preview');
+    } finally {
+      setIsCleanupLoading(false);
+    }
+  };
+
+  const handleManualCleanup = async () => {
+    if (!window.confirm('Are you sure you want to delete all data older than 60 days? This action cannot be undone.')) return;
+    setIsCleanupLoading(true);
+    try {
+      const response = await axios.post('/api/settings/cleanup');
+      showMessage(response.data.message);
+      await fetchCleanupPreview();
+      await fetchDbStats();
+      await fetchSettings();
+    } catch (error) {
+      showMessage('Cleanup failed');
+    } finally {
+      setIsCleanupLoading(false);
+    }
+  };
+
+  const handleResetBoxUsage = async () => {
+    if (!window.confirm('Are you sure you want to reset all box usage statistics?')) return;
+    try {
+      const response = await axios.post('/api/settings/reset-box-usage');
+      showMessage(response.data.message);
+      if (response.data.startDate) setBoxStatsStartDate(response.data.startDate);
+      await fetchSettings();
+      await fetchDbStats();
+    } catch (error) {
+      showMessage('Failed to reset box usage: ' + (error.response?.data?.error || error.message));
+    }
+  };
+
+  const handleClearAllData = async () => {
+    if (!showClearConfirm) { setShowClearConfirm(true); return; }
+    setIsClearingData(true);
+    try {
+      const response = await axios.post('/api/settings/clear-all-data');
+      showMessage(response.data.message);
+      setShowClearConfirm(false);
+      await fetchDbStats();
+      await fetchSettings();
+      setCleanupPreview(null);
+    } catch (error) {
+      showMessage('Failed to clear data: ' + (error.response?.data?.error || error.message));
+    } finally {
+      setIsClearingData(false);
+    }
+  };
+
+  // ── Helpers ────────────────────────────────────────────────
   const showMessage = (msg) => {
     setMessage(msg);
     setTimeout(() => setMessage(''), 5000);
@@ -250,38 +317,44 @@ const Settings = () => {
     return new Date(dateString).toLocaleString();
   };
 
-  // 🆕 计算预计用完天数
   const calculateDaysUntilEmpty = (box) => {
-    if (!boxStatsStartDate || !box.usage_count || box.usage_count === 0 || !box.quantity || box.quantity <= 0) {
-      return null;
-    }
-
-    // 计算从开始日期到今天的天数
-    const startDate = new Date(boxStatsStartDate);
-    const today = new Date();
-    const daysPassed = Math.max(1, Math.floor((today - startDate) / (1000 * 60 * 60 * 24)));
-
-    // 计算日均使用量
+    if (!boxStatsStartDate || !box.usage_count || box.usage_count === 0 || !box.quantity || box.quantity <= 0) return null;
+    const daysPassed = Math.max(1, Math.floor((new Date() - new Date(boxStatsStartDate)) / 86400000));
     const dailyUsage = box.usage_count / daysPassed;
-
-    // 如果日均使用量为 0，返回 null
-    if (dailyUsage === 0) {
-      return null;
-    }
-
-    // 计算剩余天数（向下取整）
-    const daysRemaining = Math.floor(box.quantity / dailyUsage);
-
-    return daysRemaining;
+    if (dailyUsage === 0) return null;
+    return Math.floor(box.quantity / dailyUsage);
   };
 
-  // 🆕 按使用次数和字母排序 box types
   const sortedBoxTypes = [...boxTypes].sort((a, b) => {
-    if (b.usage_count !== a.usage_count) {
-      return b.usage_count - a.usage_count;
-    }
+    if (b.usage_count !== a.usage_count) return b.usage_count - a.usage_count;
     return a.code.localeCompare(b.code);
   });
+
+  const isError = (msg) =>
+    msg.includes('Error') || msg.includes('failed') || msg.includes('Failed');
+
+  const CheckRow = ({ id, label, checked, disabled, onChange }) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+      <input
+        type="checkbox"
+        id={id}
+        checked={checked}
+        disabled={disabled}
+        onChange={e => onChange(e.target.checked)}
+        style={{ cursor: disabled ? 'not-allowed' : 'pointer', width: '16px', height: '16px' }}
+      />
+      <label
+        htmlFor={id}
+        style={{
+          cursor: disabled ? 'not-allowed' : 'pointer',
+          fontSize: '14px',
+          color: disabled ? '#8c9196' : '#202223'
+        }}
+      >
+        {label}
+      </label>
+    </div>
+  );
 
   return (
     <Page
@@ -289,142 +362,244 @@ const Settings = () => {
       backAction={{ content: 'Dashboard', onAction: () => navigate('/') }}
     >
       {message && (
-        <div style={{ 
-          padding: '12px', 
-          marginBottom: '16px', 
-          backgroundColor: message.includes('Error') || message.includes('failed') || message.includes('Failed') ? '#f8d7da' : '#d4edda', 
+        <div style={{
+          padding: '12px', marginBottom: '16px',
+          backgroundColor: isError(message) ? '#f8d7da' : '#d4edda',
           borderRadius: '4px',
-          border: `1px solid ${message.includes('Error') || message.includes('failed') || message.includes('Failed') ? '#f5c6cb' : '#c3e6cb'}`
+          border: `1px solid ${isError(message) ? '#f5c6cb' : '#c3e6cb'}`
         }}>
           {message}
         </div>
       )}
 
       <Layout>
-        {/* 数据库统计和清理 */}
+
+        {/* ── 1. Database Statistics ── */}
         <Layout.Section>
-          <Card title="Database Management" sectioned>
-            <BlockStack gap="4">
-              {/* 🆕 数据库统计 + Box Type 统计 */}
-              <div>
-                <Text variant="headingSm" as="h3">Database Statistics</Text>
-                {dbStats && (
-                  <div style={{ marginTop: '12px' }}>
-                    {/* 🆕 日期信息移到顶部 */}
-                    <div style={{ marginBottom: '16px' }}>
-                      <Text variant="bodySm" tone="subdued">
-                        Oldest order: {formatDate(dbStats.oldestOrder?.created_at)}
-                      </Text>
-                      <br />
-                      <Text variant="bodySm" tone="subdued">
-                        Newest order: {formatDate(dbStats.newestOrder?.created_at)}
-                      </Text>
-                    </div>
-
-                    {/* Orders 统计 */}
-                    <div style={{ 
-                      display: 'flex', 
-                      flexWrap: 'wrap', 
-                      gap: '8px',
-                      marginBottom: '16px'
-                    }}>
-                      <div style={{ 
-                        padding: '12px', 
-                        backgroundColor: '#f6f6f7', 
-                        borderRadius: '8px',
-                        minWidth: '100px',
-                        flex: '0 0 auto'
+          <Card>
+            <div style={{ padding: '16px' }}>
+              <Text variant="headingMd" as="h2">Database Statistics</Text>
+              {dbStats && (
+                <div style={{ marginTop: '16px' }}>
+                  <div style={{ marginBottom: '16px' }}>
+                    <Text variant="bodySm" tone="subdued">Oldest order: {formatDate(dbStats.oldestOrder?.created_at)}</Text>
+                    <br />
+                    <Text variant="bodySm" tone="subdued">Newest order: {formatDate(dbStats.newestOrder?.created_at)}</Text>
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '16px' }}>
+                    {[
+                      { label: 'Total Orders', value: dbStats.orders?.count || 0 },
+                      { label: 'Total Line Items', value: dbStats.lineItems?.count || 0 },
+                      { label: 'Transfer Items', value: dbStats.transferItems?.count || 0 }
+                    ].map(stat => (
+                      <div key={stat.label} style={{
+                        padding: '12px', backgroundColor: '#f6f6f7',
+                        borderRadius: '8px', minWidth: '100px', flex: '0 0 auto'
                       }}>
-                        <Text variant="bodySm" tone="subdued">Total Orders</Text>
-                        <Text variant="headingMd" as="p">{dbStats.orders?.count || 0}</Text>
+                        <Text variant="bodySm" tone="subdued">{stat.label}</Text>
+                        <Text variant="headingMd" as="p">{stat.value}</Text>
                       </div>
-                      <div style={{ 
-                        padding: '12px', 
-                        backgroundColor: '#f6f6f7', 
-                        borderRadius: '8px',
-                        minWidth: '100px',
-                        flex: '0 0 auto'
-                      }}>
-                        <Text variant="bodySm" tone="subdued">Total Line Items</Text>
-                        <Text variant="headingMd" as="p">{dbStats.lineItems?.count || 0}</Text>
-                      </div>
-                      <div style={{ 
-                        padding: '12px', 
-                        backgroundColor: '#f6f6f7', 
-                        borderRadius: '8px',
-                        minWidth: '100px',
-                        flex: '0 0 auto'
-                      }}>
-                        <Text variant="bodySm" tone="subdued">Transfer Items</Text>
-                        <Text variant="headingMd" as="p">{dbStats.transferItems?.count || 0}</Text>
-                      </div>
-                    </div>
-
-                    {/* 🆕 Box 统计开始日期 */}
-                    <div style={{ marginBottom: '12px' }}>
-                      <Text variant="bodySm" tone="subdued">
-                        Box from {boxStatsStartDate ? formatDate(boxStatsStartDate) : 'N/A'}
-                      </Text>
-                    </div>
-
-                    {/* 🆕 Box Type 统计（新行） */}
-                    <div style={{ 
-                      display: 'flex', 
-                      flexWrap: 'wrap', 
-                      gap: '8px'
-                    }}>
-                      {sortedBoxTypes.map((box) => {
-                        // 🆕 quantity 就是剩余数量
-                        const remainingDisplay = (box.quantity !== undefined && box.quantity !== null) ? box.quantity : 'null';
-                        
-                        // 🆕 计算预计用完天数
-                        const daysUntilEmpty = calculateDaysUntilEmpty(box);
-                        
-                        return (
-                          <div 
-                            key={box.id}
-                            style={{ 
-                              padding: '12px', 
-                              backgroundColor: '#f6f6f7', 
-                              borderRadius: '8px',
-                              minWidth: '90px',
-                              flex: '0 0 auto'
-                            }}
-                          >
-                            <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px', marginBottom: '4px' }}>
-                              <Text variant="bodySm" fontWeight="medium">{box.code}</Text>
-                              {box.dimensions && (
-                                <Text variant="bodySm" tone="subdued" as="span" style={{ fontSize: '11px' }}>
-                                  {box.dimensions}
-                                </Text>
-                              )}
-                            </div>
-                            <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
-                              <Text variant="headingMd" as="span">{box.usage_count || 0}</Text>
-                              <Text variant="bodySm" tone="subdued" as="span">{remainingDisplay}</Text>
-                            </div>
-                            {/* 🆕 第三行：预计用完天数 */}
-                            {daysUntilEmpty !== null && (
-                              <div style={{ marginTop: '4px' }}>
-                                <Text variant="bodySm" tone="subdued" as="span" style={{ fontSize: '11px' }}>
-                                  ~{daysUntilEmpty}d
-                                </Text>
-                              </div>
+                    ))}
+                  </div>
+                  <div style={{ marginBottom: '12px' }}>
+                    <Text variant="bodySm" tone="subdued">
+                      Box stats from {boxStatsStartDate ? formatDate(boxStatsStartDate) : 'N/A'}
+                    </Text>
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                    {sortedBoxTypes.map(box => {
+                      const remaining = box.quantity ?? 'null';
+                      const days = calculateDaysUntilEmpty(box);
+                      return (
+                        <div key={box.id} style={{
+                          padding: '12px', backgroundColor: '#f6f6f7',
+                          borderRadius: '8px', minWidth: '90px', flex: '0 0 auto'
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px', marginBottom: '4px' }}>
+                            <Text variant="bodySm" fontWeight="medium">{box.code}</Text>
+                            {box.dimensions && (
+                              <Text variant="bodySm" tone="subdued" as="span" style={{ fontSize: '11px' }}>
+                                {box.dimensions}
+                              </Text>
                             )}
                           </div>
-                        );
-                      })}
-                    </div>
+                          <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
+                            <Text variant="headingMd" as="span">{box.usage_count || 0}</Text>
+                            <Text variant="bodySm" tone="subdued" as="span">{remaining}</Text>
+                          </div>
+                          {days !== null && (
+                            <div style={{ marginTop: '4px' }}>
+                              <Text variant="bodySm" tone="subdued" as="span" style={{ fontSize: '11px' }}>~{days}d</Text>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
-                )}
-              </div>
+                </div>
+              )}
+            </div>
+          </Card>
+        </Layout.Section>
 
-              {/* 自动清理信息 */}
-              <div style={{ 
-                padding: '16px', 
-                backgroundColor: '#e3f2fd', 
-                borderRadius: '8px',
-                border: '1px solid #90caf9'
+        {/* ── 2. Enable Scanner ── */}
+        <Layout.Section>
+          <CollapsibleCard title="Enable Scanner">
+            <BlockStack gap="3">
+              <CheckRow
+                id="scanner-enabled"
+                label="Enable scanner"
+                checked={scannerUI.enabled}
+                onChange={v => handleScannerToggle('enabled', v)}
+              />
+              <div style={{ paddingLeft: '26px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <CheckRow
+                  id="scanner-picker"
+                  label="Enable scanner in Picker"
+                  checked={scannerUI.picker}
+                  disabled={!scannerUI.enabled}
+                  onChange={v => handleScannerToggle('picker', v)}
+                />
+                <CheckRow
+                  id="scanner-packing-orders"
+                  label="Enable scanner in Packing Orders"
+                  checked={scannerUI.packingOrders}
+                  disabled={!scannerUI.enabled}
+                  onChange={v => handleScannerToggle('packingOrders', v)}
+                />
+                <CheckRow
+                  id="scanner-packer"
+                  label="Enable scanner in Packer"
+                  checked={scannerUI.packer}
+                  disabled={!scannerUI.enabled}
+                  onChange={v => handleScannerToggle('packer', v)}
+                />
+              </div>
+              <div style={{ marginTop: '8px' }}>
+                <SaveButton isDirty={scannerDirty} onSave={handleScannerSave} loading={scannerSaving} />
+              </div>
+            </BlockStack>
+          </CollapsibleCard>
+        </Layout.Section>
+
+        {/* ── 3. Pack & Label It ── */}
+        <Layout.Section>
+          <CollapsibleCard title="Pack & Label It">
+            <BlockStack gap="3">
+              <Text variant="bodySm" tone="subdued">
+                When enabled, submitting a packed order will automatically purchase a Canada Post label,
+                fulfill the order in Shopify, and send the label to the printer.
+              </Text>
+              <CheckRow
+                id="pack-label-enabled"
+                label="Enable Pack & Label It"
+                checked={packLabelUI.enabled}
+                onChange={v => setPackLabelUI({ enabled: v })}
+              />
+              <div style={{ marginTop: '8px' }}>
+                <SaveButton isDirty={packLabelDirty} onSave={handlePackLabelSave} loading={packLabelSaving} />
+              </div>
+            </BlockStack>
+          </CollapsibleCard>
+        </Layout.Section>
+
+        {/* ── 4. Manage Boxes ── */}
+        <Layout.Section>
+          <CollapsibleCard title="Manage Boxes">
+            <div style={{ marginBottom: '24px' }}>
+              <Text variant="headingSm" as="h3">Add New Box Type</Text>
+              <div style={{ marginTop: '12px', marginBottom: '12px' }}>
+                <TextField
+                  label="Code"
+                  value={newBoxCode}
+                  onChange={setNewBoxCode}
+                  placeholder="A"
+                  maxLength={2}
+                  autoComplete="off"
+                />
+              </div>
+              <div style={{ marginBottom: '12px' }}>
+                <TextField
+                  label="Dimensions (inches, e.g. 10x8x4)"
+                  value={newBoxDimensions}
+                  onChange={setNewBoxDimensions}
+                  placeholder="10x8x4"
+                  autoComplete="off"
+                />
+              </div>
+              <Button onClick={handleAddBox}>Add Box Type</Button>
+            </div>
+            {boxTypes.length > 0 && (
+              <div>
+                <Text variant="headingSm" as="h3">Current Box Types</Text>
+                <div style={{
+                  display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)',
+                  gap: '16px', marginTop: '12px'
+                }}>
+                  {boxTypes.map(box => (
+                    <div key={box.id} style={{
+                      padding: '16px', border: '1px solid #e1e3e5',
+                      borderRadius: '8px', backgroundColor: '#fafbfb'
+                    }}>
+                      <div style={{ marginBottom: '12px' }}>
+                        <TextField label="Code" value={box.code} autoComplete="off"
+                          onChange={value => setBoxTypes(prev => prev.map(b => b.id === box.id ? { ...b, code: value } : b))} />
+                      </div>
+                      <div style={{ marginBottom: '12px' }}>
+                        <TextField label="Dimensions" value={box.dimensions || ''} autoComplete="off"
+                          onChange={value => setBoxTypes(prev => prev.map(b => b.id === box.id ? { ...b, dimensions: value } : b))} />
+                      </div>
+                      <div style={{ marginBottom: '12px' }}>
+                        <TextField label="Quantity" type="number" value={box.quantity?.toString() || '0'} autoComplete="off"
+                          onChange={value => setBoxTypes(prev => prev.map(b => b.id === box.id ? { ...b, quantity: parseInt(value) || 0 } : b))} />
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <Button tone="critical" onClick={() => handleDeleteBox(box.id)}>Delete</Button>
+                        <Button variant="primary" onClick={() => handleBoxSave(box)}>Save</Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </CollapsibleCard>
+        </Layout.Section>
+
+        {/* ── 5. Fulfilment Manage ── */}
+        <Layout.Section>
+          <CollapsibleCard title="Fulfilment Manage">
+            <BlockStack gap="3">
+              <Text variant="bodySm" tone="subdued">
+                This address will appear as the sender on all Canada Post shipping labels.
+              </Text>
+              <TextField label="Company Name" value={senderUI.company} autoComplete="off"
+                onChange={v => setSenderUI(p => ({ ...p, company: v }))} />
+              <TextField label="Contact Name (optional)" value={senderUI.contact} autoComplete="off"
+                onChange={v => setSenderUI(p => ({ ...p, contact: v }))} />
+              <TextField label="Address Line 1" value={senderUI.address1} autoComplete="off"
+                onChange={v => setSenderUI(p => ({ ...p, address1: v }))} />
+              <TextField label="Address Line 2 (optional)" value={senderUI.address2} autoComplete="off"
+                onChange={v => setSenderUI(p => ({ ...p, address2: v }))} />
+              <TextField label="City" value={senderUI.city} autoComplete="off"
+                onChange={v => setSenderUI(p => ({ ...p, city: v }))} />
+              <TextField label="Province (e.g. QC)" value={senderUI.province} autoComplete="off"
+                onChange={v => setSenderUI(p => ({ ...p, province: v }))} />
+              <TextField label="Postal Code (e.g. J4L1M8)" value={senderUI.postalCode} autoComplete="off"
+                onChange={v => setSenderUI(p => ({ ...p, postalCode: v }))} />
+              <div style={{ marginTop: '8px' }}>
+                <SaveButton isDirty={senderDirty} onSave={handleSenderSave} loading={senderSaving} />
+              </div>
+            </BlockStack>
+          </CollapsibleCard>
+        </Layout.Section>
+
+        {/* ── 6. Cleanup Statistics ── */}
+        <Layout.Section>
+          <CollapsibleCard title="Cleanup Statistics">
+            <BlockStack gap="4">
+              <div style={{
+                padding: '16px', backgroundColor: '#e3f2fd',
+                borderRadius: '8px', border: '1px solid #90caf9'
               }}>
                 <Text variant="headingSm" as="h3">Automatic Cleanup</Text>
                 <div style={{ marginTop: '8px' }}>
@@ -434,23 +609,16 @@ const Settings = () => {
                 </div>
               </div>
 
-              {/* 清理预览 */}
               {cleanupPreview && (
-                <div style={{ 
-                  padding: '16px', 
-                  backgroundColor: '#fff3e0', 
-                  borderRadius: '8px',
-                  border: '1px solid #ffb74d'
+                <div style={{
+                  padding: '16px', backgroundColor: '#fff3e0',
+                  borderRadius: '8px', border: '1px solid #ffb74d'
                 }}>
                   <Text variant="headingSm" as="h3">Cleanup Preview</Text>
                   <div style={{ marginTop: '12px' }}>
-                    <Text variant="bodyMd">
-                      <strong>{cleanupPreview.count}</strong> orders will be deleted
-                    </Text>
+                    <Text variant="bodyMd"><strong>{cleanupPreview.count}</strong> orders will be deleted</Text>
                     <br />
-                    <Text variant="bodySm" tone="subdued">
-                      Cutoff date: {formatDate(cleanupPreview.cutoffDate)}
-                    </Text>
+                    <Text variant="bodySm" tone="subdued">Cutoff date: {formatDate(cleanupPreview.cutoffDate)}</Text>
                     {cleanupPreview.count > 0 && (
                       <div style={{ marginTop: '12px', maxHeight: '200px', overflow: 'auto' }}>
                         <Text variant="bodySm" fontWeight="bold">Orders to be deleted:</Text>
@@ -476,38 +644,18 @@ const Settings = () => {
                 </div>
               )}
 
-              {/* 清理操作按钮 */}
               <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                <Button 
-                  onClick={fetchCleanupPreview}
-                  loading={isCleanupLoading}
-                >
-                  Check Preview
-                </Button>
-                <Button 
-                  onClick={handleManualCleanup}
-                  tone="critical"
-                  loading={isCleanupLoading}
-                  disabled={cleanupPreview?.count === 0}
-                >
+                <Button onClick={fetchCleanupPreview} loading={isCleanupLoading}>Check Preview</Button>
+                <Button tone="critical" loading={isCleanupLoading}
+                  disabled={cleanupPreview?.count === 0} onClick={handleManualCleanup}>
                   Run Cleanup Now
                 </Button>
-                {/* 🆕 Reset Box Usage 按钮 */}
-                <Button 
-                  onClick={handleResetBoxUsage}
-                  tone="critical"
-                >
-                  Reset Box Usage
-                </Button>
+                <Button tone="critical" onClick={handleResetBoxUsage}>Reset Box Usage</Button>
               </div>
 
-              {/* 危险区域：清空所有数据 */}
-              <div style={{ 
-                marginTop: '24px',
-                padding: '16px', 
-                backgroundColor: '#fff1f0', 
-                borderRadius: '8px',
-                border: '2px solid #ff4d4f'
+              <div style={{
+                marginTop: '8px', padding: '16px',
+                backgroundColor: '#fff1f0', borderRadius: '8px', border: '2px solid #ff4d4f'
               }}>
                 <Text variant="headingSm" as="h3">⚠️ Danger Zone</Text>
                 <div style={{ marginTop: '12px' }}>
@@ -515,47 +663,29 @@ const Settings = () => {
                     This will permanently delete ALL orders, line items, and transfer items from the database.
                   </Text>
                 </div>
-                
                 {showClearConfirm && (
-                  <div style={{ 
-                    marginTop: '12px',
-                    padding: '12px',
-                    backgroundColor: '#fff',
-                    borderRadius: '4px',
-                    border: '1px solid #ff4d4f'
+                  <div style={{
+                    marginTop: '12px', padding: '12px',
+                    backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #ff4d4f'
                   }}>
-                    <Text variant="bodyMd" fontWeight="bold" tone="critical">
-                      Are you absolutely sure?
-                    </Text>
+                    <Text variant="bodyMd" fontWeight="bold" tone="critical">Are you absolutely sure?</Text>
                     <br />
                     <Text variant="bodySm" tone="subdued">
                       This action cannot be undone. All order data will be permanently deleted.
                     </Text>
                   </div>
                 )}
-                
                 <div style={{ marginTop: '12px', display: 'flex', gap: '12px' }}>
                   {!showClearConfirm ? (
-                    <Button 
-                      onClick={handleClearAllData}
-                      tone="critical"
-                      disabled={isClearingData}
-                    >
+                    <Button tone="critical" disabled={isClearingData} onClick={handleClearAllData}>
                       Clear All Data
                     </Button>
                   ) : (
                     <>
-                      <Button 
-                        onClick={handleClearAllData}
-                        tone="critical"
-                        loading={isClearingData}
-                      >
+                      <Button tone="critical" loading={isClearingData} onClick={handleClearAllData}>
                         Yes, Delete Everything
                       </Button>
-                      <Button 
-                        onClick={handleCancelClear}
-                        disabled={isClearingData}
-                      >
+                      <Button disabled={isClearingData} onClick={() => setShowClearConfirm(false)}>
                         Cancel
                       </Button>
                     </>
@@ -563,208 +693,7 @@ const Settings = () => {
                 </div>
               </div>
             </BlockStack>
-          </Card>
-        </Layout.Section>
-
-        {/* 🆕 Scanner Mode card — 位于 Box Types card 上方 */}
-        <Layout.Section>
-          <Card title="Scanner Mode" sectioned>
-            <BlockStack gap="3">
-              {/* Enable scanner 主开关 */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <input
-                  type="checkbox"
-                  id="scanner-enabled"
-                  checked={scannerEnabled}
-                  onChange={(e) => handleScannerChange('scannerEnabled', e.target.checked)}
-                  style={{ cursor: 'pointer', width: '16px', height: '16px' }}
-                />
-                <label htmlFor="scanner-enabled" style={{ cursor: 'pointer', fontSize: '14px', fontWeight: '600' }}>
-                  Enable scanner
-                </label>
-              </div>
-
-              {/* 三个子项 */}
-              <div style={{ paddingLeft: '26px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <input
-                    type="checkbox"
-                    id="scanner-picker"
-                    checked={scannerPicker}
-                    disabled={!scannerEnabled}
-                    onChange={(e) => handleScannerChange('scannerPicker', e.target.checked)}
-                    style={{ cursor: scannerEnabled ? 'pointer' : 'not-allowed', width: '16px', height: '16px' }}
-                  />
-                  <label
-                    htmlFor="scanner-picker"
-                    style={{
-                      cursor: scannerEnabled ? 'pointer' : 'not-allowed',
-                      fontSize: '14px',
-                      color: scannerEnabled ? '#202223' : '#8c9196'
-                    }}
-                  >
-                    Enable scanner in Picker
-                  </label>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <input
-                    type="checkbox"
-                    id="scanner-packing-orders"
-                    checked={scannerPackingOrders}
-                    disabled={!scannerEnabled}
-                    onChange={(e) => handleScannerChange('scannerPackingOrders', e.target.checked)}
-                    style={{ cursor: scannerEnabled ? 'pointer' : 'not-allowed', width: '16px', height: '16px' }}
-                  />
-                  <label
-                    htmlFor="scanner-packing-orders"
-                    style={{
-                      cursor: scannerEnabled ? 'pointer' : 'not-allowed',
-                      fontSize: '14px',
-                      color: scannerEnabled ? '#202223' : '#8c9196'
-                    }}
-                  >
-                    Enable scanner in Packing Orders
-                  </label>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <input
-                    type="checkbox"
-                    id="scanner-packer"
-                    checked={scannerPacker}
-                    disabled={!scannerEnabled}
-                    onChange={(e) => handleScannerChange('scannerPacker', e.target.checked)}
-                    style={{ cursor: scannerEnabled ? 'pointer' : 'not-allowed', width: '16px', height: '16px' }}
-                  />
-                  <label
-                    htmlFor="scanner-packer"
-                    style={{
-                      cursor: scannerEnabled ? 'pointer' : 'not-allowed',
-                      fontSize: '14px',
-                      color: scannerEnabled ? '#202223' : '#8c9196'
-                    }}
-                  >
-                    Enable scanner in Packer
-                  </label>
-                </div>
-              </div>
-            </BlockStack>
-          </Card>
-        </Layout.Section>
-
-        <Layout.Section>
-          <Card title="Box Types" sectioned>
-            <div style={{ marginBottom: '20px' }}>
-              <p style={{ fontWeight: 'bold', marginBottom: '12px' }}>Add New Box Type</p>
-              <div style={{ marginBottom: '12px' }}>
-                <TextField
-                  label="Code"
-                  value={newBoxCode}
-                  onChange={setNewBoxCode}
-                  placeholder="A"
-                  maxLength={2}
-                  autoComplete="off"
-                />
-              </div>
-              <div style={{ marginBottom: '12px' }}>
-                <TextField
-                  label="Dimensions"
-                  value={newBoxDimensions}
-                  onChange={setNewBoxDimensions}
-                  placeholder="10x8x4"
-                  autoComplete="off"
-                />
-              </div>
-              <Button onClick={handleAddBox}>Add Box Type</Button>
-            </div>
-
-            {boxTypes.length > 0 && (
-              <div>
-                <p style={{ fontWeight: 'bold', marginBottom: '12px' }}>Current Box Types</p>
-                {/* 🆕 3列布局 */}
-                <div style={{ 
-                  display: 'grid', 
-                  gridTemplateColumns: 'repeat(3, 1fr)', 
-                  gap: '16px' 
-                }}>
-                  {boxTypes.map((box) => (
-                    <div 
-                      key={box.id} 
-                      style={{ 
-                        padding: '16px', 
-                        border: '1px solid #e1e3e5',
-                        borderRadius: '8px',
-                        backgroundColor: '#fafbfb'
-                      }}
-                    >
-                      {/* Code */}
-                      <div style={{ marginBottom: '12px' }}>
-                        <TextField
-                          label="Code"
-                          value={box.code}
-                          onChange={(value) => {
-                            const updated = boxTypes.map(b => 
-                              b.id === box.id ? { ...b, code: value } : b
-                            );
-                            setBoxTypes(updated);
-                          }}
-                          autoComplete="off"
-                        />
-                      </div>
-                      
-                      {/* Dimensions */}
-                      <div style={{ marginBottom: '12px' }}>
-                        <TextField
-                          label="Dimensions"
-                          value={box.dimensions || ''}
-                          onChange={(value) => {
-                            const updated = boxTypes.map(b => 
-                              b.id === box.id ? { ...b, dimensions: value } : b
-                            );
-                            setBoxTypes(updated);
-                          }}
-                          autoComplete="off"
-                        />
-                      </div>
-                      
-                      {/* 🆕 Quantity */}
-                      <div style={{ marginBottom: '12px' }}>
-                        <TextField
-                          label="Quantity"
-                          type="number"
-                          value={box.quantity?.toString() || '0'}
-                          onChange={(value) => {
-                            const updated = boxTypes.map(b => 
-                              b.id === box.id ? { ...b, quantity: parseInt(value) || 0 } : b
-                            );
-                            setBoxTypes(updated);
-                          }}
-                          autoComplete="off"
-                        />
-                      </div>
-                      
-                      {/* 🆕 Delete & Save 按钮 */}
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        <Button 
-                          onClick={() => handleDeleteBox(box.id)}
-                          tone="critical"
-                        >
-                          Delete
-                        </Button>
-                        <Button 
-                          onClick={() => handleBoxSave(box)}
-                          variant="primary"
-                        >
-                          Save
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </Card>
+          </CollapsibleCard>
         </Layout.Section>
 
         <Layout.Section>
@@ -772,6 +701,7 @@ const Settings = () => {
             Settings should be configured on desktop/PC.
           </p>
         </Layout.Section>
+
       </Layout>
     </Page>
   );

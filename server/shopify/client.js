@@ -279,6 +279,118 @@ class ShopifyClient {
     }
   }
 
+  // 🆕 Get fulfillment orders for an order (GraphQL)
+  async getFulfillmentOrders(shopifyOrderId) {
+    try {
+      console.log(`
+Fetching fulfillment orders for: ${shopifyOrderId}`);
+
+      const orderGid = shopifyOrderId.startsWith('gid://')
+        ? shopifyOrderId
+        : `gid://shopify/Order/${shopifyOrderId}`;
+
+      const query = `
+        query GetFulfillmentOrders($orderId: ID!) {
+          order(id: $orderId) {
+            id
+            name
+            fulfillmentOrders(first: 10) {
+              nodes {
+                id
+                status
+                lineItems(first: 50) {
+                  nodes {
+                    id
+                    remainingQuantity
+                    totalQuantity
+                  }
+                }
+              }
+            }
+          }
+        }
+      `;
+
+      const response = await this.client.post('/graphql.json', {
+        query,
+        variables: { orderId: orderGid }
+      });
+
+      const fulfillmentOrders = response.data?.data?.order?.fulfillmentOrders?.nodes || [];
+      console.log(`✓ Found ${fulfillmentOrders.length} fulfillment order(s)`);
+      return fulfillmentOrders;
+    } catch (error) {
+      console.error('Error fetching fulfillment orders:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  // 🆕 Create fulfillment with tracking (GraphQL)
+  async createFulfillment({ fulfillmentOrderId, trackingNumber, trackingCompany = 'Canada Post' }) {
+    try {
+      console.log(`
+Creating fulfillment for: ${fulfillmentOrderId}`);
+      console.log(`Tracking: ${trackingCompany} ${trackingNumber}`);
+
+      const trackingUrl = `https://www.canadapost-postescanada.ca/track-reperage/en#/search?searchFor=${trackingNumber}`;
+
+      const mutation = `
+        mutation fulfillmentCreateV2($fulfillment: FulfillmentV2Input!) {
+          fulfillmentCreateV2(fulfillment: $fulfillment) {
+            fulfillment {
+              id
+              status
+              trackingInfo {
+                company
+                number
+                url
+              }
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+      `;
+
+      const variables = {
+        fulfillment: {
+          notifyCustomer: true,
+          trackingInfo: {
+            company: trackingCompany,
+            number: trackingNumber,
+            url: trackingUrl
+          },
+          lineItemsByFulfillmentOrder: [
+            { fulfillmentOrderId }
+          ]
+        }
+      };
+
+      const response = await this.client.post('/graphql.json', {
+        query: mutation,
+        variables
+      });
+
+      const result = response.data?.data?.fulfillmentCreateV2;
+      const userErrors = result?.userErrors || [];
+
+      if (userErrors.length > 0) {
+        const errorMsg = userErrors.map(e => `${e.field}: ${e.message}`).join('; ');
+        throw new Error(`Shopify fulfillment error: ${errorMsg}`);
+      }
+
+      const fulfillment = result?.fulfillment;
+      console.log(`✓ Fulfillment created: ${fulfillment?.id}`);
+      console.log(`  Status: ${fulfillment?.status}`);
+      return fulfillment;
+    } catch (error) {
+      console.error('Error creating fulfillment:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+
   // 🆕 Update order metafield
   async updateOrderMetafield(orderId, namespace, key, value, type = 'boolean') {
     try {

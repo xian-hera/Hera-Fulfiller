@@ -121,4 +121,60 @@ try {
   }
 }
 
+// 🆕 9. Add Pack & Label columns to orders
+const packLabelColumns = [
+  { name: 'label_status', type: 'TEXT' },
+  { name: 'label_error', type: 'TEXT' },
+  { name: 'label_tracking_number', type: 'TEXT' },
+  { name: 'fulfill_status', type: 'TEXT' },
+  { name: 'fulfill_error', type: 'TEXT' },
+  { name: 'label_options', type: 'TEXT' },
+];
+
+for (const col of packLabelColumns) {
+  try {
+    db.prepare(`ALTER TABLE orders ADD COLUMN ${col.name} ${col.type}`).run();
+    console.log(`✓ Added ${col.name} column to orders`);
+  } catch (error) {
+    if (error.message.includes('duplicate column')) {
+      console.log(`✓ Column ${col.name} already exists in orders`);
+    } else {
+      console.error(`✗ Error adding ${col.name} to orders:`, error.message);
+    }
+  }
+}
+
+// 🆕 10. Add sender address and pack_label_enabled to settings
+const newSettings = [
+  ['pack_label_enabled', 'false'],
+  ['sender_company', 'HERA BEAUTÉ'],
+  ['sender_contact', ''],
+  ['sender_address1', '22-2877 Ch De Chambly'],
+  ['sender_address2', ''],
+  ['sender_city', 'Longueuil'],
+  ['sender_province', 'QC'],
+  ['sender_postal_code', 'J4L1M8'],
+];
+
+for (const [key, value] of newSettings) {
+  try {
+    db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`).run(key, value);
+    console.log(`✓ Setting '${key}' initialized`);
+  } catch (error) {
+    console.error(`✗ Error initializing setting '${key}':`, error.message);
+  }
+}
+
+// 🆕 11. Add manifest_transmitted column to orders
+try {
+  db.prepare(`ALTER TABLE orders ADD COLUMN manifest_transmitted INTEGER DEFAULT 0`).run();
+  console.log('✓ Added manifest_transmitted column to orders');
+} catch (error) {
+  if (error.message.includes('duplicate column')) {
+    console.log('✓ Column manifest_transmitted already exists in orders');
+  } else {
+    console.error('✗ Error adding manifest_transmitted to orders:', error.message);
+  }
+}
+
 console.log('Migration completed!');
