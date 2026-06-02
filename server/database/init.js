@@ -238,6 +238,17 @@ const initDatabase = async () => {
       // 🆕 Picker optimistic locking
       addColumnIfNotExists('line_items', 'version', 'INTEGER DEFAULT 0');
 
+      // 🆕 Pack & Label It — orders table
+      addColumnIfNotExists('orders', 'label_status', 'TEXT');
+      addColumnIfNotExists('orders', 'label_error', 'TEXT');
+      addColumnIfNotExists('orders', 'label_tracking_number', 'TEXT');
+      addColumnIfNotExists('orders', 'fulfill_status', 'TEXT');
+      addColumnIfNotExists('orders', 'fulfill_error', 'TEXT');
+      addColumnIfNotExists('orders', 'label_options', 'TEXT');
+      addColumnIfNotExists('orders', 'manifest_transmitted', 'INTEGER DEFAULT 0');
+      addColumnIfNotExists('orders', 'packer_note', 'TEXT');
+      addColumnIfNotExists('orders', 'shipping_title', 'TEXT');
+
       // ── Default data ────────────────────────────────────────────────────────
 
       // Box types
@@ -259,6 +270,16 @@ const initDatabase = async () => {
       insertSetting.run('picker_wig_column', 'E');
       insertSetting.run('sku_column', 'A');
       insertSetting.run('csv_uploaded_at', '');
+
+      // 🆕 Pack & Label It settings
+      insertSetting.run('pack_label_enabled', 'false');
+      insertSetting.run('sender_company', 'HERA BEAUTÉ');
+      insertSetting.run('sender_contact', '');
+      insertSetting.run('sender_address1', '22-2877 Ch De Chambly');
+      insertSetting.run('sender_address2', '');
+      insertSetting.run('sender_city', 'Longueuil');
+      insertSetting.run('sender_province', 'QC');
+      insertSetting.run('sender_postal_code', 'J4L1M8');
 
       // 🆕 Default Connecteam settings
       const insertCtSetting = db.db.prepare('INSERT OR IGNORE INTO connecteam_settings (key, value) VALUES (?, ?)');
