@@ -8,7 +8,7 @@ class CanadaPostClient {
     this.password = process.env.CP_API_PASSWORD;
     this.customerNumber = process.env.CP_CUSTOMER_NUMBER || '0008398038';
     this.contractId = process.env.CP_CONTRACT_ID || '0044158012';
-    this.isProduction = process.env.NODE_ENV === 'production';
+    this.isProduction = process.env.CP_ENVIRONMENT === 'production';
 
     this.baseUrl = this.isProduction
       ? 'https://soa-gw.canadapost.ca'

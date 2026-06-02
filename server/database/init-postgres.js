@@ -71,7 +71,7 @@ async function initPostgres() {
     )
   `);
 
-  // Picker sessions table — tracks active users for smart polling
+  // Picker sessions table
   await client.query(`
     CREATE TABLE IF NOT EXISTS picker_sessions (
       session_id TEXT PRIMARY KEY,
@@ -149,7 +149,7 @@ async function initPostgres() {
     )
   `);
 
-  // 🆕 Connecteam tasks table — records all tasks published via Fulfiller
+  // Connecteam tasks table
   await client.query(`
     CREATE TABLE IF NOT EXISTS connecteam_tasks (
       id SERIAL PRIMARY KEY,
@@ -164,7 +164,7 @@ async function initPostgres() {
     )
   `);
 
-  // 🆕 Shopify transfers table — records all transfers created via Fulfiller
+  // Shopify transfers table
   await client.query(`
     CREATE TABLE IF NOT EXISTS shopify_transfers (
       id SERIAL PRIMARY KEY,
@@ -181,7 +181,7 @@ async function initPostgres() {
     )
   `);
 
-  // 🆕 Connecteam settings table
+  // Connecteam settings table
   await client.query(`
     CREATE TABLE IF NOT EXISTS connecteam_settings (
       id SERIAL PRIMARY KEY,
@@ -191,7 +191,7 @@ async function initPostgres() {
     )
   `);
 
-  // 🆕 Shopify transfer settings table
+  // Shopify transfer settings table
   await client.query(`
     CREATE TABLE IF NOT EXISTS shopify_transfer_settings (
       id SERIAL PRIMARY KEY,
@@ -201,7 +201,7 @@ async function initPostgres() {
     )
   `);
 
-  // 🆕 Connecteam users cache table — synced from Connecteam API
+  // Connecteam users cache table
   await client.query(`
     CREATE TABLE IF NOT EXISTS connecteam_users (
       id SERIAL PRIMARY KEY,
@@ -215,7 +215,7 @@ async function initPostgres() {
     )
   `);
 
-  // ── Migrations for existing tables ────────────────────────────────────────
+  // ── Migrations ─────────────────────────────────────────────────────────────
   console.log('Running database migrations...');
 
   const migrations = [
@@ -228,7 +228,6 @@ async function initPostgres() {
     [`ALTER TABLE box_types ADD COLUMN IF NOT EXISTS usage_count INTEGER DEFAULT 0`, 'usage_count to box_types'],
     [`ALTER TABLE box_types ADD COLUMN IF NOT EXISTS quantity INTEGER DEFAULT 0`, 'quantity to box_types'],
     [`ALTER TABLE transfer_items ADD COLUMN IF NOT EXISTS out_of_stock INTEGER DEFAULT 0`, 'out_of_stock to transfer_items'],
-    // 🆕 New Transfer redesign migrations
     [`ALTER TABLE transfer_items ADD COLUMN IF NOT EXISTS connecteam_tasked INTEGER DEFAULT 0`, 'connecteam_tasked to transfer_items'],
     [`ALTER TABLE transfer_items ADD COLUMN IF NOT EXISTS connecteam_task_id TEXT`, 'connecteam_task_id to transfer_items'],
     [`ALTER TABLE transfer_items ADD COLUMN IF NOT EXISTS connecteam_task_title_date TEXT`, 'connecteam_task_title_date to transfer_items'],
@@ -236,8 +235,15 @@ async function initPostgres() {
     [`ALTER TABLE transfer_items ADD COLUMN IF NOT EXISTS shopify_transfer_id TEXT`, 'shopify_transfer_id to transfer_items'],
     [`ALTER TABLE transfer_items ADD COLUMN IF NOT EXISTS shopify_transfer_number TEXT`, 'shopify_transfer_number to transfer_items'],
     [`ALTER TABLE transfer_items ADD COLUMN IF NOT EXISTS from_location_changed INTEGER DEFAULT 0`, 'from_location_changed to transfer_items'],
-    // 🆕 Picker optimistic locking
     [`ALTER TABLE line_items ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 0`, 'version to line_items'],
+    // 🆕 Pack & Label It migrations
+    [`ALTER TABLE orders ADD COLUMN IF NOT EXISTS label_status TEXT`, 'label_status to orders'],
+    [`ALTER TABLE orders ADD COLUMN IF NOT EXISTS label_error TEXT`, 'label_error to orders'],
+    [`ALTER TABLE orders ADD COLUMN IF NOT EXISTS label_tracking_number TEXT`, 'label_tracking_number to orders'],
+    [`ALTER TABLE orders ADD COLUMN IF NOT EXISTS fulfill_status TEXT`, 'fulfill_status to orders'],
+    [`ALTER TABLE orders ADD COLUMN IF NOT EXISTS fulfill_error TEXT`, 'fulfill_error to orders'],
+    [`ALTER TABLE orders ADD COLUMN IF NOT EXISTS label_options TEXT`, 'label_options to orders'],
+    [`ALTER TABLE orders ADD COLUMN IF NOT EXISTS manifest_transmitted INTEGER DEFAULT 0`, 'manifest_transmitted to orders'],
   ];
 
   for (const [sql, desc] of migrations) {
@@ -278,6 +284,15 @@ async function initPostgres() {
     ['picker_wig_column', 'E'],
     ['sku_column', 'A'],
     ['csv_uploaded_at', ''],
+    // 🆕 Pack & Label It settings
+    ['pack_label_enabled', 'false'],
+    ['sender_company', 'HERA BEAUTÉ'],
+    ['sender_contact', ''],
+    ['sender_address1', '22-2877 Ch De Chambly'],
+    ['sender_address2', ''],
+    ['sender_city', 'Longueuil'],
+    ['sender_province', 'QC'],
+    ['sender_postal_code', 'J4L1M8'],
   ];
   for (const [key, value] of appSettings) {
     await client.query(
@@ -286,10 +301,9 @@ async function initPostgres() {
     );
   }
 
-  // 🆕 Default Connecteam settings
+  // Default Connecteam settings
   const connecteamDefaults = [
     ['default_assignee_ids', JSON.stringify([10952088, 8922246, 14153542, 6785478, 6793918])],
-    // Betty Tsui, Xian Wang, Hannah Thibeaud, Jungwook Choi, Sung Yeon Hwang
     ['default_description', 'Please double check the SKU and quantity, Thank you.'],
     ['location_members', JSON.stringify({
       '01': [], '02': [], '03': [], '04': [], '05': [],
@@ -303,7 +317,7 @@ async function initPostgres() {
     );
   }
 
-  // 🆕 Default Shopify transfer settings
+  // Default Shopify transfer settings
   const shopifyDefaults = [
     ['default_destination', 'MTL10'],
     ['default_reference_name', 'Online Transfer'],
