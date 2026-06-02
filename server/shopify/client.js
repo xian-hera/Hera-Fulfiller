@@ -318,6 +318,9 @@ Fetching fulfillment orders for: ${shopifyOrderId}`);
 
       const fulfillmentOrders = response.data?.data?.order?.fulfillmentOrders?.nodes || [];
       console.log(`✓ Found ${fulfillmentOrders.length} fulfillment order(s)`);
+      fulfillmentOrders.forEach((fo, i) => {
+        console.log(`  FO[${i}] id=${fo.id} status=${fo.status}`);
+      });
       return fulfillmentOrders;
     } catch (error) {
       console.error('Error fetching fulfillment orders:', error.response?.data || error.message);
