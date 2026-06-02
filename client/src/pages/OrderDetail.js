@@ -74,6 +74,7 @@ const OrderDetail = () => {
     leaveAtDoor: false
   });
   const [labelOptionsLoading, setLabelOptionsLoading] = useState(false);
+  const [labelOptionsOpen, setLabelOptionsOpen] = useState(false);
   // 错误状态 card
   const [labelStatus, setLabelStatus] = useState(null);
   const [labelError, setLabelError] = useState(null);
@@ -1313,92 +1314,112 @@ const OrderDetail = () => {
             <Layout.Section>
               <Card>
                 <div style={{ padding: '16px' }}>
-                  <div style={{ marginBottom: '12px' }}>
-                    <Text variant="headingSm" as="h3">Label Options</Text>
-                    <Text variant="bodySm" tone="subdued">
-                      These options will be applied when the label is purchased.
-                    </Text>
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
-                    {/* Signature */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <input
-                        type="checkbox"
-                        id="opt-signature"
-                        checked={labelOptions.signature || false}
-                        onChange={e => setLabelOptions(p => ({ ...p, signature: e.target.checked }))}
-                        style={{ cursor: 'pointer', width: '18px', height: '18px' }}
-                      />
-                      <label htmlFor="opt-signature" style={{ cursor: 'pointer', fontSize: '14px' }}>
-                        Signature Required
-                      </label>
+                  {/* Header row with title + expand button */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <Text variant="headingSm" as="h3">Label Options</Text>
+                      {/* Show active options summary when collapsed */}
+                      {!labelOptionsOpen && (
+                        <Text variant="bodySm" tone="subdued">
+                          {[
+                            labelOptions.signature && 'Signature',
+                            labelOptions.cardForPickup && 'Card for Pickup',
+                            labelOptions.leaveAtDoor && 'Leave at Door',
+                            'Liability Coverage'
+                          ].filter(Boolean).join(' · ')}
+                        </Text>
+                      )}
                     </div>
-
-                    {/* Card for pickup — mutually exclusive with Leave at Door */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <input
-                        type="checkbox"
-                        id="opt-card-pickup"
-                        checked={labelOptions.cardForPickup || false}
-                        onChange={e => {
-                          const val = e.target.checked;
-                          setLabelOptions(p => ({
-                            ...p,
-                            cardForPickup: val,
-                            leaveAtDoor: val ? false : p.leaveAtDoor
-                          }));
-                        }}
-                        style={{ cursor: 'pointer', width: '18px', height: '18px' }}
-                      />
-                      <label htmlFor="opt-card-pickup" style={{ cursor: 'pointer', fontSize: '14px' }}>
-                        Card for Pickup
-                      </label>
-                    </div>
-
-                    {/* Leave at Door — mutually exclusive with Card for Pickup */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <input
-                        type="checkbox"
-                        id="opt-leave-door"
-                        checked={labelOptions.leaveAtDoor || false}
-                        onChange={e => {
-                          const val = e.target.checked;
-                          setLabelOptions(p => ({
-                            ...p,
-                            leaveAtDoor: val,
-                            cardForPickup: val ? false : p.cardForPickup
-                          }));
-                        }}
-                        style={{ cursor: 'pointer', width: '18px', height: '18px' }}
-                      />
-                      <label htmlFor="opt-leave-door" style={{ cursor: 'pointer', fontSize: '14px' }}>
-                        Leave at Door, No Card
-                      </label>
-                    </div>
-
-                    {/* Liability Coverage — always on, display only */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <input
-                        type="checkbox"
-                        checked={true}
-                        disabled
-                        style={{ width: '18px', height: '18px' }}
-                        readOnly
-                      />
-                      <label style={{ fontSize: '14px', color: '#8c9196' }}>
-                        Liability Coverage up to $100 (always included)
-                      </label>
-                    </div>
+                    <Button onClick={() => setLabelOptionsOpen(o => !o)}>
+                      {labelOptionsOpen ? 'Collapse' : 'Expand'}
+                    </Button>
                   </div>
 
-                  <Button
-                    variant="primary"
-                    disabled={JSON.stringify(labelOptions) === JSON.stringify(labelOptionsSaved)}
-                    loading={labelOptionsLoading}
-                    onClick={handleLabelOptionsSave}
-                  >
-                    Save Label Options
-                  </Button>
+                  {/* Expandable content */}
+                  {labelOptionsOpen && (
+                    <div style={{ marginTop: '16px' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
+                        {/* Signature */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <input
+                            type="checkbox"
+                            id="opt-signature"
+                            checked={labelOptions.signature || false}
+                            onChange={e => setLabelOptions(p => ({ ...p, signature: e.target.checked }))}
+                            style={{ cursor: 'pointer', width: '18px', height: '18px' }}
+                          />
+                          <label htmlFor="opt-signature" style={{ cursor: 'pointer', fontSize: '14px' }}>
+                            Signature Required
+                          </label>
+                        </div>
+
+                        {/* Card for pickup — mutually exclusive with Leave at Door */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <input
+                            type="checkbox"
+                            id="opt-card-pickup"
+                            checked={labelOptions.cardForPickup || false}
+                            onChange={e => {
+                              const val = e.target.checked;
+                              setLabelOptions(p => ({
+                                ...p,
+                                cardForPickup: val,
+                                leaveAtDoor: val ? false : p.leaveAtDoor
+                              }));
+                            }}
+                            style={{ cursor: 'pointer', width: '18px', height: '18px' }}
+                          />
+                          <label htmlFor="opt-card-pickup" style={{ cursor: 'pointer', fontSize: '14px' }}>
+                            Card for Pickup
+                          </label>
+                        </div>
+
+                        {/* Leave at Door — mutually exclusive with Card for Pickup */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <input
+                            type="checkbox"
+                            id="opt-leave-door"
+                            checked={labelOptions.leaveAtDoor || false}
+                            onChange={e => {
+                              const val = e.target.checked;
+                              setLabelOptions(p => ({
+                                ...p,
+                                leaveAtDoor: val,
+                                cardForPickup: val ? false : p.cardForPickup
+                              }));
+                            }}
+                            style={{ cursor: 'pointer', width: '18px', height: '18px' }}
+                          />
+                          <label htmlFor="opt-leave-door" style={{ cursor: 'pointer', fontSize: '14px' }}>
+                            Leave at Door, No Card
+                          </label>
+                        </div>
+
+                        {/* Liability Coverage — always on, display only */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <input
+                            type="checkbox"
+                            checked={true}
+                            disabled
+                            style={{ width: '18px', height: '18px' }}
+                            readOnly
+                          />
+                          <label style={{ fontSize: '14px', color: '#8c9196' }}>
+                            Liability Coverage up to $100 (always included)
+                          </label>
+                        </div>
+                      </div>
+
+                      <Button
+                        variant="primary"
+                        disabled={JSON.stringify(labelOptions) === JSON.stringify(labelOptionsSaved)}
+                        loading={labelOptionsLoading}
+                        onClick={handleLabelOptionsSave}
+                      >
+                        Save Label Options
+                      </Button>
+                    </div>
+                  )}
                 </div>
               </Card>
             </Layout.Section>

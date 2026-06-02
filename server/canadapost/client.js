@@ -141,10 +141,28 @@ class CanadaPostClient {
         ${order.shipping_address2 ? `<address-line-2>${this.escapeXml(order.shipping_address2)}</address-line-2>` : ''}
         <city>${this.escapeXml(order.shipping_city || '')}</city>
         <prov-state>${this.escapeXml(order.shipping_province || '')}</prov-state>
-        <country-code>${this.escapeXml(order.shipping_country_code || order.shipping_country || 'CA')}</country-code>
+        <country-code>${this.getCountryCode(order.shipping_country_code || order.shipping_country)}</country-code>
         <postal-zip-code>${(order.shipping_zip || '').replace(/\s/g, '')}</postal-zip-code>
       </address-details>
     </destination>`;
+  }
+
+  // Convert country name to 2-letter ISO code
+  getCountryCode(country) {
+    if (!country) return 'CA';
+    if (country.length === 2) return country.toUpperCase();
+    const map = {
+      'canada': 'CA', 'united states': 'US', 'usa': 'US', 'united states of america': 'US',
+      'united kingdom': 'GB', 'uk': 'GB', 'australia': 'AU', 'france': 'FR',
+      'germany': 'DE', 'japan': 'JP', 'china': 'CN', 'mexico': 'MX',
+      'south korea': 'KR', 'korea': 'KR', 'italy': 'IT', 'spain': 'ES',
+      'netherlands': 'NL', 'belgium': 'BE', 'switzerland': 'CH', 'sweden': 'SE',
+      'norway': 'NO', 'denmark': 'DK', 'finland': 'FI', 'portugal': 'PT',
+      'brazil': 'BR', 'argentina': 'AR', 'colombia': 'CO', 'chile': 'CL',
+      'india': 'IN', 'singapore': 'SG', 'hong kong': 'HK', 'taiwan': 'TW',
+      'new zealand': 'NZ', 'ireland': 'IE', 'austria': 'AT', 'poland': 'PL',
+    };
+    return map[country.toLowerCase().trim()] || country.substring(0, 2).toUpperCase();
   }
 
   // Escape special XML characters
