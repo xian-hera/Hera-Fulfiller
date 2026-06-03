@@ -273,7 +273,7 @@ router.patch('/items/:id/packer-status', async (req, res) => {
 router.post('/orders/:shopifyOrderId/complete', async (req, res) => {
   try {
     const { shopifyOrderId } = req.params;
-    const { boxType, weight, customDimensions } = req.body;
+    const { boxType, weight } = req.body;
 
     console.log('\n========== ORDER COMPLETION START ==========');
     console.log(`Shopify Order ID parameter: ${shopifyOrderId}`);
@@ -295,19 +295,9 @@ router.post('/orders/:shopifyOrderId/complete', async (req, res) => {
     console.log(`Order found: ${order.name}`);
 
     // 获取 box type 详情（含 dimensions）
-    let boxTypeRecord = await db.prepare(
+    const boxTypeRecord = await db.prepare(
       'SELECT * FROM box_types WHERE code = ?'
     ).get(boxType);
-
-    // 🆕 Custom size: build a virtual box record from user input
-    if (boxType === 'Custom' && customDimensions) {
-      boxTypeRecord = {
-        code: 'Custom',
-        dimensions: `${customDimensions.length}x${customDimensions.width}x${customDimensions.height}`,
-        weight_grams: customDimensions.boxWeightGrams || 0,
-        isCustom: true
-      };
-    }
 
     // 更新订单状态
     await db.prepare(`
@@ -391,31 +381,18 @@ router.post('/orders/:shopifyOrderId/complete', async (req, res) => {
     }
 
     // 计算实际使用的 weight（grams）
-    // = line items 重量之和 + 箱子重量
-    // 如果用户在 modal 手填了 weight，则使用手填值（跳过自动计算）
-    let totalWeightGrams = 0;
-
-    if (weight) {
-      // 用户手动输入了总重量（weight warning 情况）
-      totalWeightGrams = parseFloat(weight);
-    } else {
-      // 自动计算：所有 line items 重量之和
+    // 如果用户在 modal 填了 weight，用那个；否则用所有 line items 的 weight 之和
+    let totalWeightGrams = weight ? parseFloat(weight) : 0;
+    if (!totalWeightGrams) {
       const lineItems = await db.prepare(
         'SELECT weight, weight_unit, quantity FROM line_items WHERE shopify_order_id = ?'
       ).all(shopifyOrderId);
-      const itemsWeight = lineItems.reduce((sum, item) => {
+      totalWeightGrams = lineItems.reduce((sum, item) => {
         const w = item.weight_unit === 'g' ? item.weight : item.weight * 1000;
-        return sum + (w * (item.quantity || 1));
+        return sum + (w * item.quantity);
       }, 0);
-
-      // 加上箱子重量
-      const boxWeight = boxTypeRecord?.weight_grams || 0;
-      totalWeightGrams = itemsWeight + boxWeight;
-
-      console.log(`Weight breakdown: items=${itemsWeight}g + box=${boxWeight}g = ${totalWeightGrams}g`);
     }
-
-    // 最小 weight 50g，避免 Canada Post API 报错
+    // 最小 weight 50g，避免 API 报错
     if (totalWeightGrams < 50) totalWeightGrams = 50;
 
     // ── Step 1: Canada Post Create Shipment ──
@@ -772,6 +749,72 @@ router.patch('/items/:id/update-weight', async (req, res) => {
   } catch (error) {
     console.error('Error updating weight:', error);
     res.status(500).json({ error: 'Failed to update weight: ' + error.message });
+  }
+});
+
+// 🔧 TEMP DEBUG - remove after testing
+router.get('/debug-order/:orderId', async (req, res) => {
+  try {
+    const shopifyClient = require('../shopify/client');
+    const { orderId } = req.params;
+    const orderGid = `gid://shopify/Order/${orderId}`;
+    const query = `
+      query {
+        order(id: "${orderGid}") {
+          id
+          name
+          displayFinancialStatus
+          displayFulfillmentStatus
+          cancelReason
+          cancelledAt
+          closedAt
+          lineItems(first: 20) {
+            edges {
+              node {
+                id
+                name
+                quantity
+                fulfillableQuantity
+                requiresShipping
+              }
+            }
+          }
+          fulfillments(first: 10) {
+            id
+            status
+          }
+          fulfillmentOrders(first: 10) {
+            nodes {
+              id
+              status
+              requestStatus
+              assignedLocation {
+                location {
+                  id
+                  name
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
+    const response = await shopifyClient.client.post('/graphql.json', { query });
+    res.json(response.data);
+  } catch (error) {
+    res.status(500).json({ error: error.message, data: error.response?.data });
+  }
+});
+
+// 🔧 TEMP DEBUG REST
+router.get('/debug-order-rest/:orderId', async (req, res) => {
+  try {
+    const shopifyClient = require('../shopify/client');
+    const { orderId } = req.params;
+    const response = await shopifyClient.client.get(`/orders/${orderId}/fulfillment_orders.json`);
+    res.json(response.data);
+  } catch (error) {
+    res.status(500).json({ error: error.message, data: error.response?.data });
   }
 });
 
