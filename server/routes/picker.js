@@ -65,7 +65,8 @@ async function getBatchMTL10Inventory(skus) {
         }
       `;
 
-      const response = await shopifyClient.client.post('/graphql.json', {
+      const client = await shopifyClient.getClient();
+      const response = await client.post('/graphql.json', {
         query,
         variables: { query: skuQuery }
       });
@@ -504,7 +505,8 @@ router.get('/check-fulfilled-orders', async (req, res) => {
     for (const shopifyOrderId of uniqueOrders) {
       try {
         // 使用 REST API 查询订单状态
-        const response = await shopifyClient.client.get(`/orders/${shopifyOrderId}.json`);
+        const client = await shopifyClient.getClient();
+        const response = await client.get(`/orders/${shopifyOrderId}.json`);
         const order = response.data.order;
         
         // 如果订单已完成（fulfillment_status 不是 null 且不是 unfulfilled）

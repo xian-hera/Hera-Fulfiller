@@ -247,7 +247,8 @@ async function getInventoryBySku(sku) {
     const searchQuery = `sku:${sku}`;
     console.log(`GraphQL search query: "${searchQuery}"`);
 
-    const response = await shopifyClient.client.post('/graphql.json', {
+    const client = await shopifyClient.getClient();
+    const response = await client.post('/graphql.json', {
       query,
       variables: { query: searchQuery }
     });
@@ -592,7 +593,8 @@ router.post('/check-planner-stock', async (req, res) => {
           }
         `;
 
-        const response = await shopifyClient.client.post('/graphql.json', {
+        const client = await shopifyClient.getClient();
+        const response = await client.post('/graphql.json', {
           query,
           variables: { query: `sku:${sku}` }
         });

@@ -8,9 +8,20 @@ const db = require('../database/init');
 // ============================================================================
 
 const SHOP = process.env.SHOPIFY_SHOP_NAME || 'beaute-hera.myshopify.com';
-const TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
 const API_VERSION = '2025-07';
 const GQL_URL = `https://${SHOP}/admin/api/${API_VERSION}/graphql.json`;
+
+// 从数据库 sessions 表读取当前 access token（token 不再放在环境变量里）
+async function getAccessToken() {
+  const row = await db.prepare(
+    'SELECT access_token FROM sessions ORDER BY updated_at DESC LIMIT 1'
+  ).get();
+  const token = row && row.access_token;
+  if (!token) {
+    throw new Error('No Shopify token in sessions table. Visit /auth to authenticate.');
+  }
+  return token;
+}
 
 // Shopify Location IDs (confirmed via API testing)
 const LOCATION_IDS = {
@@ -28,12 +39,13 @@ const LOCATION_IDS = {
 };
 
 async function gql(query, variables = {}) {
+  const token = await getAccessToken();
   const res = await axios.post(
     GQL_URL,
     { query, variables },
     {
       headers: {
-        'X-Shopify-Access-Token': TOKEN,
+        'X-Shopify-Access-Token': token,
         'Content-Type': 'application/json',
       },
     }

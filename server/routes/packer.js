@@ -752,41 +752,4 @@ router.patch('/items/:id/update-weight', async (req, res) => {
   }
 });
 
-// 🔧 TEMP DEBUG - remove after testing
-router.get('/debug-order/:orderId', async (req, res) => {
-  try {
-    const axios = require('axios');
-    const { orderId } = req.params;
-    const shopUrl = process.env.SHOPIFY_SHOP_NAME;
-    const token = process.env.SHOPIFY_ACCESS_TOKEN;
-    const orderGid = `gid://shopify/Order/${orderId}`;
-    const query = `{ order(id: "${orderGid}") { id name displayFinancialStatus displayFulfillmentStatus cancelReason cancelledAt closedAt lineItems(first: 20) { edges { node { id name quantity fulfillableQuantity requiresShipping } } } fulfillments(first: 10) { id status } fulfillmentOrders(first: 10) { nodes { id status requestStatus assignedLocation { location { id name } } } } } }`;
-    const response = await axios.post(
-      `https://${shopUrl}/admin/api/2025-01/graphql.json`,
-      { query },
-      { headers: { 'X-Shopify-Access-Token': token, 'Content-Type': 'application/json' } }
-    );
-    res.json(response.data);
-  } catch (error) {
-    res.status(500).json({ error: error.message, data: error.response?.data });
-  }
-});
-
-// 🔧 TEMP DEBUG REST
-router.get('/debug-order-rest/:orderId', async (req, res) => {
-  try {
-    const axios = require('axios');
-    const { orderId } = req.params;
-    const shopUrl = process.env.SHOPIFY_SHOP_NAME;
-    const token = process.env.SHOPIFY_ACCESS_TOKEN;
-    const response = await axios.get(
-      `https://${shopUrl}/admin/api/2025-01/orders/${orderId}/fulfillment_orders.json`,
-      { headers: { 'X-Shopify-Access-Token': token } }
-    );
-    res.json(response.data);
-  } catch (error) {
-    res.status(500).json({ error: error.message, data: error.response?.data });
-  }
-});
-
 module.exports = router;
