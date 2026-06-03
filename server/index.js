@@ -22,19 +22,31 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// 🔧 TEMP OAuth callback - remove after capturing new access token
+// ---- Shopify OAuth ----
+// 第一步：在浏览器里打开 /auth 来发起授权
+app.get('/auth', (req, res) => {
+  const shop = req.query.shop || process.env.SHOPIFY_SHOP_NAME;
+  if (!shop) return res.status(400).send('Missing shop');
+
+  const redirectUri = `${process.env.HOST}/auth/callback`;
+  const state = Math.random().toString(36).slice(2);
+  const installUrl =
+    `https://${shop}/admin/oauth/authorize` +
+    `?client_id=${process.env.SHOPIFY_API_KEY}` +
+    `&scope=${encodeURIComponent(process.env.SHOPIFY_SCOPES)}` +
+    `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+    `&state=${state}`;
+
+  res.redirect(installUrl);
+});
+
+// 第二步：Shopify 带着 ?code=... 跳回这里，换 token 并存进数据库
 app.get('/auth/callback', async (req, res) => {
   try {
     const { code, shop } = req.query;
-    console.log('========== OAUTH CALLBACK RECEIVED ==========');
-    console.log('Shop:', shop);
-    console.log('Code:', code);
+    if (!code || !shop) return res.status(400).send('Missing code or shop parameter');
 
-    if (!code || !shop) {
-      return res.status(400).send('Missing code or shop parameter');
-    }
-
-    // Exchange code for access token
+    // 用 code 换 access token
     const response = await axios.post(`https://${shop}/admin/oauth/access_token`, {
       client_id: process.env.SHOPIFY_API_KEY,
       client_secret: process.env.SHOPIFY_API_SECRET,
@@ -44,17 +56,27 @@ app.get('/auth/callback', async (req, res) => {
     const accessToken = response.data.access_token;
     const scope = response.data.scope;
 
-    console.log('✓ New Access Token:', accessToken);
+    // 存进 sessions 表
+    await db.prepare(
+      `INSERT INTO sessions (shop, access_token, scope, updated_at)
+       VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT (shop) DO UPDATE
+         SET access_token = EXCLUDED.access_token,
+             scope = EXCLUDED.scope,
+             updated_at = CURRENT_TIMESTAMP`
+    ).run(shop, accessToken, scope);
+
+    console.log('========== OAUTH CALLBACK RECEIVED ==========');
+    console.log('✓ Token saved for shop:', shop);
     console.log('✓ Granted Scopes:', scope);
     console.log('=============================================');
 
     res.send(`
-      <h2>✓ OAuth Success</h2>
-      <p><strong>New Access Token:</strong></p>
-      <pre style="background:#f0f0f0;padding:16px;word-break:break-all">${accessToken}</pre>
+      <h2>✓ Authentication complete</h2>
+      <p><strong>Shop:</strong> ${shop}</p>
       <p><strong>Granted Scopes:</strong></p>
       <pre style="background:#f0f0f0;padding:16px">${scope}</pre>
-      <p>Copy the access token above and update your Render environment variable <code>SHOPIFY_ACCESS_TOKEN</code>.</p>
+      <p>Token 已存入数据库，app 可以正常工作了。无需手动填写任何环境变量。</p>
     `);
   } catch (error) {
     console.error('OAuth callback error:', error.response?.data || error.message);
@@ -79,7 +101,7 @@ app.get('/api/health', (req, res) => {
 // Serve static files in production
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, '../client/build')));
-  
+
   app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, '../client/build', 'index.html'));
   });
@@ -88,9 +110,9 @@ if (process.env.NODE_ENV === 'production') {
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
-  res.status(500).json({ 
+  res.status(500).json({
     error: 'Something went wrong!',
-    message: err.message 
+    message: err.message
   });
 });
 
