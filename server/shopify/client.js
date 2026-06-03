@@ -288,6 +288,7 @@ Fetching fulfillment orders for: ${shopifyOrderId}`);
       const orderGid = shopifyOrderId.startsWith('gid://')
         ? shopifyOrderId
         : `gid://shopify/Order/${shopifyOrderId}`;
+      console.log(`Using GID: ${orderGid}`);
 
       const query = `
         query GetFulfillmentOrders($orderId: ID!) {
