@@ -218,7 +218,8 @@ class CanadaPostClient {
     // Weight: grams → kg (Canada Post requires kg, 3 decimal places)
     const weightKg = (weightGrams / 1000).toFixed(3);
 
-    // Dimensions from box_types (stored as "LxWxH" in inches)
+    // Dimensions from box_types — always stored as "LxWxH" in inches → convert to cm
+    // Custom size: user also enters inches, same conversion applies
     const dimensions = this.parseDimensions(boxType?.dimensions);
 
     const groupId = this.getTodayGroupId();

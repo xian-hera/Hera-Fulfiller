@@ -208,16 +208,16 @@ router.get('/box-types', async (req, res) => {
 // Add box type
 router.post('/box-types', async (req, res) => {
   try {
-    const { code, dimensions } = req.body;
+    const { code, dimensions, weightGrams } = req.body;
 
     if (!code || code.trim() === '') {
       return res.status(400).json({ error: 'Box code is required' });
     }
 
     await db.prepare(`
-      INSERT INTO box_types (code, dimensions, usage_count, quantity)
-      VALUES (?, ?, 0, 0)
-    `).run(code.toUpperCase().trim(), dimensions || '');
+      INSERT INTO box_types (code, dimensions, usage_count, quantity, weight_grams)
+      VALUES (?, ?, 0, 0, ?)
+    `).run(code.toUpperCase().trim(), dimensions || '', weightGrams || 0);
 
     res.json({ success: true });
   } catch (error) {
@@ -233,7 +233,7 @@ router.post('/box-types', async (req, res) => {
 router.patch('/box-types/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { code, dimensions, quantity } = req.body;
+    const { code, dimensions, quantity, weightGrams } = req.body;
 
     if (!code || code.trim() === '') {
       return res.status(400).json({ error: 'Box code is required' });
@@ -248,15 +248,15 @@ router.patch('/box-types/:id', async (req, res) => {
     if (quantity !== undefined) {
       await db.prepare(`
         UPDATE box_types
-        SET code = ?, dimensions = ?, quantity = ?
+        SET code = ?, dimensions = ?, quantity = ?, weight_grams = ?
         WHERE id = ?
-      `).run(code.toUpperCase().trim(), dimensions || '', quantity, id);
+      `).run(code.toUpperCase().trim(), dimensions || '', quantity, weightGrams ?? 0, id);
     } else {
       await db.prepare(`
         UPDATE box_types
-        SET code = ?, dimensions = ?
+        SET code = ?, dimensions = ?, weight_grams = ?
         WHERE id = ?
-      `).run(code.toUpperCase().trim(), dimensions || '', id);
+      `).run(code.toUpperCase().trim(), dimensions || '', weightGrams ?? 0, id);
     }
 
     res.json({ success: true });

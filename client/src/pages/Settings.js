@@ -41,6 +41,7 @@ const Settings = () => {
   const [boxTypes, setBoxTypes] = useState([]);
   const [newBoxCode, setNewBoxCode] = useState('');
   const [newBoxDimensions, setNewBoxDimensions] = useState('');
+  const [newBoxWeight, setNewBoxWeight] = useState('');
   const [boxStatsStartDate, setBoxStatsStartDate] = useState(null);
 
   // ── DB stats / cleanup ─────────────────────────────────────
@@ -209,10 +210,12 @@ const Settings = () => {
     try {
       await axios.post('/api/settings/box-types', {
         code: newBoxCode.toUpperCase(),
-        dimensions: newBoxDimensions
+        dimensions: newBoxDimensions,
+        weightGrams: parseInt(newBoxWeight) || 0
       });
       setNewBoxCode('');
       setNewBoxDimensions('');
+      setNewBoxWeight('');
       await fetchSettings();
       showMessage('Box type added!');
     } catch (error) {
@@ -236,7 +239,8 @@ const Settings = () => {
       await axios.patch(`/api/settings/box-types/${box.id}`, {
         code: box.code.toUpperCase(),
         dimensions: box.dimensions,
-        quantity: box.quantity
+        quantity: box.quantity,
+        weightGrams: parseInt(box.weight_grams) || 0
       });
       await fetchSettings();
       await fetchDbStats();
@@ -527,6 +531,16 @@ const Settings = () => {
                   autoComplete="off"
                 />
               </div>
+              <div style={{ marginBottom: '12px' }}>
+                <TextField
+                  label="Box Weight (grams)"
+                  type="number"
+                  value={newBoxWeight}
+                  onChange={setNewBoxWeight}
+                  placeholder="0"
+                  autoComplete="off"
+                />
+              </div>
               <Button onClick={handleAddBox}>Add Box Type</Button>
             </div>
             {boxTypes.length > 0 && (
@@ -552,6 +566,10 @@ const Settings = () => {
                       <div style={{ marginBottom: '12px' }}>
                         <TextField label="Quantity" type="number" value={box.quantity?.toString() || '0'} autoComplete="off"
                           onChange={value => setBoxTypes(prev => prev.map(b => b.id === box.id ? { ...b, quantity: parseInt(value) || 0 } : b))} />
+                      </div>
+                      <div style={{ marginBottom: '12px' }}>
+                        <TextField label="Box Weight (grams)" type="number" value={box.weight_grams?.toString() || '0'} autoComplete="off"
+                          onChange={value => setBoxTypes(prev => prev.map(b => b.id === box.id ? { ...b, weight_grams: parseInt(value) || 0 } : b))} />
                       </div>
                       <div style={{ display: 'flex', gap: '8px' }}>
                         <Button tone="critical" onClick={() => handleDeleteBox(box.id)}>Delete</Button>

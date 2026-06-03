@@ -14,7 +14,15 @@ const CompleteOrderModal = ({
 }) => {
   const [boxType, setBoxType] = useState('');
   const [orderWeight, setOrderWeight] = useState('');
-  const [activeInput, setActiveInput] = useState('boxType'); // 'boxType' or 'weight'
+  const [activeInput, setActiveInput] = useState('boxType');
+
+  // 🆕 Custom size state
+  const [showCustomSize, setShowCustomSize] = useState(false);
+  const [customLength, setCustomLength] = useState('');
+  const [customWidth, setCustomWidth] = useState('');
+  const [customHeight, setCustomHeight] = useState('');
+  const [customBoxWeight, setCustomBoxWeight] = useState('');
+  const [activeCustomInput, setActiveCustomInput] = useState('length');
 
   const handleBoxTypeClick = (code) => {
     setBoxType(code);
@@ -32,39 +40,146 @@ const CompleteOrderModal = ({
     setOrderWeight(prev => prev.slice(0, -1));
   };
 
+  // 🆕 Custom size keypad handlers
+  const handleCustomNumberClick = (number) => {
+    const setters = {
+      length: setCustomLength,
+      width: setCustomWidth,
+      height: setCustomHeight,
+      boxWeight: setCustomBoxWeight
+    };
+    setters[activeCustomInput]?.(prev => prev + number);
+  };
+
+  const handleCustomBackspace = () => {
+    const setters = {
+      length: setCustomLength,
+      width: setCustomWidth,
+      height: setCustomHeight,
+      boxWeight: setCustomBoxWeight
+    };
+    setters[activeCustomInput]?.(prev => prev.slice(0, -1));
+  };
+
+  // 🆕 Submit custom size — return to main modal with 'Custom' as box type
+  const handleCustomSizeSubmit = () => {
+    if (!customLength || !customWidth || !customHeight || !customBoxWeight) {
+      alert('Please fill in all dimensions and box weight');
+      return;
+    }
+    setBoxType('Custom');
+    setShowCustomSize(false);
+  };
+
   const handleComplete = () => {
     if (!boxType) {
       alert('Please select a box type');
       return;
     }
 
-    if (hasWeightWarning && !orderWeight) {
+    if (hasWeightWarning && !orderWeight && boxType !== 'Custom') {
       alert('Please enter the order weight');
       return;
     }
 
-    onComplete({
-      boxType,
-      weight: orderWeight || null
-    });
+    const payload = { boxType, weight: orderWeight || null };
 
-    // 重置状态
+    // 🆕 Attach custom dimensions if Custom box was used
+    if (boxType === 'Custom') {
+      payload.customDimensions = {
+        length: customLength,
+        width: customWidth,
+        height: customHeight,
+        boxWeightGrams: parseFloat(customBoxWeight) || 0
+      };
+    }
+
+    onComplete(payload);
+
+    // Reset
     setBoxType('');
     setOrderWeight('');
     setActiveInput('boxType');
+    setShowCustomSize(false);
+    setCustomLength('');
+    setCustomWidth('');
+    setCustomHeight('');
+    setCustomBoxWeight('');
+    setActiveCustomInput('length');
   };
 
   const handleClose = () => {
     setBoxType('');
     setOrderWeight('');
     setActiveInput('boxType');
+    setShowCustomSize(false);
+    setCustomLength('');
+    setCustomWidth('');
+    setCustomHeight('');
+    setCustomBoxWeight('');
+    setActiveCustomInput('length');
     onClose();
   };
 
-  // 左列：输入区 + 操作按钮
+  // 🆕 Custom size fields
+  const customFields = [
+    { key: 'length', label: 'Length (inch)', value: customLength },
+    { key: 'width', label: 'Width (inch)', value: customWidth },
+    { key: 'height', label: 'Height (inch)', value: customHeight },
+    { key: 'boxWeight', label: 'Box Weight (g)', value: customBoxWeight }
+  ];
+
+  // 🆕 Custom Size view
+  if (showCustomSize) {
+    return (
+      <Modal
+        open={open}
+        onClose={handleClose}
+        title={`Custom Size — Order ${orderName}`}
+      >
+        <Modal.Section>
+          <div className="complete-order-layout">
+            <div className="complete-order-inputs">
+              <Text variant="bodySm" tone="subdued">
+                Enter box dimensions (inches) and box weight (grams).
+              </Text>
+              <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {customFields.map(field => (
+                  <div
+                    key={field.key}
+                    onClick={() => setActiveCustomInput(field.key)}
+                    className="complete-order-field"
+                  >
+                    <InlineStack align="space-between" blockAlign="center">
+                      <Text variant="bodySm" as="p">{field.label}:</Text>
+                      {activeCustomInput === field.key && <Badge tone="info">Active</Badge>}
+                    </InlineStack>
+                    <div className={`complete-order-display ${activeCustomInput === field.key ? 'active' : ''}`}>
+                      {field.value || '0'}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="complete-order-actions" style={{ marginTop: '16px' }}>
+                <Button onClick={() => setShowCustomSize(false)}>Back</Button>
+                <Button variant="primary" onClick={handleCustomSizeSubmit}>Confirm</Button>
+              </div>
+            </div>
+            <div className="complete-order-keypad">
+              <NumericKeypad
+                onNumberClick={handleCustomNumberClick}
+                onBackspace={handleCustomBackspace}
+              />
+            </div>
+          </div>
+        </Modal.Section>
+      </Modal>
+    );
+  }
+
+  // Normal view
   const inputSection = (
     <div className="complete-order-inputs">
-      {/* Box Type 输入区 */}
       <div onClick={() => setActiveInput('boxType')} className="complete-order-field">
         <InlineStack align="space-between" blockAlign="center">
           <Text variant="bodySm" as="p">Box Type:</Text>
@@ -75,7 +190,6 @@ const CompleteOrderModal = ({
         </div>
       </div>
 
-      {/* Weight 输入区（仅在有 weight warning 时显示）*/}
       {hasWeightWarning && (
         <div onClick={() => setActiveInput('weight')} className="complete-order-field">
           <InlineStack align="space-between" blockAlign="center">
@@ -88,15 +202,17 @@ const CompleteOrderModal = ({
         </div>
       )}
 
-      {/* 操作按钮 — 在两列布局时固定在左列底部 */}
+      {/* 🆕 Three buttons: Cancel | Custom Size | Complete Order */}
       <div className="complete-order-actions">
         <Button onClick={handleClose}>Cancel</Button>
+        <Button onClick={() => { setShowCustomSize(true); setActiveCustomInput('length'); }}>
+          Custom Size
+        </Button>
         <Button variant="primary" onClick={handleComplete}>Complete Order</Button>
       </div>
     </div>
   );
 
-  // 右列（或下方）：键盘
   const keypadSection = (
     <div className="complete-order-keypad">
       {activeInput === 'boxType' ? (
@@ -121,11 +237,6 @@ const CompleteOrderModal = ({
       title={`Complete Order ${orderName}`}
     >
       <Modal.Section>
-        {/* 
-          .complete-order-layout:
-          - 竖屏：单列，inputs 在上，keypad 在下
-          - 横屏：两列，inputs（左）+ keypad（右）
-        */}
         <div className="complete-order-layout">
           {inputSection}
           {keypadSection}

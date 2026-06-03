@@ -273,7 +273,7 @@ router.patch('/items/:id/packer-status', async (req, res) => {
 router.post('/orders/:shopifyOrderId/complete', async (req, res) => {
   try {
     const { shopifyOrderId } = req.params;
-    const { boxType, weight } = req.body;
+    const { boxType, weight, customDimensions } = req.body;
 
     console.log('\n========== ORDER COMPLETION START ==========');
     console.log(`Shopify Order ID parameter: ${shopifyOrderId}`);
@@ -295,9 +295,19 @@ router.post('/orders/:shopifyOrderId/complete', async (req, res) => {
     console.log(`Order found: ${order.name}`);
 
     // 获取 box type 详情（含 dimensions）
-    const boxTypeRecord = await db.prepare(
+    let boxTypeRecord = await db.prepare(
       'SELECT * FROM box_types WHERE code = ?'
     ).get(boxType);
+
+    // 🆕 Custom size: build a virtual box record from user input
+    if (boxType === 'Custom' && customDimensions) {
+      boxTypeRecord = {
+        code: 'Custom',
+        dimensions: `${customDimensions.length}x${customDimensions.width}x${customDimensions.height}`,
+        weight_grams: customDimensions.boxWeightGrams || 0,
+        isCustom: true
+      };
+    }
 
     // 更新订单状态
     await db.prepare(`
@@ -381,18 +391,31 @@ router.post('/orders/:shopifyOrderId/complete', async (req, res) => {
     }
 
     // 计算实际使用的 weight（grams）
-    // 如果用户在 modal 填了 weight，用那个；否则用所有 line items 的 weight 之和
-    let totalWeightGrams = weight ? parseFloat(weight) : 0;
-    if (!totalWeightGrams) {
+    // = line items 重量之和 + 箱子重量
+    // 如果用户在 modal 手填了 weight，则使用手填值（跳过自动计算）
+    let totalWeightGrams = 0;
+
+    if (weight) {
+      // 用户手动输入了总重量（weight warning 情况）
+      totalWeightGrams = parseFloat(weight);
+    } else {
+      // 自动计算：所有 line items 重量之和
       const lineItems = await db.prepare(
         'SELECT weight, weight_unit, quantity FROM line_items WHERE shopify_order_id = ?'
       ).all(shopifyOrderId);
-      totalWeightGrams = lineItems.reduce((sum, item) => {
+      const itemsWeight = lineItems.reduce((sum, item) => {
         const w = item.weight_unit === 'g' ? item.weight : item.weight * 1000;
-        return sum + (w * item.quantity);
+        return sum + (w * (item.quantity || 1));
       }, 0);
+
+      // 加上箱子重量
+      const boxWeight = boxTypeRecord?.weight_grams || 0;
+      totalWeightGrams = itemsWeight + boxWeight;
+
+      console.log(`Weight breakdown: items=${itemsWeight}g + box=${boxWeight}g = ${totalWeightGrams}g`);
     }
-    // 最小 weight 50g，避免 API 报错
+
+    // 最小 weight 50g，避免 Canada Post API 报错
     if (totalWeightGrams < 50) totalWeightGrams = 50;
 
     // ── Step 1: Canada Post Create Shipment ──
