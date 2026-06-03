@@ -298,6 +298,9 @@ Fetching fulfillment orders for: ${shopifyOrderId}`);
               nodes {
                 id
                 status
+                assignedLocation {
+                  name
+                }
                 lineItems(first: 50) {
                   nodes {
                     id
@@ -319,8 +322,12 @@ Fetching fulfillment orders for: ${shopifyOrderId}`);
       const fulfillmentOrders = response.data?.data?.order?.fulfillmentOrders?.nodes || [];
       console.log(`✓ Found ${fulfillmentOrders.length} fulfillment order(s)`);
       fulfillmentOrders.forEach((fo, i) => {
-        console.log(`  FO[${i}] id=${fo.id} status=${fo.status}`);
+        console.log(`  FO[${i}] id=${fo.id} status=${fo.status} assignedLocation=${JSON.stringify(fo.assignedLocation)}`);
       });
+      // Also log raw response if empty
+      if (fulfillmentOrders.length === 0) {
+        console.log('Raw GraphQL response:', JSON.stringify(response.data, null, 2));
+      }
       return fulfillmentOrders;
     } catch (error) {
       console.error('Error fetching fulfillment orders:', error.response?.data || error.message);
