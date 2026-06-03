@@ -5,7 +5,8 @@ class OrderWebhookHandler {
   // Helper function to fetch product details
   static async fetchProductDetails(productId) {
     try {
-      const response = await shopifyClient.client.get(`/products/${productId}.json`);
+      const client = await shopifyClient.getClient();
+      const response = await client.get(`/products/${productId}.json`);
       return response.data.product;
     } catch (error) {
       console.error(`Error fetching product ${productId}:`, error.message);
