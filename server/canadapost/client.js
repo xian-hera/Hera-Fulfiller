@@ -271,6 +271,44 @@ class CanadaPostClient {
   </delivery-spec>
 </shipment>`;
 
+    // ============================================================
+    // CP_DEBUG — 发送前：核对发给 Canada Post 的数据
+    // 在 Render 日志搜 "CP_DEBUG" 可定位全部；搜 "REQUEST START" 跳到起点
+    // ============================================================
+    console.log('\n===== CP_DEBUG REQUEST START =====');
+    console.log(`[CP_DEBUG] Environment        : ${this.isProduction ? 'PRODUCTION' : 'SANDBOX'}`);
+    console.log(`[CP_DEBUG] Order             : ${order.name}`);
+    console.log(`[CP_DEBUG] Service code      : ${serviceCode}`);
+    console.log('[CP_DEBUG] --- 1) 尺寸 / 重量 / 类型 ---');
+    console.log(`[CP_DEBUG] Box type (raw)    : ${boxType ? boxType.name || '(custom)' : '(none)'}`);
+    console.log(`[CP_DEBUG] Dimensions (raw)  : ${boxType?.dimensions || '(none)'} (inches, "LxWxH")`);
+    if (dimensions) {
+      console.log(`[CP_DEBUG] Dimensions (sent) : L=${dimensions.length} x W=${dimensions.width} x H=${dimensions.height} cm`);
+      console.log('[CP_DEBUG] Parcel type       : BOX/PARCEL (带 <dimensions>)');
+    } else {
+      console.log('[CP_DEBUG] Dimensions (sent) : (无) ');
+      console.log('[CP_DEBUG] Parcel type       : ENVELOPE/无尺寸 (未带 <dimensions> — Canada Post 按无尺寸处理)');
+    }
+    console.log(`[CP_DEBUG] Weight (raw)      : ${weightGrams} g`);
+    console.log(`[CP_DEBUG] Weight (sent)     : ${weightKg} kg`);
+    console.log('[CP_DEBUG] --- 2) 收件人信息 (destination) ---');
+    console.log(`[CP_DEBUG] Name              : ${order.shipping_name || ''}`);
+    console.log(`[CP_DEBUG] Address line 1    : ${order.shipping_address1 || ''}`);
+    console.log(`[CP_DEBUG] Address line 2    : ${order.shipping_address2 || ''}`);
+    console.log(`[CP_DEBUG] City              : ${order.shipping_city || ''}`);
+    console.log(`[CP_DEBUG] Province (raw)    : ${order.shipping_province || ''}  ->  (sent) ${this.getProvinceCode(order.shipping_province || '')}`);
+    console.log(`[CP_DEBUG] Country (raw)     : ${order.shipping_country_code || order.shipping_country || ''}  ->  (sent) ${this.getCountryCode(order.shipping_country_code || order.shipping_country)}`);
+    console.log(`[CP_DEBUG] Postal/ZIP        : ${(order.shipping_zip || '').replace(/\s/g, '')}`);
+    console.log('[CP_DEBUG] --- 3) Reference ---');
+    console.log(`[CP_DEBUG] customer-ref-1    : ${order.name}`);
+    console.log(`[CP_DEBUG] customer-request-id: ${customerRequestId}`);
+    console.log(`[CP_DEBUG] group-id          : ${groupId}`);
+    console.log('[CP_DEBUG] --- 4) Label options ---');
+    console.log(`[CP_DEBUG] Options           :`, labelOptions);
+    console.log('[CP_DEBUG] --- 完整请求 XML（原文）---');
+    console.log(requestXml);
+    console.log('===== CP_DEBUG REQUEST END =====\n');
+
     console.log('Sending Create Shipment request...');
 
     try {
@@ -286,6 +324,33 @@ class CanadaPostClient {
           }
         }
       );
+
+      // ============================================================
+      // CP_DEBUG — 收到后：核对 Canada Post 返回的数据
+      // 在 Render 日志搜 "RESPONSE START" 跳到起点
+      // ============================================================
+      console.log('\n===== CP_DEBUG RESPONSE START =====');
+      console.log(`[CP_DEBUG] HTTP status       : ${response.status}`);
+      console.log('[CP_DEBUG] --- 完整响应 XML（原文，价格/警告都在这里面找）---');
+      console.log(typeof response.data === 'string' ? response.data : JSON.stringify(response.data));
+      // 探测价格字段（不同账户/配置返回的字段名可能不同，全部尝试打印）
+      try {
+        const infoForPrice = (await this.parseXml(response.data))?.['shipment-info'] || {};
+        const priceCandidates = ['shipment-price', 'price', 'due-amount', 'total-amount', 'cc-charge-amount'];
+        let foundAnyPrice = false;
+        priceCandidates.forEach(k => {
+          if (infoForPrice[k] !== undefined) {
+            console.log(`[CP_DEBUG] price field "${k}" : ${JSON.stringify(infoForPrice[k])}`);
+            foundAnyPrice = true;
+          }
+        });
+        if (!foundAnyPrice) {
+          console.log('[CP_DEBUG] price            : 响应里未发现常见价格字段（create-shipment 默认可能不返回价格，详见上面 XML 原文）');
+        }
+      } catch (e) {
+        console.log(`[CP_DEBUG] price probe error : ${e.message}`);
+      }
+      console.log('===== CP_DEBUG RESPONSE END =====\n');
 
       const parsed = await this.parseXml(response.data);
       const info = parsed?.['shipment-info'];
