@@ -293,6 +293,9 @@ async function initPostgres() {
     ['sender_city', 'Longueuil'],
     ['sender_province', 'QC'],
     ['sender_postal_code', 'J4L1M8'],
+    // 🆕 单位开关（控制发给 Canada Post 前是否换算）默认 inch + gram = 当前现状
+    ['length_unit', 'inch'],
+    ['weight_unit', 'gram'],
   ];
   for (const [key, value] of appSettings) {
     await client.query(

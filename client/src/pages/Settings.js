@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from '../api/axios';
-import { Page, Layout, Card, TextField, Button, Text, BlockStack } from '@shopify/polaris';
+import { Page, Layout, Card, TextField, Button, Text, BlockStack, Select } from '@shopify/polaris';
 
 // ── Collapsible Card helper ──────────────────────────────────
 const CollapsibleCard = ({ title, children }) => {
@@ -43,6 +43,10 @@ const Settings = () => {
   const [newBoxDimensions, setNewBoxDimensions] = useState('');
   const [newBoxWeight, setNewBoxWeight] = useState('');
   const [boxStatsStartDate, setBoxStatsStartDate] = useState(null);
+  // 🆕 单位开关（控制发给 Canada Post 前是否换算）
+  const [lengthUnit, setLengthUnit] = useState('inch');
+  const [weightUnit, setWeightUnit] = useState('gram');
+  const [unitSaving, setUnitSaving] = useState(false);
 
   // ── DB stats / cleanup ─────────────────────────────────────
   const [dbStats, setDbStats] = useState(null);
@@ -94,6 +98,10 @@ const Settings = () => {
       setBoxTypes(response.data.boxTypes || []);
 
       if (s.box_stats_start_date) setBoxStatsStartDate(s.box_stats_start_date);
+
+      // 🆕 单位设置（默认 inch / gram）
+      setLengthUnit(s.length_unit || 'inch');
+      setWeightUnit(s.weight_unit || 'gram');
 
       const scannerVals = {
         enabled: s.scanner_enabled === 'true',
@@ -179,6 +187,21 @@ const Settings = () => {
       showMessage('Error saving Pack & Label It settings');
     } finally {
       setPackLabelSaving(false);
+    }
+  };
+
+  // ── 单位开关 save（选中即存）──────────────────────────────
+  const handleUnitChange = async (key, value) => {
+    if (key === 'length_unit') setLengthUnit(value);
+    if (key === 'weight_unit') setWeightUnit(value);
+    setUnitSaving(true);
+    try {
+      await axios.post('/api/settings/update', { key, value });
+      showMessage('Unit setting saved');
+    } catch (error) {
+      showMessage('Error saving unit setting');
+    } finally {
+      setUnitSaving(false);
     }
   };
 
@@ -510,6 +533,44 @@ const Settings = () => {
         {/* ── 4. Manage Boxes ── */}
         <Layout.Section>
           <CollapsibleCard title="Manage Boxes">
+            {/* 🆕 单位开关 + 动态提示 */}
+            <div style={{
+              marginBottom: '20px', padding: '16px',
+              backgroundColor: '#f1f8f5', border: '1px solid #b7e0c9', borderRadius: '8px'
+            }}>
+              <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+                <div style={{ minWidth: '160px' }}>
+                  <Select
+                    label="Length unit"
+                    options={[
+                      { label: 'Inches (in)', value: 'inch' },
+                      { label: 'Centimeters (cm)', value: 'cm' }
+                    ]}
+                    value={lengthUnit}
+                    onChange={value => handleUnitChange('length_unit', value)}
+                    disabled={unitSaving}
+                  />
+                </div>
+                <div style={{ minWidth: '160px' }}>
+                  <Select
+                    label="Weight unit"
+                    options={[
+                      { label: 'Grams (g)', value: 'gram' },
+                      { label: 'Kilograms (kg)', value: 'kg' }
+                    ]}
+                    value={weightUnit}
+                    onChange={value => handleUnitChange('weight_unit', value)}
+                    disabled={unitSaving}
+                  />
+                </div>
+              </div>
+              <div style={{ marginTop: '12px' }}>
+                <Text variant="bodyMd" fontWeight="medium" as="p">
+                  {`All sizes are in ${lengthUnit === 'cm' ? 'centimeters' : 'inches'}, all weights are in ${weightUnit === 'kg' ? 'kilograms' : 'grams'}.`}
+                </Text>
+              </div>
+            </div>
+
             <div style={{ marginBottom: '24px' }}>
               <Text variant="headingSm" as="h3">Add New Box Type</Text>
               <div style={{ marginTop: '12px', marginBottom: '12px' }}>
@@ -524,7 +585,7 @@ const Settings = () => {
               </div>
               <div style={{ marginBottom: '12px' }}>
                 <TextField
-                  label="Dimensions (inches, e.g. 10x8x4)"
+                  label="Dimensions (e.g. 10x8x4)"
                   value={newBoxDimensions}
                   onChange={setNewBoxDimensions}
                   placeholder="10x8x4"
@@ -533,7 +594,7 @@ const Settings = () => {
               </div>
               <div style={{ marginBottom: '12px' }}>
                 <TextField
-                  label="Box Weight (grams)"
+                  label="Box Weight"
                   type="number"
                   value={newBoxWeight}
                   onChange={setNewBoxWeight}
@@ -568,7 +629,7 @@ const Settings = () => {
                           onChange={value => setBoxTypes(prev => prev.map(b => b.id === box.id ? { ...b, quantity: parseInt(value) || 0 } : b))} />
                       </div>
                       <div style={{ marginBottom: '12px' }}>
-                        <TextField label="Box Weight (grams)" type="number" value={box.weight_grams?.toString() || '0'} autoComplete="off"
+                        <TextField label="Box Weight" type="number" value={box.weight_grams?.toString() || '0'} autoComplete="off"
                           onChange={value => setBoxTypes(prev => prev.map(b => b.id === box.id ? { ...b, weight_grams: parseInt(value) || 0 } : b))} />
                       </div>
                       <div style={{ display: 'flex', gap: '8px' }}>

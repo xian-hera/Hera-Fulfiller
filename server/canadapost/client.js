@@ -63,16 +63,30 @@ class CanadaPostClient {
     return 'DOM.EP';
   }
 
-  // Parse box dimensions string "LxWxH" in inches → cm
-  parseDimensions(dimensionString) {
+  // Parse box dimensions string "LxWxH" → cm (Canada Post 要 cm)
+  // lengthUnit='inch' 时 ×2.54 转 cm；='cm' 时直接用（不换算）
+  parseDimensions(dimensionString, lengthUnit = 'inch') {
     if (!dimensionString) return null;
     const parts = dimensionString.split('x').map(p => parseFloat(p.trim()));
     if (parts.length !== 3 || parts.some(isNaN)) return null;
+    const factor = lengthUnit === 'cm' ? 1 : 2.54;
     return {
-      length: (parts[0] * 2.54).toFixed(1),
-      width: (parts[1] * 2.54).toFixed(1),
-      height: (parts[2] * 2.54).toFixed(1)
+      length: (parts[0] * factor).toFixed(1),
+      width: (parts[1] * factor).toFixed(1),
+      height: (parts[2] * factor).toFixed(1)
     };
+  }
+
+  // Canada Post service-code → 友好名称（写进 metafield 用）
+  getServiceName(code) {
+    const map = {
+      'DOM.RP': 'Regular Parcel',
+      'DOM.EP': 'Expedited Parcel',
+      'DOM.XP': 'Xpresspost',
+      'DOM.PC': 'Priority',
+      'DOM.LIB': 'Library Books'
+    };
+    return map[code] || code || 'Unknown';
   }
 
   // Build optional services XML fragment
@@ -206,21 +220,22 @@ class CanadaPostClient {
   // CREATE SHIPMENT
   // Creates a shipment and returns tracking number + label URL
   // ============================================================
-  async createShipment({ order, boxType, weightGrams, labelOptions, senderInfo }) {
+  async createShipment({ order, boxType, weightValue, weightUnit = 'gram', lengthUnit = 'inch', labelOptions, senderInfo }) {
     console.log('\n========== CANADA POST CREATE SHIPMENT ==========');
     console.log(`Order: ${order.name}`);
-    console.log(`Box type: ${boxType}, Weight: ${weightGrams}g`);
+    console.log(`Box type: ${boxType?.code || '(custom)'}, Weight: ${weightValue} ${weightUnit === 'kg' ? 'kg' : 'g'}`);
     console.log(`Label options:`, labelOptions);
 
     const serviceCode = this.getServiceCode(order.shipping_code, order.shipping_title);
     console.log(`Service code: ${serviceCode}`);
 
-    // Weight: grams → kg (Canada Post requires kg, 3 decimal places)
-    const weightKg = (weightGrams / 1000).toFixed(3);
+    // Weight → kg (Canada Post 要 kg, 3 位小数)
+    // weightUnit='gram' 时 ÷1000；='kg' 时直接用（不换算）
+    const weightKg = (weightUnit === 'kg' ? Number(weightValue) : Number(weightValue) / 1000).toFixed(3);
 
-    // Dimensions from box_types — always stored as "LxWxH" in inches → convert to cm
-    // Custom size: user also enters inches, same conversion applies
-    const dimensions = this.parseDimensions(boxType?.dimensions);
+    // Dimensions：box_types.dimensions 或 custom 输入的 "LxWxH"
+    // lengthUnit='inch' 时换算成 cm；='cm' 时直接用
+    const dimensions = this.parseDimensions(boxType?.dimensions, lengthUnit);
 
     const groupId = this.getTodayGroupId();
     const customerRequestId = `${order.name}-${Date.now()}`;
@@ -280,8 +295,8 @@ class CanadaPostClient {
     console.log(`[CP_DEBUG] Order             : ${order.name}`);
     console.log(`[CP_DEBUG] Service code      : ${serviceCode}`);
     console.log('[CP_DEBUG] --- 1) 尺寸 / 重量 / 类型 ---');
-    console.log(`[CP_DEBUG] Box type (raw)    : ${boxType ? boxType.name || '(custom)' : '(none)'}`);
-    console.log(`[CP_DEBUG] Dimensions (raw)  : ${boxType?.dimensions || '(none)'} (inches, "LxWxH")`);
+    console.log(`[CP_DEBUG] Box type (raw)    : ${boxType ? (boxType.code || '(custom)') : '(none)'}`);
+    console.log(`[CP_DEBUG] Dimensions (raw)  : ${boxType?.dimensions || '(none)'} (${lengthUnit}, "LxWxH")`);
     if (dimensions) {
       console.log(`[CP_DEBUG] Dimensions (sent) : L=${dimensions.length} x W=${dimensions.width} x H=${dimensions.height} cm`);
       console.log('[CP_DEBUG] Parcel type       : BOX/PARCEL (带 <dimensions>)');
@@ -289,7 +304,7 @@ class CanadaPostClient {
       console.log('[CP_DEBUG] Dimensions (sent) : (无) ');
       console.log('[CP_DEBUG] Parcel type       : ENVELOPE/无尺寸 (未带 <dimensions> — Canada Post 按无尺寸处理)');
     }
-    console.log(`[CP_DEBUG] Weight (raw)      : ${weightGrams} g`);
+    console.log(`[CP_DEBUG] Weight (raw)      : ${weightValue} ${weightUnit === 'kg' ? 'kg' : 'g'}`);
     console.log(`[CP_DEBUG] Weight (sent)     : ${weightKg} kg`);
     console.log('[CP_DEBUG] --- 2) 收件人信息 (destination) ---');
     console.log(`[CP_DEBUG] Name              : ${order.shipping_name || ''}`);
@@ -362,10 +377,11 @@ class CanadaPostClient {
       const trackingPin = info['tracking-pin'];
       const shipmentId = info['shipment-id'];
 
-      // Find label link (rel="label")
+      // Find label link (rel="label") + price link (rel="price")
       const links = info?.links?.link;
       let labelHref = null;
       let labelMediaType = 'application/pdf';
+      let priceHref = null;
 
       if (Array.isArray(links)) {
         const labelLink = links.find(l => l.$ && l.$.rel === 'label');
@@ -373,6 +389,8 @@ class CanadaPostClient {
           labelHref = labelLink.$.href;
           labelMediaType = labelLink.$['media-type'] || 'application/pdf';
         }
+        const priceLink = links.find(l => l.$ && l.$.rel === 'price');
+        if (priceLink) priceHref = priceLink.$.href;
       } else if (links && links.$ && links.$.rel === 'label') {
         labelHref = links.$.href;
         labelMediaType = links.$['media-type'] || 'application/pdf';
@@ -381,6 +399,7 @@ class CanadaPostClient {
       console.log(`✓ Shipment created. Tracking: ${trackingPin}`);
       console.log(`  Shipment ID: ${shipmentId}`);
       console.log(`  Label URL: ${labelHref}`);
+      console.log(`  Price URL: ${priceHref}`);
       console.log('=================================================\n');
 
       return {
@@ -388,6 +407,8 @@ class CanadaPostClient {
         shipmentId,
         labelHref,
         labelMediaType,
+        priceHref,
+        serviceCode,
         groupId
       };
     } catch (error) {
@@ -404,6 +425,52 @@ class CanadaPostClient {
         }
       }
       throw error;
+    }
+  }
+
+  // ============================================================
+  // GET SHIPMENT PRICE
+  // 调用 create-shipment 响应里的 rel="price" 链接，拿运费
+  // 返回 { dueAmount, baseAmount, serviceCode }（金额为字符串，如 "11.61"）
+  // sandbox 里返回的是 stub 值
+  // ============================================================
+  async getShipmentPrice(priceHref) {
+    console.log('\n===== CP_DEBUG PRICE START =====');
+    if (!priceHref) {
+      console.log('[CP_DEBUG] price href 为空，跳过取价');
+      console.log('===== CP_DEBUG PRICE END =====\n');
+      return { dueAmount: null, baseAmount: null, serviceCode: null };
+    }
+    console.log(`[CP_DEBUG] Fetching price from: ${priceHref}`);
+    try {
+      const response = await axios.get(priceHref, {
+        headers: {
+          'Accept': 'application/vnd.cpc.shipment-v8+xml',
+          'Authorization': this.getAuthHeader(),
+          'Accept-language': 'en-CA'
+        }
+      });
+      console.log(`[CP_DEBUG] HTTP status       : ${response.status}`);
+      console.log('[CP_DEBUG] --- 完整价格响应 XML（原文）---');
+      console.log(typeof response.data === 'string' ? response.data : JSON.stringify(response.data));
+
+      const parsed = await this.parseXml(response.data);
+      const sp = parsed?.['shipment-price'] || {};
+      const dueAmount = sp['due-amount'] != null ? String(sp['due-amount']) : null;
+      const baseAmount = sp['base-amount'] != null ? String(sp['base-amount']) : null;
+      const serviceCode = sp['service-code'] || null;
+
+      console.log(`[CP_DEBUG] service-code      : ${serviceCode}`);
+      console.log(`[CP_DEBUG] base-amount       : ${baseAmount}`);
+      console.log(`[CP_DEBUG] due-amount (总额)  : ${dueAmount}`);
+      console.log('===== CP_DEBUG PRICE END =====\n');
+
+      return { dueAmount, baseAmount, serviceCode };
+    } catch (error) {
+      console.error('[CP_DEBUG] price fetch error :', error.response?.data || error.message);
+      console.log('===== CP_DEBUG PRICE END (error) =====\n');
+      // 取价失败不应阻断整个流程
+      return { dueAmount: null, baseAmount: null, serviceCode: null };
     }
   }
 

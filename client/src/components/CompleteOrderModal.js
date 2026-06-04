@@ -63,8 +63,13 @@ const CompleteOrderModal = ({
 
   // 🆕 Submit custom size — return to main modal with 'Custom' as box type
   const handleCustomSizeSubmit = () => {
-    if (!customLength || !customWidth || !customHeight || !customBoxWeight) {
-      alert('Please fill in all dimensions and box weight');
+    if (!customLength || !customWidth || !customHeight) {
+      alert('Please fill in all dimensions');
+      return;
+    }
+    // 无重量警告(情况4)：custom 页必须填总重；有警告(情况2)：重量在主页填，这里跳过
+    if (!hasWeightWarning && !customBoxWeight) {
+      alert('Please enter the total weight');
       return;
     }
     setBoxType('Custom');
@@ -77,8 +82,9 @@ const CompleteOrderModal = ({
       return;
     }
 
-    if (hasWeightWarning && !orderWeight && boxType !== 'Custom') {
-      alert('Please enter the order weight');
+    // 有重量警告(情况1、2)：无论普通还是 custom，都在主页填总重
+    if (hasWeightWarning && !orderWeight) {
+      alert('Please enter the total weight');
       return;
     }
 
@@ -90,6 +96,7 @@ const CompleteOrderModal = ({
         length: customLength,
         width: customWidth,
         height: customHeight,
+        // 情况2(有警告)时 custom 页没填重量，这里为 0；后端会改用主页的 weight
         boxWeightGrams: parseFloat(customBoxWeight) || 0
       };
     }
@@ -122,11 +129,18 @@ const CompleteOrderModal = ({
   };
 
   // 🆕 Custom size fields
+  // 有重量警告时(情况2)，custom 页不填重量，改在主页填总重 → boxWeight 框变灰禁用
   const customFields = [
     { key: 'length', label: 'Length (inch)', value: customLength },
     { key: 'width', label: 'Width (inch)', value: customWidth },
     { key: 'height', label: 'Height (inch)', value: customHeight },
-    { key: 'boxWeight', label: 'Box Weight (g)', value: customBoxWeight }
+    {
+      key: 'boxWeight',
+      label: 'Total Weight (g)',
+      value: customBoxWeight,
+      disabled: hasWeightWarning,
+      hint: hasWeightWarning ? 'Please input the total weight on the main page' : null
+    }
   ];
 
   // 🆕 Custom Size view
@@ -147,15 +161,16 @@ const CompleteOrderModal = ({
                 {customFields.map(field => (
                   <div
                     key={field.key}
-                    onClick={() => setActiveCustomInput(field.key)}
+                    onClick={() => { if (!field.disabled) setActiveCustomInput(field.key); }}
                     className="complete-order-field"
+                    style={field.disabled ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                   >
                     <InlineStack align="space-between" blockAlign="center">
                       <Text variant="bodySm" as="p">{field.label}:</Text>
-                      {activeCustomInput === field.key && <Badge tone="info">Active</Badge>}
+                      {!field.disabled && activeCustomInput === field.key && <Badge tone="info">Active</Badge>}
                     </InlineStack>
-                    <div className={`complete-order-display ${activeCustomInput === field.key ? 'active' : ''}`}>
-                      {field.value || '0'}
+                    <div className={`complete-order-display ${(!field.disabled && activeCustomInput === field.key) ? 'active' : ''}`}>
+                      {field.disabled ? (field.hint || '—') : (field.value || '0')}
                     </div>
                   </div>
                 ))}

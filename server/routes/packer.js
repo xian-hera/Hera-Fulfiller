@@ -273,7 +273,7 @@ router.patch('/items/:id/packer-status', async (req, res) => {
 router.post('/orders/:shopifyOrderId/complete', async (req, res) => {
   try {
     const { shopifyOrderId } = req.params;
-    const { boxType, weight } = req.body;
+    const { boxType, weight, customDimensions } = req.body;
 
     console.log('\n========== ORDER COMPLETION START ==========');
     console.log(`Shopify Order ID parameter: ${shopifyOrderId}`);
@@ -294,10 +294,39 @@ router.post('/orders/:shopifyOrderId/complete', async (req, res) => {
 
     console.log(`Order found: ${order.name}`);
 
+    // 读取单位设置（控制是否换算后再发给 Canada Post）
+    // 默认 inch + gram（= 当前现状；以后改成 cm/kg 时把设置一改即可停止换算）
+    const unitRows = await db.prepare(
+      "SELECT key, value FROM settings WHERE key IN ('length_unit','weight_unit')"
+    ).all();
+    const unitMap = {};
+    unitRows.forEach(r => { unitMap[r.key] = r.value; });
+    const lengthUnit = unitMap.length_unit || 'inch';
+    const weightUnit = unitMap.weight_unit || 'gram';
+    const isCustom = boxType === 'Custom';
+
     // 获取 box type 详情（含 dimensions）
-    const boxTypeRecord = await db.prepare(
-      'SELECT * FROM box_types WHERE code = ?'
-    ).get(boxType);
+    // - 普通 box：查 box_types 表
+    // - Custom：不查表，用前端传来的 customDimensions 现拼一个记录
+    let boxTypeRecord;
+    if (isCustom) {
+      if (!customDimensions || !customDimensions.length || !customDimensions.width || !customDimensions.height) {
+        return res.status(400).json({ error: 'Custom size requires length, width and height' });
+      }
+      boxTypeRecord = {
+        code: 'Custom',
+        dimensions: `${customDimensions.length}x${customDimensions.width}x${customDimensions.height}`,
+        weight_grams: 0  // custom 重量是“整包总重”，直接用，不再加自重
+      };
+      console.log(`Custom size: ${boxTypeRecord.dimensions} (${lengthUnit})`);
+    } else {
+      boxTypeRecord = await db.prepare(
+        'SELECT * FROM box_types WHERE code = ?'
+      ).get(boxType);
+      if (!boxTypeRecord) {
+        console.log(`⚠️ Box type "${boxType}" not found in box_types table`);
+      }
+    }
 
     // 更新订单状态
     await db.prepare(`
@@ -306,15 +335,16 @@ router.post('/orders/:shopifyOrderId/complete', async (req, res) => {
       WHERE shopify_order_id = ?
     `).run(boxType, weight || null, shopifyOrderId);
 
-    // 更新 box type 使用统计
-    await db.prepare(`
-      UPDATE box_types 
-      SET usage_count = usage_count + 1,
-          quantity = CASE WHEN quantity > 0 THEN quantity - 1 ELSE quantity END
-      WHERE code = ?
-    `).run(boxType);
-
-    console.log(`✓ Box type ${boxType} usage count updated`);
+    // 更新 box type 使用统计（custom 不在表里，跳过）
+    if (!isCustom) {
+      await db.prepare(`
+        UPDATE box_types 
+        SET usage_count = usage_count + 1,
+            quantity = CASE WHEN quantity > 0 THEN quantity - 1 ELSE quantity END
+        WHERE code = ?
+      `).run(boxType);
+      console.log(`✓ Box type ${boxType} usage count updated`);
+    }
 
     // 提取真正的 Shopify Order ID（数字格式）
     let realShopifyOrderId = shopifyOrderId;
@@ -380,20 +410,51 @@ router.post('/orders/:shopifyOrderId/complete', async (req, res) => {
       try { labelOptions = JSON.parse(order.label_options); } catch {}
     }
 
-    // 计算实际使用的 weight（grams）
-    // 如果用户在 modal 填了 weight，用那个；否则用所有 line items 的 weight 之和
-    let totalWeightGrams = weight ? parseFloat(weight) : 0;
-    if (!totalWeightGrams) {
+    // 计算重量（4 种情况矩阵）
+    // 内部统一用“克”做 canonical，最后按 weightUnit 转成 displayWeight
+    //   情况1 有警告+普通：用户主页填总重(weight) → 直接用
+    //   情况2 有警告+custom：用户主页填总重(weight) → 直接用（custom 页不填重量）
+    //   情况3 无警告+普通：商品之和 + box 自重 → 计算
+    //   情况4 无警告+custom：custom 页填的重量(customDimensions.boxWeightGrams) → 直接用
+    // 归纳：有任何手填值就直接用；否则（只可能是普通box无警告）才计算
+    let totalGrams;
+    let weightSource;
+
+    // 主页手填重量（情况1、2）——优先级最高
+    const mainPageWeight = weight ? parseFloat(weight) : 0;
+    // custom 页填的重量（情况4）
+    const customPageWeight = isCustom ? (parseFloat(customDimensions?.boxWeightGrams) || 0) : 0;
+
+    if (mainPageWeight > 0) {
+      // 情况1 / 情况2：主页手填总重，直接用
+      totalGrams = weightUnit === 'kg' ? mainPageWeight * 1000 : mainPageWeight;
+      weightSource = '主页手填总重';
+    } else if (isCustom) {
+      // 情况4：custom 页填的重量作为总重，直接用
+      totalGrams = weightUnit === 'kg' ? customPageWeight * 1000 : customPageWeight;
+      weightSource = 'custom页填的总重';
+    } else {
+      // 情况3：普通 box 无警告 → 商品之和 + box 自重
       const lineItems = await db.prepare(
         'SELECT weight, weight_unit, quantity FROM line_items WHERE shopify_order_id = ?'
       ).all(shopifyOrderId);
-      totalWeightGrams = lineItems.reduce((sum, item) => {
+      const itemsGrams = lineItems.reduce((sum, item) => {
         const w = item.weight_unit === 'g' ? item.weight : item.weight * 1000;
         return sum + (w * item.quantity);
       }, 0);
+      const boxTareGrams = Number(boxTypeRecord?.weight_grams) || 0;
+      totalGrams = itemsGrams + boxTareGrams;
+      weightSource = `计算(商品 ${itemsGrams}g + box自重 ${boxTareGrams}g)`;
     }
-    // 最小 weight 50g，避免 API 报错
-    if (totalWeightGrams < 50) totalWeightGrams = 50;
+    console.log(`重量来源: ${weightSource} = ${totalGrams}g`);
+
+    // 最小 50g（= 0.05kg），避免 Canada Post API 报错
+    if (totalGrams < 50) totalGrams = 50;
+
+    // 转成发送/显示用的单位值
+    const displayWeight = weightUnit === 'kg'
+      ? Number((totalGrams / 1000).toFixed(3))
+      : Math.round(totalGrams);
 
     // ── Step 1: Canada Post Create Shipment ──
     let labelResult = null;
@@ -406,7 +467,9 @@ router.post('/orders/:shopifyOrderId/complete', async (req, res) => {
       labelResult = await canadaPostClient.createShipment({
         order,
         boxType: boxTypeRecord,
-        weightGrams: totalWeightGrams,
+        weightValue: displayWeight,
+        weightUnit,
+        lengthUnit,
         labelOptions,
         senderInfo
       });
@@ -492,6 +555,34 @@ router.post('/orders/:shopifyOrderId/complete', async (req, res) => {
       SET fulfill_status = ?, fulfill_error = ?, updated_at = CURRENT_TIMESTAMP
       WHERE shopify_order_id = ?
     `).run(fulfillStatus, fulfillError, shopifyOrderId);
+
+    // ── Step: 取运费 + 写 custom.fulfillment metafield ──
+    // 只在 label 成功时做（此时包裹信息 + price 链接才有效）
+    if (labelStatus === 'success' && labelResult) {
+      try {
+        const canadaPostClient = require('../canadapost/client');
+        const priceInfo = await canadaPostClient.getShipmentPrice(labelResult.priceHref);
+
+        const serviceName = canadaPostClient.getServiceName(labelResult.serviceCode);
+        const dimsStr = isCustom
+          ? `${customDimensions.length}x${customDimensions.width}x${customDimensions.height}`
+          : (boxTypeRecord?.dimensions || 'N/A');
+        const lenLabel = lengthUnit === 'cm' ? 'cm' : 'in';
+        const wtLabel = weightUnit === 'kg' ? 'kg' : 'g';
+        const priceStr = priceInfo.dueAmount ? `$${priceInfo.dueAmount}` : 'N/A';
+
+        // 格式：service - size - weight - price
+        const fulfillmentValue = `${serviceName} - ${dimsStr} ${lenLabel} - ${displayWeight} ${wtLabel} - ${priceStr}`;
+        console.log(`[Fulfillment metafield] ${fulfillmentValue}`);
+
+        await shopifyClient.updateOrderMetafield(
+          realShopifyOrderId, 'custom', 'fulfillment', fulfillmentValue, 'single_line_text_field'
+        );
+        console.log('✓ custom.fulfillment metafield 已写入');
+      } catch (mfErr) {
+        console.error('⚠️ 写 custom.fulfillment 失败（non-critical）:', mfErr.message);
+      }
+    }
 
     // 如果 fulfill 成功，删除订单（webhook 会处理，但以防万一也手动删）
     // 实际上 Shopify 的 order/fulfilled webhook 会触发删除，这里不重复删
