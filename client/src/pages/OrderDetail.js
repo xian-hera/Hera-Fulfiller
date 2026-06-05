@@ -684,12 +684,13 @@ const OrderDetail = () => {
     }
   };
 
-  const handleOrderComplete = async ({ boxType, weight }) => {
+  const handleOrderComplete = async ({ boxType, weight, customDimensions }) => {
     try {
-      console.log('Completing order:', shopifyOrderId);
+      console.log('Completing order:', shopifyOrderId, { boxType, weight, customDimensions });
       const response = await axios.post(`/api/packer/orders/${shopifyOrderId}/complete`, {
         boxType,
-        weight
+        weight,
+        customDimensions
       });
 
       console.log('Order complete response:', response.data);
