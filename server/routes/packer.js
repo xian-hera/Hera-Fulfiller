@@ -488,6 +488,19 @@ router.post('/orders/:shopifyOrderId/complete', async (req, res) => {
       WHERE shopify_order_id = ?
     `).run(labelStatus, labelError, labelTrackingNumber, shopifyOrderId);
 
+    // 🆕 写入 manifest_shipments（独立追踪，不依赖 orders 表生命周期）
+    if (labelStatus === 'success' && labelResult) {
+      try {
+        await db.prepare(`
+          INSERT INTO manifest_shipments (shopify_order_id, order_name, tracking_number, group_id, shipment_id, service_code)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `).run(shopifyOrderId, order.name, labelResult.trackingPin, labelResult.groupId, labelResult.shipmentId, labelResult.serviceCode);
+        console.log('✓ Shipment recorded for manifest tracking');
+      } catch (msErr) {
+        console.error('⚠️ Failed to record shipment for manifest (non-critical):', msErr.message);
+      }
+    }
+
     // 如果 label 失败，停止流程，订单留在 fulfiller
     if (labelStatus === 'failed') {
       console.log('========== ORDER COMPLETION END (label failed) ==========\n');
@@ -654,27 +667,24 @@ router.patch('/orders/:shopifyOrderId/label-options', async (req, res) => {
 });
 
 // 🆕 Manifest management - get all untransmitted shipments grouped by date
+// 数据来自独立的 manifest_shipments 表，不依赖 orders 表（orders 可随时被清理）
 router.get('/manifest/pending', async (req, res) => {
   try {
-    const orders = await db.prepare(`
-      SELECT name, label_tracking_number, label_status, created_at, box_type, weight
-      FROM orders 
-      WHERE label_status = 'success' 
-        AND fulfill_status = 'success'
-        AND manifest_transmitted = 0
-      ORDER BY created_at DESC
+    const shipments = await db.prepare(`
+      SELECT order_name AS name, tracking_number AS label_tracking_number,
+             group_id, shipment_id, service_code, label_bought_at AS created_at
+      FROM manifest_shipments
+      WHERE transmitted = 0
+      ORDER BY label_bought_at DESC
     `).all();
 
-    // Group by date (group-id format HERA-YYYYMMDD)
+    // 按 group_id 分组（group_id 格式已经是 HERA-YYYYMMDD）
     const groups = {};
-    orders.forEach(order => {
-      const date = new Date(order.created_at);
-      const y = date.getFullYear();
-      const m = String(date.getMonth() + 1).padStart(2, '0');
-      const d = String(date.getDate()).padStart(2, '0');
-      const groupId = `HERA-${y}${m}${d}`;
-      if (!groups[groupId]) groups[groupId] = { groupId, date: `${y}-${m}-${d}`, orders: [] };
-      groups[groupId].orders.push(order);
+    shipments.forEach(s => {
+      const gid = s.group_id;
+      const dateStr = gid.replace('HERA-', '').replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3');
+      if (!groups[gid]) groups[gid] = { groupId: gid, date: dateStr, orders: [] };
+      groups[gid].orders.push(s);
     });
 
     res.json({ groups: Object.values(groups).sort((a, b) => a.date.localeCompare(b.date)) });
@@ -704,35 +714,26 @@ router.post('/manifest/generate', async (req, res) => {
       postalCode: senderMap.sender_postal_code || ''
     };
 
-    // 获取所有未 transmit 的 shipment 的 group-ids
-    const orders = await db.prepare(`
-      SELECT name, label_tracking_number, created_at
-      FROM orders 
-      WHERE label_status = 'success' 
-        AND fulfill_status = 'success'
-        AND (manifest_transmitted = 0 OR manifest_transmitted IS NULL)
+    // 获取所有未 transmit 的 shipment
+    const shipments = await db.prepare(`
+      SELECT id, order_name, tracking_number, group_id, shipment_id
+      FROM manifest_shipments
+      WHERE transmitted = 0
     `).all();
 
-    if (orders.length === 0) {
+    if (shipments.length === 0) {
       return res.status(400).json({ error: 'No pending shipments to transmit' });
     }
 
-    // 收集所有唯一的 group-ids
-    const groupIds = new Set();
-    orders.forEach(order => {
-      const date = new Date(order.created_at);
-      const y = date.getFullYear();
-      const m = String(date.getMonth() + 1).padStart(2, '0');
-      const d = String(date.getDate()).padStart(2, '0');
-      groupIds.add(`HERA-${y}${m}${d}`);
-    });
+    // 收集所有唯一的 group-ids（manifest_shipments 表已经存了 group_id，直接用）
+    const groupIds = [...new Set(shipments.map(s => s.group_id))];
 
-    console.log(`Transmitting ${orders.length} shipments across ${groupIds.size} group(s):`, [...groupIds]);
+    console.log(`Transmitting ${shipments.length} shipments across ${groupIds.length} group(s):`, groupIds);
 
     const canadaPostClient = require('../canadapost/client');
 
     // Transmit all groups together
-    const manifestLinks = await canadaPostClient.transmitShipments([...groupIds], senderInfo);
+    const manifestLinks = await canadaPostClient.transmitShipments(groupIds, senderInfo);
 
     if (manifestLinks.length === 0) {
       throw new Error('No manifest links returned from Canada Post');
@@ -741,22 +742,20 @@ router.post('/manifest/generate', async (req, res) => {
     // Download first manifest PDF
     const manifestPdf = await canadaPostClient.getManifestPdf(manifestLinks[0]);
 
-    // Mark orders as transmitted
+    // 标记为已传输
     await db.prepare(`
-      UPDATE orders 
-      SET manifest_transmitted = 1, updated_at = CURRENT_TIMESTAMP
-      WHERE label_status = 'success' 
-        AND fulfill_status = 'success'
-        AND (manifest_transmitted = 0 OR manifest_transmitted IS NULL)
+      UPDATE manifest_shipments
+      SET transmitted = 1
+      WHERE transmitted = 0
     `).run();
 
-    console.log(`✓ Manifest generated. ${orders.length} shipments transmitted.`);
+    console.log(`✓ Manifest generated. ${shipments.length} shipments transmitted.`);
 
     // Return PDF as base64 for download
     res.json({
       success: true,
-      shipmentCount: orders.length,
-      groupCount: groupIds.size,
+      shipmentCount: shipments.length,
+      groupCount: groupIds.length,
       manifestPdfBase64: manifestPdf.toString('base64')
     });
 

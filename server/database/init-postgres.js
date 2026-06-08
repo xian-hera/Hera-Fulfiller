@@ -149,6 +149,21 @@ async function initPostgres() {
     )
   `);
 
+  // Manifest Shipments table（独立追踪需要 transmit 的 shipment，和 orders 表生命周期解耦）
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS manifest_shipments (
+      id SERIAL PRIMARY KEY,
+      shopify_order_id TEXT,
+      order_name TEXT NOT NULL,
+      tracking_number TEXT,
+      group_id TEXT NOT NULL,
+      shipment_id TEXT,
+      service_code TEXT,
+      label_bought_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      transmitted INTEGER DEFAULT 0
+    )
+  `);
+
   // Connecteam tasks table
   await client.query(`
     CREATE TABLE IF NOT EXISTS connecteam_tasks (
