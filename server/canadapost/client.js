@@ -254,8 +254,8 @@ class CanadaPostClient {
 
     const requestXml = `<?xml version="1.0" encoding="utf-8"?>
 <shipment xmlns="http://www.canadapost.ca/ws/shipment-v8">
+  <transmit-shipment>true</transmit-shipment>
   <customer-request-id>${customerRequestId}</customer-request-id>
-  <group-id>${groupId}</group-id>
   <requested-shipping-point>${postalCode}</requested-shipping-point>
   <cpc-pickup-indicator>true</cpc-pickup-indicator>
   <delivery-spec>
@@ -317,7 +317,7 @@ class CanadaPostClient {
     console.log('[CP_DEBUG] --- 3) Reference ---');
     console.log(`[CP_DEBUG] customer-ref-1    : ${order.name}`);
     console.log(`[CP_DEBUG] customer-request-id: ${customerRequestId}`);
-    console.log(`[CP_DEBUG] group-id          : ${groupId}`);
+    console.log(`[CP_DEBUG] transmit-shipment : true (立即传输，不使用 group-id)`);
     console.log('[CP_DEBUG] --- 4) Label options ---');
     console.log(`[CP_DEBUG] Options           :`, labelOptions);
     console.log('[CP_DEBUG] --- 完整请求 XML（原文）---');
@@ -382,6 +382,7 @@ class CanadaPostClient {
       let labelHref = null;
       let labelMediaType = 'application/pdf';
       let priceHref = null;
+      let refundHref = null;
 
       if (Array.isArray(links)) {
         const labelLink = links.find(l => l.$ && l.$.rel === 'label');
@@ -391,6 +392,8 @@ class CanadaPostClient {
         }
         const priceLink = links.find(l => l.$ && l.$.rel === 'price');
         if (priceLink) priceHref = priceLink.$.href;
+        const refundLink = links.find(l => l.$ && l.$.rel === 'refund');
+        if (refundLink) refundHref = refundLink.$.href;
       } else if (links && links.$ && links.$.rel === 'label') {
         labelHref = links.$.href;
         labelMediaType = links.$['media-type'] || 'application/pdf';
@@ -400,6 +403,7 @@ class CanadaPostClient {
       console.log(`  Shipment ID: ${shipmentId}`);
       console.log(`  Label URL: ${labelHref}`);
       console.log(`  Price URL: ${priceHref}`);
+      console.log(`  Refund URL: ${refundHref}`);
       console.log('=================================================\n');
 
       return {
@@ -408,6 +412,7 @@ class CanadaPostClient {
         labelHref,
         labelMediaType,
         priceHref,
+        refundHref,
         serviceCode,
         groupId
       };
@@ -471,6 +476,59 @@ class CanadaPostClient {
       console.log('===== CP_DEBUG PRICE END (error) =====\n');
       // 取价失败不应阻断整个流程
       return { dueAmount: null, baseAmount: null, serviceCode: null };
+    }
+  }
+
+  // ============================================================
+  // REQUEST SHIPMENT REFUND
+  // 对已 transmit 的 shipment 请求退款（transmit-shipment=true 的 label 不能 void，只能 refund）
+  // refundHref = Create Shipment 响应里 rel="refund" 的链接
+  // 返回 { serviceTicketId, serviceTicketDate }
+  // ============================================================
+  async requestRefund(refundHref, email) {
+    console.log('\n========== CANADA POST REFUND REQUEST ==========');
+    console.log(`Refund URL: ${refundHref}`);
+    console.log(`Email: ${email}`);
+
+    const requestXml = `<?xml version="1.0" encoding="utf-8"?>
+<shipment-refund-request xmlns="http://www.canadapost.ca/ws/shipment-v8">
+  <email>${this.escapeXml(email)}</email>
+</shipment-refund-request>`;
+
+    try {
+      const response = await axios.post(refundHref, requestXml, {
+        headers: {
+          'Content-Type': 'application/vnd.cpc.shipment-v8+xml',
+          'Accept': 'application/vnd.cpc.shipment-v8+xml',
+          'Authorization': this.getAuthHeader(),
+          'Accept-language': 'en-CA'
+        }
+      });
+
+      const parsed = await this.parseXml(response.data);
+      const info = parsed?.['shipment-refund-request-info'] || {};
+
+      const serviceTicketId = info['service-ticket-id'] || null;
+      const serviceTicketDate = info['service-ticket-date'] || null;
+
+      console.log(`✓ Refund requested. Ticket: ${serviceTicketId}, Date: ${serviceTicketDate}`);
+      console.log('=================================================\n');
+
+      return { serviceTicketId, serviceTicketDate };
+    } catch (error) {
+      if (error.response) {
+        console.error('Refund API error status:', error.response.status);
+        console.error('Refund API error data:', error.response.data);
+        try {
+          const parsed = await this.parseXml(error.response.data);
+          const errorMsg = this.extractErrors(parsed);
+          throw new Error(`Canada Post refund error: ${errorMsg}`);
+        } catch (parseErr) {
+          if (parseErr.message.startsWith('Canada Post refund error:')) throw parseErr;
+          throw new Error(`Canada Post refund error (${error.response.status}): ${error.response.data}`);
+        }
+      }
+      throw error;
     }
   }
 

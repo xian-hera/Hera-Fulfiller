@@ -488,16 +488,16 @@ router.post('/orders/:shopifyOrderId/complete', async (req, res) => {
       WHERE shopify_order_id = ?
     `).run(labelStatus, labelError, labelTrackingNumber, shopifyOrderId);
 
-    // 🆕 写入 manifest_shipments（独立追踪，不依赖 orders 表生命周期）
+    // 🆕 写入 manifest_shipments（shipment 日志，用于 refund 查找 + 历史记录）
     if (labelStatus === 'success' && labelResult) {
       try {
         await db.prepare(`
-          INSERT INTO manifest_shipments (shopify_order_id, order_name, tracking_number, group_id, shipment_id, service_code)
-          VALUES (?, ?, ?, ?, ?, ?)
-        `).run(shopifyOrderId, order.name, labelResult.trackingPin, labelResult.groupId, labelResult.shipmentId, labelResult.serviceCode);
-        console.log('✓ Shipment recorded for manifest tracking');
+          INSERT INTO manifest_shipments (shopify_order_id, order_name, tracking_number, group_id, shipment_id, service_code, refund_link)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).run(shopifyOrderId, order.name, labelResult.trackingPin, labelResult.groupId, labelResult.shipmentId, labelResult.serviceCode, labelResult.refundHref || null);
+        console.log('✓ Shipment recorded in label history');
       } catch (msErr) {
-        console.error('⚠️ Failed to record shipment for manifest (non-critical):', msErr.message);
+        console.error('⚠️ Failed to record shipment in label history (non-critical):', msErr.message);
       }
     }
 
@@ -666,102 +666,99 @@ router.patch('/orders/:shopifyOrderId/label-options', async (req, res) => {
   }
 });
 
-// 🆕 Manifest management - get all untransmitted shipments grouped by date
-// 数据来自独立的 manifest_shipments 表，不依赖 orders 表（orders 可随时被清理）
-router.get('/manifest/pending', async (req, res) => {
+// ── Refund Label 功能 ──────────────────────────────────────
+
+// 获取最近 50 条 label 记录（用于 Refund 弹窗列表）
+// 支持 ?search=375 按订单号过滤
+router.get('/refund/recent', async (req, res) => {
   try {
-    const shipments = await db.prepare(`
-      SELECT order_name AS name, tracking_number AS label_tracking_number,
-             group_id, shipment_id, service_code, label_bought_at AS created_at
-      FROM manifest_shipments
-      WHERE transmitted = 0
-      ORDER BY label_bought_at DESC
-    `).all();
-
-    // 按 group_id 分组（group_id 格式已经是 HERA-YYYYMMDD）
-    const groups = {};
-    shipments.forEach(s => {
-      const gid = s.group_id;
-      const dateStr = gid.replace('HERA-', '').replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3');
-      if (!groups[gid]) groups[gid] = { groupId: gid, date: dateStr, orders: [] };
-      groups[gid].orders.push(s);
-    });
-
-    res.json({ groups: Object.values(groups).sort((a, b) => a.date.localeCompare(b.date)) });
+    const { search } = req.query;
+    let shipments;
+    if (search && search.trim()) {
+      shipments = await db.prepare(`
+        SELECT id, order_name, tracking_number, service_code, refund_link, refund_status, label_bought_at
+        FROM manifest_shipments
+        WHERE order_name LIKE ?
+        ORDER BY label_bought_at DESC
+        LIMIT 50
+      `).all(`%${search.trim()}%`);
+    } else {
+      shipments = await db.prepare(`
+        SELECT id, order_name, tracking_number, service_code, refund_link, refund_status, label_bought_at
+        FROM manifest_shipments
+        ORDER BY label_bought_at DESC
+        LIMIT 50
+      `).all();
+    }
+    res.json({ shipments });
   } catch (error) {
-    console.error('Error fetching pending manifests:', error);
-    res.status(500).json({ error: 'Failed to fetch pending manifests: ' + error.message });
+    console.error('Error fetching recent shipments:', error);
+    res.status(500).json({ error: 'Failed to fetch recent shipments: ' + error.message });
   }
 });
 
-// 🆕 Generate manifest - transmit all pending shipments
-router.post('/manifest/generate', async (req, res) => {
+// 请求 refund（调用 Canada Post Refund API）
+router.post('/refund/request', async (req, res) => {
   try {
-    // 获取 sender 设置
-    const senderSettings = await db.prepare(
-      "SELECT key, value FROM settings WHERE key IN ('sender_company','sender_contact','sender_address1','sender_address2','sender_city','sender_province','sender_postal_code')"
-    ).all();
-    const senderMap = {};
-    senderSettings.forEach(s => { senderMap[s.key] = s.value; });
-
-    const senderInfo = {
-      company: senderMap.sender_company || 'HERA BEAUTÉ',
-      contact: senderMap.sender_contact || '',
-      address1: senderMap.sender_address1 || '',
-      address2: senderMap.sender_address2 || '',
-      city: senderMap.sender_city || '',
-      province: senderMap.sender_province || '',
-      postalCode: senderMap.sender_postal_code || ''
-    };
-
-    // 获取所有未 transmit 的 shipment
-    const shipments = await db.prepare(`
-      SELECT id, order_name, tracking_number, group_id, shipment_id
-      FROM manifest_shipments
-      WHERE transmitted = 0
-    `).all();
-
-    if (shipments.length === 0) {
-      return res.status(400).json({ error: 'No pending shipments to transmit' });
+    const { shipmentId, email } = req.body;
+    if (!shipmentId || !email) {
+      return res.status(400).json({ error: 'shipmentId and email are required' });
     }
 
-    // 收集所有唯一的 group-ids（manifest_shipments 表已经存了 group_id，直接用）
-    const groupIds = [...new Set(shipments.map(s => s.group_id))];
+    // 从 manifest_shipments 查找 refund_link
+    const record = await db.prepare(
+      'SELECT id, order_name, tracking_number, refund_link, refund_status FROM manifest_shipments WHERE id = ?'
+    ).get(shipmentId);
 
-    console.log(`Transmitting ${shipments.length} shipments across ${groupIds.length} group(s):`, groupIds);
+    if (!record) {
+      return res.status(404).json({ error: 'Shipment record not found' });
+    }
+    if (!record.refund_link) {
+      return res.status(400).json({ error: 'No refund link available for this shipment' });
+    }
+    if (record.refund_status === 'requested') {
+      return res.status(400).json({ error: 'Refund has already been requested for this shipment' });
+    }
 
     const canadaPostClient = require('../canadapost/client');
+    const result = await canadaPostClient.requestRefund(record.refund_link, email);
 
-    // Transmit all groups together
-    const manifestLinks = await canadaPostClient.transmitShipments(groupIds, senderInfo);
+    // 更新 refund_status
+    await db.prepare(
+      "UPDATE manifest_shipments SET refund_status = 'requested' WHERE id = ?"
+    ).run(shipmentId);
 
-    if (manifestLinks.length === 0) {
-      throw new Error('No manifest links returned from Canada Post');
-    }
-
-    // Download first manifest PDF
-    const manifestPdf = await canadaPostClient.getManifestPdf(manifestLinks[0]);
-
-    // 标记为已传输
-    await db.prepare(`
-      UPDATE manifest_shipments
-      SET transmitted = 1
-      WHERE transmitted = 0
-    `).run();
-
-    console.log(`✓ Manifest generated. ${shipments.length} shipments transmitted.`);
-
-    // Return PDF as base64 for download
     res.json({
       success: true,
-      shipmentCount: shipments.length,
-      groupCount: groupIds.length,
-      manifestPdfBase64: manifestPdf.toString('base64')
+      orderName: record.order_name,
+      trackingNumber: record.tracking_number,
+      serviceTicketId: result.serviceTicketId,
+      serviceTicketDate: result.serviceTicketDate
     });
-
   } catch (error) {
-    console.error('Error generating manifest:', error);
-    res.status(500).json({ error: 'Failed to generate manifest: ' + error.message });
+    console.error('Error requesting refund:', error);
+    res.status(500).json({ error: 'Refund request failed: ' + error.message });
+  }
+});
+
+// 清空 label 历史记录
+router.post('/refund/clear-history', async (req, res) => {
+  try {
+    const count = await db.prepare('SELECT COUNT(*) as count FROM manifest_shipments').get();
+    await db.prepare('DELETE FROM manifest_shipments').run();
+
+    // 记录清空时间
+    await db.prepare(`
+      INSERT INTO settings (key, value, updated_at)
+      VALUES ('refund_history_cleared_at', ?, CURRENT_TIMESTAMP)
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
+    `).run(new Date().toISOString());
+
+    console.log(`✓ Label history cleared: ${count.count} records deleted`);
+    res.json({ success: true, deletedCount: count.count });
+  } catch (error) {
+    console.error('Error clearing label history:', error);
+    res.status(500).json({ error: 'Failed to clear label history: ' + error.message });
   }
 });
 

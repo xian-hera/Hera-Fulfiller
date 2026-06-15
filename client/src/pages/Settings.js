@@ -75,6 +75,14 @@ const Settings = () => {
   const [packLabelSaving, setPackLabelSaving] = useState(false);
   const packLabelDirty = packLabelUI.enabled !== packLabelSaved.enabled;
 
+  // ── Refund email ──────────────────────────────────────────
+  const [refundEmail, setRefundEmail] = useState('');
+  const [refundEmailSaved, setRefundEmailSaved] = useState('');
+  const [refundEmailSaving, setRefundEmailSaving] = useState(false);
+  const refundEmailDirty = refundEmail !== refundEmailSaved;
+  const [refundHistoryClearedAt, setRefundHistoryClearedAt] = useState('');
+  const [clearingHistory, setClearingHistory] = useState(false);
+
   // ── Fulfilment Manage (sender address) — UI & saved ────────
   const defaultSender = {
     company: '', contact: '', address1: '', address2: '',
@@ -115,6 +123,11 @@ const Settings = () => {
       const packVals = { enabled: s.pack_label_enabled === 'true' };
       setPackLabelUI(packVals);
       setPackLabelSaved(packVals);
+
+      // Refund email
+      setRefundEmail(s.refund_email || '');
+      setRefundEmailSaved(s.refund_email || '');
+      setRefundHistoryClearedAt(s.refund_history_cleared_at || '');
 
       const senderVals = {
         company: s.sender_company || '',
@@ -187,6 +200,35 @@ const Settings = () => {
       showMessage('Error saving Pack & Label It settings');
     } finally {
       setPackLabelSaving(false);
+    }
+  };
+
+  // ── Refund email save ──────────────────────────────────────
+  const handleRefundEmailSave = async () => {
+    setRefundEmailSaving(true);
+    try {
+      await axios.post('/api/settings/update', { key: 'refund_email', value: refundEmail });
+      setRefundEmailSaved(refundEmail);
+      showMessage('Refund email saved');
+    } catch (error) {
+      showMessage('Error saving refund email');
+    } finally {
+      setRefundEmailSaving(false);
+    }
+  };
+
+  // ── Clear label history ────────────────────────────────────
+  const handleClearLabelHistory = async () => {
+    if (!window.confirm('Are you sure you want to clear all label history? This cannot be undone.')) return;
+    setClearingHistory(true);
+    try {
+      const response = await axios.post('/api/packer/refund/clear-history');
+      showMessage(`Label history cleared (${response.data.deletedCount} records deleted)`);
+      setRefundHistoryClearedAt(new Date().toISOString());
+    } catch (error) {
+      showMessage('Error clearing label history');
+    } finally {
+      setClearingHistory(false);
     }
   };
 
@@ -525,6 +567,41 @@ const Settings = () => {
               />
               <div style={{ marginTop: '8px' }}>
                 <SaveButton isDirty={packLabelDirty} onSave={handlePackLabelSave} loading={packLabelSaving} />
+              </div>
+
+              {/* Refund email */}
+              <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #e1e3e5' }}>
+                <Text variant="headingSm" as="h3">Refund Settings</Text>
+                <div style={{ marginTop: '12px' }}>
+                  <TextField
+                    label="Refund notification email"
+                    value={refundEmail}
+                    onChange={setRefundEmail}
+                    placeholder="name@example.com"
+                    autoComplete="off"
+                    helpText="This email will receive refund confirmation from Canada Post"
+                  />
+                </div>
+                <div style={{ marginTop: '8px' }}>
+                  <SaveButton isDirty={refundEmailDirty} onSave={handleRefundEmailSave} loading={refundEmailSaving} />
+                </div>
+              </div>
+
+              {/* Clear label history */}
+              <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #e1e3e5' }}>
+                <Text variant="headingSm" as="h3">Label History</Text>
+                <div style={{ marginTop: '8px' }}>
+                  <Text variant="bodySm" tone="subdued">
+                    {refundHistoryClearedAt
+                      ? `Last cleared: ${new Date(refundHistoryClearedAt).toLocaleString()}`
+                      : 'History has never been cleared.'}
+                  </Text>
+                </div>
+                <div style={{ marginTop: '12px' }}>
+                  <Button tone="critical" onClick={handleClearLabelHistory} loading={clearingHistory}>
+                    Clear Label History
+                  </Button>
+                </div>
               </div>
             </BlockStack>
           </CollapsibleCard>

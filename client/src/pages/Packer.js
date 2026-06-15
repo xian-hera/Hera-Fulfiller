@@ -15,6 +15,7 @@ import {
   Banner
 } from '@shopify/polaris';
 import { SortIcon } from '@shopify/polaris-icons';
+import RefundLabelModal from '../components/RefundLabelModal';
 
 // 🆕 Scanner helper functions
 function resolveKey(e) {
@@ -55,6 +56,8 @@ const Packer = () => {
   });
   
   const [isSorted, setIsSorted] = useState(false);
+  const [showRefundModal, setShowRefundModal] = useState(false);
+  const [packLabelEnabled, setPackLabelEnabled] = useState(false);
 
   // 🆕 Scanner state
   const [scannerPackerEnabled, setScannerPackerEnabled] = useState(false);
@@ -151,6 +154,7 @@ const Packer = () => {
       const response = await axios.get('/api/settings');
       const s = response.data.settings || {};
       setScannerPackerEnabled(s.scanner_enabled === 'true' && s.scanner_packer === 'true');
+      setPackLabelEnabled(s.pack_label_enabled === 'true');
     } catch (error) {
       console.error('Error fetching scanner settings:', error);
     }
@@ -480,12 +484,12 @@ const Packer = () => {
         icon: SortIcon,
         onAction: handleSort
       }}
-      secondaryActions={[
+      secondaryActions={packLabelEnabled ? [
         {
-          content: 'Generate Manifest',
-          onAction: () => navigate('/manifest')
+          content: 'Void/Refund Label',
+          onAction: () => setShowRefundModal(true)
         }
-      ]}
+      ] : []}
     >
       <Layout>
         <Layout.Section>
@@ -600,6 +604,11 @@ const Packer = () => {
           </div>
         </div>
       )}
+
+      <RefundLabelModal
+        open={showRefundModal}
+        onClose={() => setShowRefundModal(false)}
+      />
     </Page>
   );
 };

@@ -149,16 +149,18 @@ async function initPostgres() {
     )
   `);
 
-  // Manifest Shipments table（独立追踪需要 transmit 的 shipment，和 orders 表生命周期解耦）
+  // Manifest Shipments table（shipment/label 日志，用于 refund 查找 + 历史记录）
   await client.query(`
     CREATE TABLE IF NOT EXISTS manifest_shipments (
       id SERIAL PRIMARY KEY,
       shopify_order_id TEXT,
       order_name TEXT NOT NULL,
       tracking_number TEXT,
-      group_id TEXT NOT NULL,
+      group_id TEXT,
       shipment_id TEXT,
       service_code TEXT,
+      refund_link TEXT,
+      refund_status TEXT,
       label_bought_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       transmitted INTEGER DEFAULT 0
     )
@@ -259,6 +261,9 @@ async function initPostgres() {
     [`ALTER TABLE orders ADD COLUMN IF NOT EXISTS fulfill_error TEXT`, 'fulfill_error to orders'],
     [`ALTER TABLE orders ADD COLUMN IF NOT EXISTS label_options TEXT`, 'label_options to orders'],
     [`ALTER TABLE orders ADD COLUMN IF NOT EXISTS manifest_transmitted INTEGER DEFAULT 0`, 'manifest_transmitted to orders'],
+    // 🆕 manifest_shipments refund 相关迁移
+    [`ALTER TABLE manifest_shipments ADD COLUMN IF NOT EXISTS refund_link TEXT`, 'refund_link to manifest_shipments'],
+    [`ALTER TABLE manifest_shipments ADD COLUMN IF NOT EXISTS refund_status TEXT`, 'refund_status to manifest_shipments'],
   ];
 
   for (const [sql, desc] of migrations) {
@@ -311,6 +316,8 @@ async function initPostgres() {
     // 🆕 单位开关（控制发给 Canada Post 前是否换算）默认 inch + gram = 当前现状
     ['length_unit', 'inch'],
     ['weight_unit', 'gram'],
+    ['refund_email', ''],
+    ['refund_history_cleared_at', ''],
   ];
   for (const [key, value] of appSettings) {
     await client.query(

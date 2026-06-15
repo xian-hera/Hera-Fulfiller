@@ -29,8 +29,7 @@ function App() {
             <Route path="/settings" element={<Settings />} />
             <Route path="/transfer-planner" element={<TransferPlanner />} />
             <Route path="/connecteam-task" element={<ConnecteamTask />} />
-            <Route path="/shopify-transfer" element={<ShopifyTransfer />} />
-            <Route path="/manifest" element={<Manifest />} />
+            <Route path="/shopify-transfer" element={<ShopifyTransfer />} />            
           </Routes>
         </Router>
       </ErrorBoundary>
