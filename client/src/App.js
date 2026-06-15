@@ -13,7 +13,6 @@ import ErrorBoundary from './components/ErrorBoundary';
 import TransferPlanner from './pages/TransferPlanner';
 import ConnecteamTask from './pages/ConnecteamTask';
 import ShopifyTransfer from './pages/ShopifyTransfer';
-import Manifest from './pages/Manifest';
 
 function App() {
   return (
