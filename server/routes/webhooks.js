@@ -10,6 +10,9 @@ function isPosOrder(orderData) {
          sourceName.includes('pos');
 }
 
+// 控制是否记录 POS skip 日志，默认关闭
+const LOG_POS_SKIP = process.env.LOG_POS_SKIP === 'true';
+
 // Order Created - 过滤 POS 订单
 router.post('/orders/create', async (req, res) => {
   try {
@@ -17,7 +20,7 @@ router.post('/orders/create', async (req, res) => {
     
     // 🆕 过滤 POS 订单
     if (isPosOrder(orderData)) {
-      console.log(`✗ Skipping POS order: ${orderData.name} (source: ${orderData.source_name})`);
+      if (LOG_POS_SKIP) console.log(`✗ Skipping POS order: ${orderData.name} (source: ${orderData.source_name})`);
       return res.status(200).json({ message: 'POS order ignored' });
     }
     
@@ -38,7 +41,7 @@ router.post('/orders/updated', async (req, res) => {
     
     // 🆕 过滤 POS 订单
     if (isPosOrder(orderData)) {
-      console.log(`✗ Skipping POS order update: ${orderData.name} (source: ${orderData.source_name})`);
+      if (LOG_POS_SKIP) console.log(`✗ Skipping POS order update: ${orderData.name} (source: ${orderData.source_name})`);
       return res.status(200).json({ message: 'POS order ignored' });
     }
     
@@ -60,7 +63,7 @@ router.post('/order-edits/complete', async (req, res) => {
     const orderData = editData.order_edit?.order || editData.order || {};
     
     if (isPosOrder(orderData)) {
-      console.log(`✗ Skipping POS order edit`);
+      if (LOG_POS_SKIP) console.log(`✗ Skipping POS order edit`);
       return res.status(200).json({ message: 'POS order ignored' });
     }
     
@@ -80,7 +83,7 @@ router.post('/orders/cancelled', async (req, res) => {
     
     // 🆕 过滤 POS 订单
     if (isPosOrder(orderData)) {
-      console.log(`✗ Skipping POS order cancellation: ${orderData.name} (source: ${orderData.source_name})`);
+      if (LOG_POS_SKIP) console.log(`✗ Skipping POS order cancellation: ${orderData.name} (source: ${orderData.source_name})`);
       return res.status(200).json({ message: 'POS order ignored' });
     }
     
@@ -100,7 +103,7 @@ router.post('/orders/fulfilled', async (req, res) => {
     
     // 🆕 过滤 POS 订单
     if (isPosOrder(orderData)) {
-      console.log(`✗ Skipping POS order fulfillment: ${orderData.name} (source: ${orderData.source_name})`);
+      if (LOG_POS_SKIP) console.log(`✗ Skipping POS order fulfillment: ${orderData.name} (source: ${orderData.source_name})`);
       return res.status(200).json({ message: 'POS order ignored' });
     }
     
