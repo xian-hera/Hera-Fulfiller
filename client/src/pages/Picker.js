@@ -1149,6 +1149,8 @@ const Picker = () => {
                     </div>
                   ))
                 )}
+                {/* Android 底部导航栏占位，防止最后一个 item 被遮挡 */}
+                <div style={{ height: 'var(--shopify-safe-area-inset-bottom, 80px)' }} />
               </div>
             </Card>
           </Layout.Section>
