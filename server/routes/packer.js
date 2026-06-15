@@ -492,9 +492,9 @@ router.post('/orders/:shopifyOrderId/complete', async (req, res) => {
     if (labelStatus === 'success' && labelResult) {
       try {
         await db.prepare(`
-          INSERT INTO manifest_shipments (shopify_order_id, order_name, tracking_number, group_id, shipment_id, service_code, refund_link)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
-        `).run(shopifyOrderId, order.name, labelResult.trackingPin, labelResult.groupId, labelResult.shipmentId, labelResult.serviceCode, labelResult.refundHref || null);
+          INSERT INTO manifest_shipments (shopify_order_id, order_name, tracking_number, group_id, shipment_id, service_code, refund_link, label_url)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(shopifyOrderId, order.name, labelResult.trackingPin, labelResult.groupId, labelResult.shipmentId, labelResult.serviceCode, labelResult.refundHref || null, labelResult.labelHref || null);
         console.log('✓ Shipment recorded in label history');
       } catch (msErr) {
         console.error('⚠️ Failed to record shipment in label history (non-critical):', msErr.message);
@@ -676,7 +676,7 @@ router.get('/refund/recent', async (req, res) => {
     let shipments;
     if (search && search.trim()) {
       shipments = await db.prepare(`
-        SELECT id, order_name, tracking_number, service_code, refund_link, refund_status, label_bought_at
+        SELECT id, order_name, tracking_number, service_code, refund_link, refund_status, label_bought_at, label_url
         FROM manifest_shipments
         WHERE order_name LIKE ?
         ORDER BY label_bought_at DESC
@@ -684,7 +684,7 @@ router.get('/refund/recent', async (req, res) => {
       `).all(`%${search.trim()}%`);
     } else {
       shipments = await db.prepare(`
-        SELECT id, order_name, tracking_number, service_code, refund_link, refund_status, label_bought_at
+        SELECT id, order_name, tracking_number, service_code, refund_link, refund_status, label_bought_at, label_url
         FROM manifest_shipments
         ORDER BY label_bought_at DESC
         LIMIT 50
@@ -759,6 +759,50 @@ router.post('/refund/clear-history', async (req, res) => {
   } catch (error) {
     console.error('Error clearing label history:', error);
     res.status(500).json({ error: 'Failed to clear label history: ' + error.message });
+  }
+});
+
+// Reprint label — 从 Canada Post 重新下载 label PDF 并推送给 print agent
+router.post('/refund/reprint', async (req, res) => {
+  try {
+    const { shipmentId } = req.body;
+    if (!shipmentId) {
+      return res.status(400).json({ error: 'shipmentId is required' });
+    }
+
+    const record = await db.prepare(
+      'SELECT id, order_name, tracking_number, label_url FROM manifest_shipments WHERE id = ?'
+    ).get(shipmentId);
+
+    if (!record) {
+      return res.status(404).json({ error: 'Shipment record not found' });
+    }
+    if (!record.label_url) {
+      return res.status(400).json({ error: 'No label URL available for this shipment. Labels created before this feature was added cannot be reprinted.' });
+    }
+
+    console.log(`\n[Reprint] Downloading label for ${record.order_name} from: ${record.label_url}`);
+    const canadaPostClient = require('../canadapost/client');
+    const pdfBuffer = await canadaPostClient.getLabelPdf(record.label_url);
+    console.log(`[Reprint] ✓ Label PDF downloaded (${pdfBuffer.length} bytes)`);
+
+    const pdfBase64 = pdfBuffer.toString('base64');
+    const { broadcastLabelPrint } = require('../websocket');
+    broadcastLabelPrint({
+      orderName: record.order_name,
+      trackingNumber: record.tracking_number,
+      pdfBase64
+    });
+    console.log(`[Reprint] ✓ Label pushed to print agent for ${record.order_name}`);
+
+    res.json({
+      success: true,
+      orderName: record.order_name,
+      trackingNumber: record.tracking_number
+    });
+  } catch (error) {
+    console.error('[Reprint] Error:', error.message);
+    res.status(500).json({ error: 'Reprint failed: ' + error.message });
   }
 });
 

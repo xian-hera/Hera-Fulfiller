@@ -26,6 +26,10 @@ const RefundLabelModal = ({ open, onClose }) => {
   // ── Result state ───────────────────────────────────────────
   const [result, setResult] = useState(null); // { orderName, trackingNumber, serviceTicketId, serviceTicketDate }
 
+  // ── Reprint state ──────────────────────────────────────────
+  const [reprintingId, setReprintingId] = useState(null);
+  const [reprintMessage, setReprintMessage] = useState(null); // { id, tone, text }
+
   // ── Fetch list ─────────────────────────────────────────────
   const fetchShipments = useCallback(async (searchValue) => {
     setIsLoading(true);
@@ -109,6 +113,22 @@ const RefundLabelModal = ({ open, onClose }) => {
   const formatDate = (dateString) => {
     if (!dateString) return '—';
     return new Date(dateString).toLocaleString();
+  };
+
+  // ── Reprint handler ────────────────────────────────────────
+  const handleReprint = async (shipment) => {
+    setReprintingId(shipment.id);
+    setReprintMessage(null);
+    try {
+      await axios.post('/api/packer/refund/reprint', { shipmentId: shipment.id });
+      setReprintMessage({ id: shipment.id, tone: 'success', text: 'Sent to printer!' });
+      setTimeout(() => setReprintMessage(null), 3000);
+    } catch (error) {
+      const msg = error.response?.data?.error || 'Reprint failed';
+      setReprintMessage({ id: shipment.id, tone: 'critical', text: msg });
+    } finally {
+      setReprintingId(null);
+    }
   };
 
   const handleClose = () => {
@@ -295,8 +315,25 @@ const RefundLabelModal = ({ open, onClose }) => {
                   </BlockStack>
                 </div>
 
-                {/* Right: refund button */}
-                <div style={{ flexShrink: 0 }}>
+                {/* Right: reprint + refund buttons */}
+                <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  {/* Reprint */}
+                  {!shipment.label_url ? (
+                    <Button disabled size="slim">No Label</Button>
+                  ) : (
+                    <Button
+                      size="slim"
+                      onClick={() => handleReprint(shipment)}
+                      loading={reprintingId === shipment.id}
+                      disabled={reprintingId === shipment.id}
+                    >
+                      {reprintMessage?.id === shipment.id
+                        ? reprintMessage.text
+                        : 'Reprint'}
+                    </Button>
+                  )}
+
+                  {/* Refund */}
                   {shipment.refund_status === 'requested' ? (
                     <Button disabled size="slim">Refunded</Button>
                   ) : !shipment.refund_link ? (
