@@ -30,3 +30,14 @@ body {
     min-height: 44px; /* Better touch target */
   }
 }
+/* Android safe area fix for Polaris Modal bottom content */
+.Polaris-Modal__Body,
+.Polaris-Modal__Section {
+  padding-bottom: calc(16px + var(--shopify-safe-area-inset-bottom, 0px));
+}
+
+@media (max-width: 768px) {
+  .Polaris-Modal-Dialog__Modal {
+    max-height: calc(100vh - var(--shopify-safe-area-inset-bottom, 0px));
+  }
+}
