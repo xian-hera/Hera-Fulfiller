@@ -1165,11 +1165,6 @@ const Picker = () => {
           <Modal.Section>
             {selectedImage && (
               <BlockStack gap="4">
-                <img 
-                  src={selectedImage.url} 
-                  alt="Product" 
-                  style={{ width: '100%', maxHeight: '500px', objectFit: 'contain' }} 
-                />
                 <Button 
                   url={selectedImage.link} 
                   external
@@ -1178,6 +1173,11 @@ const Picker = () => {
                 >
                   View Product on Website
                 </Button>
+                <img 
+                  src={selectedImage.url} 
+                  alt="Product" 
+                  style={{ width: '100%', maxHeight: '500px', objectFit: 'contain' }} 
+                />
               </BlockStack>
             )}
           </Modal.Section>
