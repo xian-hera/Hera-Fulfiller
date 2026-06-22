@@ -15,6 +15,7 @@ const CompleteOrderModal = ({
   const [boxType, setBoxType] = useState('');
   const [orderWeight, setOrderWeight] = useState('');
   const [activeInput, setActiveInput] = useState('boxType');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // 🆕 Custom size state
   const [showCustomSize, setShowCustomSize] = useState(false);
@@ -102,17 +103,9 @@ const CompleteOrderModal = ({
     }
 
     onComplete(payload);
+    setIsSubmitting(true);
 
-    // Reset
-    setBoxType('');
-    setOrderWeight('');
-    setActiveInput('boxType');
-    setShowCustomSize(false);
-    setCustomLength('');
-    setCustomWidth('');
-    setCustomHeight('');
-    setCustomBoxWeight('');
-    setActiveCustomInput('length');
+    // 不在这里 reset — 父组件处理完后会调 onClose → handleClose 统一 reset
   };
 
   const handleClose = () => {
@@ -125,6 +118,7 @@ const CompleteOrderModal = ({
     setCustomHeight('');
     setCustomBoxWeight('');
     setActiveCustomInput('length');
+    setIsSubmitting(false);
     onClose();
   };
 
@@ -219,11 +213,13 @@ const CompleteOrderModal = ({
 
       {/* 🆕 Three buttons: Cancel | Custom Size | Complete Order */}
       <div className="complete-order-actions">
-        <Button onClick={handleClose}>Cancel</Button>
-        <Button onClick={() => { setShowCustomSize(true); setActiveCustomInput('length'); }}>
+        <Button onClick={handleClose} disabled={isSubmitting}>Cancel</Button>
+        <Button onClick={() => { setShowCustomSize(true); setActiveCustomInput('length'); }} disabled={isSubmitting}>
           Custom Size
         </Button>
-        <Button variant="primary" onClick={handleComplete}>Complete Order</Button>
+        <Button variant="primary" onClick={handleComplete} loading={isSubmitting} disabled={isSubmitting}>
+          {isSubmitting ? 'Processing...' : 'Complete Order'}
+        </Button>
       </div>
     </div>
   );
