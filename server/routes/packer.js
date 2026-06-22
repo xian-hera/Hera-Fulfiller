@@ -409,6 +409,7 @@ router.post('/orders/:shopifyOrderId/complete', async (req, res) => {
     if (order.label_options) {
       try { labelOptions = JSON.parse(order.label_options); } catch {}
     }
+    const serviceCodeOverride = labelOptions.serviceCode || null;
 
     // 计算重量（4 种情况矩阵）
     // 内部统一用“克”做 canonical，最后按 weightUnit 转成 displayWeight
@@ -471,7 +472,8 @@ router.post('/orders/:shopifyOrderId/complete', async (req, res) => {
         weightUnit,
         lengthUnit,
         labelOptions,
-        senderInfo
+        senderInfo,
+        serviceCodeOverride
       });
       labelStatus = 'success';
       labelTrackingNumber = labelResult.trackingPin;

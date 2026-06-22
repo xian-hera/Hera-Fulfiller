@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Modal, Text, Button, BlockStack, InlineStack, Badge } from '@shopify/polaris';
 import NumericKeypad from './NumericKeypad';
 import BoxTypeKeypad from './BoxTypeKeypad';
@@ -16,6 +16,9 @@ const CompleteOrderModal = ({
   const [orderWeight, setOrderWeight] = useState('');
   const [activeInput, setActiveInput] = useState('boxType');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  useEffect(() => {
+    setIsSubmitting(false);
+  }, [orderName]);
 
   // 🆕 Custom size state
   const [showCustomSize, setShowCustomSize] = useState(false);

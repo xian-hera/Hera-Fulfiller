@@ -220,13 +220,13 @@ class CanadaPostClient {
   // CREATE SHIPMENT
   // Creates a shipment and returns tracking number + label URL
   // ============================================================
-  async createShipment({ order, boxType, weightValue, weightUnit = 'gram', lengthUnit = 'inch', labelOptions, senderInfo }) {
+  async createShipment({ order, boxType, weightValue, weightUnit = 'gram', lengthUnit = 'inch', labelOptions, senderInfo, serviceCodeOverride }) {
     console.log('\n========== CANADA POST CREATE SHIPMENT ==========');
     console.log(`Order: ${order.name}`);
     console.log(`Box type: ${boxType?.code || '(custom)'}, Weight: ${weightValue} ${weightUnit === 'kg' ? 'kg' : 'g'}`);
     console.log(`Label options:`, labelOptions);
 
-    const serviceCode = this.getServiceCode(order.shipping_code, order.shipping_title);
+    const serviceCode = serviceCodeOverride || this.getServiceCode(order.shipping_code, order.shipping_title);
     console.log(`Service code: ${serviceCode}`);
 
     // Weight → kg (Canada Post 要 kg, 3 位小数)

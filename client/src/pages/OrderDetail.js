@@ -63,6 +63,20 @@ const OrderDetail = () => {
 
   // 🆕 Pack & Label It 状态
   const [packLabelEnabled, setPackLabelEnabled] = useState(false);
+
+  // 从 order 的 shipping 信息推算默认 Canada Post service code（和后端 getServiceCode 逻辑一致）
+  const getDefaultServiceCode = (orderData) => {
+    if (!orderData) return 'DOM.EP';
+    const { shipping_code, shipping_title } = orderData;
+    if (shipping_code === 'DOM.XP' || shipping_title?.includes('Xpresspost')) return 'DOM.XP';
+    if (shipping_code === 'DOM.PC' || shipping_title?.includes('Priority')) return 'DOM.PC';
+    return 'DOM.EP';
+  };
+
+  const serviceName = (code) => {
+    const map = { 'DOM.EP': 'Expedited Parcel', 'DOM.XP': 'Xpresspost', 'DOM.PC': 'Priority' };
+    return map[code] || code;
+  };
   const [labelOptions, setLabelOptions] = useState({
     signature: false,
     cardForPickup: false,
@@ -75,6 +89,8 @@ const OrderDetail = () => {
   });
   const [labelOptionsLoading, setLabelOptionsLoading] = useState(false);
   const [labelOptionsOpen, setLabelOptionsOpen] = useState(false);
+  // 当前生效的 shipping service: 用户选过就用用户选的，否则从 order 数据自动判断
+  const effectiveServiceCode = labelOptions.serviceCode || getDefaultServiceCode(order);
   // 错误状态 card
   const [labelStatus, setLabelStatus] = useState(null);
   const [labelError, setLabelError] = useState(null);
@@ -1326,7 +1342,8 @@ const OrderDetail = () => {
                             labelOptions.signature && 'Signature',
                             labelOptions.cardForPickup && 'Card for Pickup',
                             labelOptions.leaveAtDoor && 'Leave at Door',
-                            'Liability Coverage'
+                            'Liability Coverage',
+                            serviceName(effectiveServiceCode)
                           ].filter(Boolean).join(' · ')}
                         </Text>
                       )}
@@ -1339,75 +1356,106 @@ const OrderDetail = () => {
                   {/* Expandable content */}
                   {labelOptionsOpen && (
                     <div style={{ marginTop: '16px' }}>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
-                        {/* Signature */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <input
-                            type="checkbox"
-                            id="opt-signature"
-                            checked={labelOptions.signature || false}
-                            onChange={e => setLabelOptions(p => ({ ...p, signature: e.target.checked }))}
-                            style={{ cursor: 'pointer', width: '18px', height: '18px' }}
-                          />
-                          <label htmlFor="opt-signature" style={{ cursor: 'pointer', fontSize: '14px' }}>
-                            Signature Required
-                          </label>
+                      <div style={{ display: 'flex', gap: '32px', marginBottom: '16px' }}>
+                        {/* Left column: Delivery Options */}
+                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                          <Text variant="bodyMd" fontWeight="semibold">Delivery Options</Text>
+                          {/* Signature */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <input
+                              type="checkbox"
+                              id="opt-signature"
+                              checked={labelOptions.signature || false}
+                              onChange={e => setLabelOptions(p => ({ ...p, signature: e.target.checked }))}
+                              style={{ cursor: 'pointer', width: '18px', height: '18px' }}
+                            />
+                            <label htmlFor="opt-signature" style={{ cursor: 'pointer', fontSize: '14px' }}>
+                              Signature Required
+                            </label>
+                          </div>
+
+                          {/* Card for pickup */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <input
+                              type="checkbox"
+                              id="opt-card-pickup"
+                              checked={labelOptions.cardForPickup || false}
+                              onChange={e => {
+                                const val = e.target.checked;
+                                setLabelOptions(p => ({
+                                  ...p,
+                                  cardForPickup: val,
+                                  leaveAtDoor: val ? false : p.leaveAtDoor
+                                }));
+                              }}
+                              style={{ cursor: 'pointer', width: '18px', height: '18px' }}
+                            />
+                            <label htmlFor="opt-card-pickup" style={{ cursor: 'pointer', fontSize: '14px' }}>
+                              Card for Pickup
+                            </label>
+                          </div>
+
+                          {/* Leave at Door */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <input
+                              type="checkbox"
+                              id="opt-leave-door"
+                              checked={labelOptions.leaveAtDoor || false}
+                              onChange={e => {
+                                const val = e.target.checked;
+                                setLabelOptions(p => ({
+                                  ...p,
+                                  leaveAtDoor: val,
+                                  cardForPickup: val ? false : p.cardForPickup
+                                }));
+                              }}
+                              style={{ cursor: 'pointer', width: '18px', height: '18px' }}
+                            />
+                            <label htmlFor="opt-leave-door" style={{ cursor: 'pointer', fontSize: '14px' }}>
+                              Leave at Door, No Card
+                            </label>
+                          </div>
+
+                          {/* Liability Coverage */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <input
+                              type="checkbox"
+                              checked={true}
+                              disabled
+                              style={{ width: '18px', height: '18px' }}
+                              readOnly
+                            />
+                            <label style={{ fontSize: '14px', color: '#8c9196' }}>
+                              Liability Coverage up to $100 (always included)
+                            </label>
+                          </div>
                         </div>
 
-                        {/* Card for pickup — mutually exclusive with Leave at Door */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <input
-                            type="checkbox"
-                            id="opt-card-pickup"
-                            checked={labelOptions.cardForPickup || false}
-                            onChange={e => {
-                              const val = e.target.checked;
-                              setLabelOptions(p => ({
-                                ...p,
-                                cardForPickup: val,
-                                leaveAtDoor: val ? false : p.leaveAtDoor
-                              }));
-                            }}
-                            style={{ cursor: 'pointer', width: '18px', height: '18px' }}
-                          />
-                          <label htmlFor="opt-card-pickup" style={{ cursor: 'pointer', fontSize: '14px' }}>
-                            Card for Pickup
-                          </label>
-                        </div>
-
-                        {/* Leave at Door — mutually exclusive with Card for Pickup */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <input
-                            type="checkbox"
-                            id="opt-leave-door"
-                            checked={labelOptions.leaveAtDoor || false}
-                            onChange={e => {
-                              const val = e.target.checked;
-                              setLabelOptions(p => ({
-                                ...p,
-                                leaveAtDoor: val,
-                                cardForPickup: val ? false : p.cardForPickup
-                              }));
-                            }}
-                            style={{ cursor: 'pointer', width: '18px', height: '18px' }}
-                          />
-                          <label htmlFor="opt-leave-door" style={{ cursor: 'pointer', fontSize: '14px' }}>
-                            Leave at Door, No Card
-                          </label>
-                        </div>
-
-                        {/* Liability Coverage — always on, display only */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <input
-                            type="checkbox"
-                            checked={true}
-                            disabled
-                            style={{ width: '18px', height: '18px' }}
-                            readOnly
-                          />
-                          <label style={{ fontSize: '14px', color: '#8c9196' }}>
-                            Liability Coverage up to $100 (always included)
-                          </label>
+                        {/* Right column: Shipping Service */}
+                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                          <Text variant="bodyMd" fontWeight="semibold">Shipping Service</Text>
+                          {[
+                            { code: 'DOM.EP', label: 'Expedited Parcel' },
+                            { code: 'DOM.XP', label: 'Xpresspost' },
+                            { code: 'DOM.PC', label: 'Priority' }
+                          ].map(svc => (
+                            <div key={svc.code} style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                              <input
+                                type="radio"
+                                name="shipping-service"
+                                id={`svc-${svc.code}`}
+                                checked={effectiveServiceCode === svc.code}
+                                onChange={() => setLabelOptions(p => ({ ...p, serviceCode: svc.code }))}
+                                style={{ cursor: 'pointer', width: '18px', height: '18px' }}
+                              />
+                              <label htmlFor={`svc-${svc.code}`} style={{ cursor: 'pointer', fontSize: '14px' }}>
+                                {svc.label}
+                              </label>
+                              {getDefaultServiceCode(order) === svc.code && !labelOptions.serviceCode && (
+                                <span style={{ fontSize: '11px', color: '#8c9196' }}>(default)</span>
+                              )}
+                            </div>
+                          ))}
                         </div>
                       </div>
 
