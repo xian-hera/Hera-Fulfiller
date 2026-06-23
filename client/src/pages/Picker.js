@@ -1193,46 +1193,36 @@ const Picker = () => {
             {quantityModal && (
               <div className="picker-modal-content">
                 <div className="picker-modal-input-section">
-                  <Text>Total quantity: {quantityModal.quantity}</Text>
-                  <Text variant="bodySm" tone="subdued">Enter 0 if you have none, or 1-{quantityModal.quantity - 1} for the amount you have</Text>
-                  <div style={{ marginTop: '12px' }}>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                     <div style={{
+                      flex: 1,
                       border: '2px solid #c4cdd5',
                       borderRadius: '8px',
                       padding: '12px 16px',
-                      fontSize: '24px',
-                      fontWeight: 'bold',
-                      textAlign: 'center',
                       backgroundColor: '#ffffff',
                       minHeight: '50px',
                       display: 'flex',
                       alignItems: 'center',
-                      justifyContent: 'center'
+                      justifyContent: 'center',
+                      color: pickedQuantity ? '#000000' : '#8c9196',
+                      fontSize: pickedQuantity ? '24px' : '11px',
+                      fontWeight: pickedQuantity ? 'bold' : 'normal',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
                     }}>
-                      {pickedQuantity || '0'}
+                      {pickedQuantity || 'Enter the quantity you have, 0 means you have none'}
                     </div>
+                    <Button variant="primary" onClick={handleQuantitySubmit}>
+                      Submit
+                    </Button>
                   </div>
                 </div>
 
-                <div className="picker-modal-keypad">
+                <div className="picker-modal-keypad" style={{ marginTop: '4px' }}>
                   <NumericKeypad
                     onNumberClick={handleNumberClick}
                     onBackspace={handleBackspace}
                   />
-                </div>
-
-                <div style={{ 
-                  marginTop: '20px',
-                  display: 'flex',
-                  gap: '12px',
-                  justifyContent: 'flex-end'
-                }}>
-                  <Button onClick={() => setQuantityModal(null)}>
-                    Cancel
-                  </Button>
-                  <Button variant="primary" onClick={handleQuantitySubmit}>
-                    Submit
-                  </Button>
                 </div>
               </div>
             )}

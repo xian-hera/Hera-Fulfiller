@@ -2,7 +2,10 @@
   background-color: #8B8B8B;
   padding: 10px;
   border-radius: 8px;
-  display: inline-block;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  box-sizing: border-box;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
@@ -17,7 +20,7 @@
 }
 
 .keypad-button {
-  width: 130px;
+  flex: 1;
   height: 90px;
   background-color: #FFFFFF;
   border: none;
@@ -43,7 +46,7 @@
 }
 
 .keypad-empty {
-  width: 130px;
+  flex: 1;
   height: 90px;
 }
 
@@ -84,13 +87,13 @@
 /* iPad 横屏优化 */
 @media (max-width: 1024px) and (orientation: landscape) {
   .keypad-button {
-    width: 110px;
+    flex: 1;
     height: 75px;
     font-size: 30px;
   }
 
   .keypad-empty {
-    width: 110px;
+    flex: 1;
     height: 75px;
   }
 
@@ -112,13 +115,13 @@
   }
 
   .keypad-button {
-    width: 80px;
+    flex: 1;
     height: 60px;
     font-size: 24px;
   }
 
   .keypad-empty {
-    width: 80px;
+    flex: 1;
     height: 60px;
   }
 
