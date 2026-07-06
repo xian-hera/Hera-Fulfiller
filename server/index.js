@@ -4,6 +4,7 @@ const cors = require('cors');
 const path = require('path');
 const axios = require('axios');
 const db = require('./database/init');
+const giftRoutes = require('./routes/gift');
 
 // Import routes
 const pickerRoutes = require('./routes/picker');
@@ -92,6 +93,7 @@ app.use('/api/settings', settingsRoutes);
 app.use('/api/webhooks', webhookRoutes);
 app.use('/api/connecteam', connecteamRoutes);
 app.use('/api/shopify-transfer', shopifyTransferRoutes);
+app.use('/api/gift', giftRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

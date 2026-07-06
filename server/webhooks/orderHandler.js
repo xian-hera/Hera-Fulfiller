@@ -163,6 +163,9 @@ class OrderWebhookHandler {
       }
 
       console.log(`Order ${order.name} created successfully`);
+      // Gift order handling — runs after order is saved, never blocks main flow
+      const GiftHandler = require('./giftHandler');
+      await GiftHandler.handleGiftOrder(orderData);
       return { success: true, order_number: order.name };
     } catch (error) {
       console.error('Error handling order created:', error);
