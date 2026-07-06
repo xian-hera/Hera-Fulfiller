@@ -1,0 +1,14 @@
+api_version = "2026-04"
+
+[[extensions]]
+name = "Gift"
+handle = "gift"
+type = "ui_extension"
+uid = "d78b404a-ae09-a5a0-0497-0a376cf840ca24e0a8d4"
+
+[[extensions.targeting]]
+module = "./src/Checkout.jsx"
+target = "purchase.checkout.block.render"
+
+[extensions.capabilities]
+api_access = true

@@ -1,0 +1,13 @@
+{
+  "isGift": "This is a gift",
+  "recipientName": "Recipient's name",
+  "recipientEmail": "Recipient's email",
+  "giftMessage": "Gift message",
+  "senderName": "Your name (signature)",
+  "sendInFrench": "Send gift email in French",
+  "emailNotice": "A gift notification email with your message will be sent to the recipient.",
+  "recipientNamePlaceholder": "e.g. Sophie",
+  "recipientEmailPlaceholder": "e.g. sophie@example.com",
+  "giftMessagePlaceholder": "Write your personal message here...",
+  "senderNamePlaceholder": "e.g. Marie"
+}
