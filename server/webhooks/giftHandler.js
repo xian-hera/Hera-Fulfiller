@@ -2,12 +2,9 @@ const axios = require('axios');
 
 const KLAVIYO_API_KEY = process.env.KLAVIYO_API_KEY;
 const KLAVIYO_API_URL = 'https://a.klaviyo.com/api/events';
-const APP_BASE_URL = process.env.APP_BASE_URL; // e.g. https://hera-fulfiller.onrender.com
+const APP_BASE_URL = process.env.APP_BASE_URL;
 
 class GiftHandler {
-  /**
-   * Extract gift attributes from order note_attributes
-   */
   static extractGiftAttributes(noteAttributes = []) {
     const get = (key) => noteAttributes.find((a) => a.name === key)?.value ?? '';
     return {
@@ -20,19 +17,10 @@ class GiftHandler {
     };
   }
 
-  /**
-   * Build the tracking image URL for this order.
-   * This URL will be re-rendered on every email open.
-   */
   static buildTrackingImageUrl(orderId, language) {
     return `${APP_BASE_URL}/api/gift/tracking-image?order_id=${orderId}&lang=${language}`;
   }
 
-  /**
-   * Send a Gift Order Created event to Klaviyo.
-   * The recipient email is used as the profile identifier.
-   * This does NOT subscribe them to any marketing list.
-   */
   static async sendGiftCreatedEvent(orderData, giftAttributes) {
     const { recipientName, recipientEmail, giftMessage, senderName, language } = giftAttributes;
 
@@ -60,6 +48,9 @@ class GiftHandler {
               type: 'profile',
               attributes: {
                 email: recipientEmail,
+                properties: {
+                  gift_language: language,
+                },
                 // Do NOT set email_marketing_consent here
                 // to avoid subscribing the recipient to marketing
               },
@@ -91,20 +82,16 @@ class GiftHandler {
       });
       console.log(`[GiftHandler] ✓ Klaviyo event sent for order ${orderData.name} → ${recipientEmail}`);
     } catch (error) {
-      // Log the error but do NOT throw — gift failure should never block the main order flow
       console.error(`[GiftHandler] ✗ Failed to send Klaviyo event for order ${orderData.name}:`, error.response?.data || error.message);
     }
   }
 
-  /**
-   * Main entry point — called from orderHandler after order is saved to DB.
-   */
   static async handleGiftOrder(orderData) {
     const noteAttributes = orderData.note_attributes || [];
     const giftAttributes = this.extractGiftAttributes(noteAttributes);
 
     if (!giftAttributes.isGift) {
-      return; // Not a gift order, nothing to do
+      return;
     }
 
     console.log(`[GiftHandler] Gift order detected: ${orderData.name}`);
