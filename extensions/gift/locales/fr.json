@@ -2,7 +2,7 @@
   "isGift": "C'est un cadeau",
   "recipientName": "Nom du destinataire",
   "recipientEmail": "Courriel du destinataire",
-  "giftMessage": "Message cadeau",
+  "giftMessage": "Message cadeau au destinataire",
   "senderName": "Votre nom (signature)",
   "sendInFrench": "Envoyer le courriel cadeau en français",
   "emailNotice": "Un courriel de notification cadeau avec votre message sera envoyé au destinataire.",

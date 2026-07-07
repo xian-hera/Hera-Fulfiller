@@ -2,7 +2,7 @@
   "isGift": "This is a gift",
   "recipientName": "Recipient's name",
   "recipientEmail": "Recipient's email",
-  "giftMessage": "Gift message",
+  "giftMessage": "Gift message to the recipient",
   "senderName": "Your name (signature)",
   "sendInFrench": "Send gift email in French",
   "emailNotice": "A gift notification email with your message will be sent to the recipient.",
