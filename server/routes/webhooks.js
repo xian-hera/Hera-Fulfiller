@@ -134,4 +134,30 @@ router.post('/refunds/create', async (req, res) => {
   }
 });
 
+// 🆕 Fulfillment Order Placed On Hold
+router.post('/fulfillment_orders/placed_on_hold', async (req, res) => {
+  try {
+    const payload = req.body;
+    console.log('Webhook received: Fulfillment Order Placed On Hold', payload.fulfillment_order?.id);
+    const result = await OrderWebhookHandler.handleFulfillmentOrderPlacedOnHold(payload);
+    res.json(result);
+  } catch (error) {
+    console.error('Error processing fulfillment order placed_on_hold webhook:', error);
+    res.status(500).json({ error: 'Failed to process webhook' });
+  }
+});
+
+// 🆕 Fulfillment Order Hold Released
+router.post('/fulfillment_orders/hold_released', async (req, res) => {
+  try {
+    const payload = req.body;
+    console.log('Webhook received: Fulfillment Order Hold Released', payload.fulfillment_order?.id);
+    const result = await OrderWebhookHandler.handleFulfillmentOrderHoldReleased(payload);
+    res.json(result);
+  } catch (error) {
+    console.error('Error processing fulfillment order hold_released webhook:', error);
+    res.status(500).json({ error: 'Failed to process webhook' });
+  }
+});
+
 module.exports = router;

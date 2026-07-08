@@ -689,6 +689,90 @@ class OrderWebhookHandler {
       throw error;
     }
   }
+
+  // 🆕 Handle fulfillment order placed on hold (Shopify webhook)
+  static async handleFulfillmentOrderPlacedOnHold(payload) {
+    try {
+      const fulfillmentOrderGid = payload.fulfillment_order?.id;
+      if (!fulfillmentOrderGid) {
+        console.error('fulfillment_orders/placed_on_hold webhook missing fulfillment_order.id');
+        return { success: false, error: 'Missing fulfillment_order.id' };
+      }
+
+      const fulfillmentOrder = await shopifyClient.getFulfillmentOrderById(fulfillmentOrderGid);
+      const shopifyOrderId = fulfillmentOrder.orderId;
+
+      if (!shopifyOrderId) {
+        console.error(`Could not resolve order_id for fulfillment order ${fulfillmentOrderGid}`);
+        return { success: false, error: 'Could not resolve order_id' };
+      }
+
+      const order = await db.prepare('SELECT * FROM orders WHERE shopify_order_id = ?').get(shopifyOrderId);
+
+      if (!order) {
+        console.log(`Order ${shopifyOrderId} not found in APP (POS / already fulfilled|cancelled) — ignoring hold webhook`);
+        return { success: true, message: 'Order not tracked' };
+      }
+
+      if (order.status === 'holding') {
+        console.log(`Order ${order.name} already holding — skipping (duplicate fulfillment order hold event)`);
+        return { success: true, message: 'Already holding' };
+      }
+
+      await db.prepare(`
+        UPDATE orders SET status = 'holding', updated_at = CURRENT_TIMESTAMP
+        WHERE shopify_order_id = ?
+      `).run(shopifyOrderId);
+
+      console.log(`✓ Order ${order.name} set to holding (Shopify fulfillment hold)`);
+      return { success: true, order_number: order.name };
+    } catch (error) {
+      console.error('Error handling fulfillment order placed on hold:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // 🆕 Handle fulfillment order hold released (Shopify webhook)
+  static async handleFulfillmentOrderHoldReleased(payload) {
+    try {
+      const fulfillmentOrderGid = payload.fulfillment_order?.id;
+      if (!fulfillmentOrderGid) {
+        console.error('fulfillment_orders/hold_released webhook missing fulfillment_order.id');
+        return { success: false, error: 'Missing fulfillment_order.id' };
+      }
+
+      const fulfillmentOrder = await shopifyClient.getFulfillmentOrderById(fulfillmentOrderGid);
+      const shopifyOrderId = fulfillmentOrder.orderId;
+
+      if (!shopifyOrderId) {
+        console.error(`Could not resolve order_id for fulfillment order ${fulfillmentOrderGid}`);
+        return { success: false, error: 'Could not resolve order_id' };
+      }
+
+      const order = await db.prepare('SELECT * FROM orders WHERE shopify_order_id = ?').get(shopifyOrderId);
+
+      if (!order) {
+        console.log(`Order ${shopifyOrderId} not found in APP — ignoring release webhook`);
+        return { success: true, message: 'Order not tracked' };
+      }
+
+      if (order.status !== 'holding') {
+        console.log(`Order ${order.name} not holding — skipping (duplicate fulfillment order release event)`);
+        return { success: true, message: 'Not holding' };
+      }
+
+      await db.prepare(`
+        UPDATE orders SET status = 'packing', updated_at = CURRENT_TIMESTAMP
+        WHERE shopify_order_id = ?
+      `).run(shopifyOrderId);
+
+      console.log(`✓ Order ${order.name} released from holding (Shopify fulfillment hold released)`);
+      return { success: true, order_number: order.name };
+    } catch (error) {
+      console.error('Error handling fulfillment order hold released:', error);
+      return { success: false, error: error.message };
+    }
+  }
 }
 
 module.exports = OrderWebhookHandler;

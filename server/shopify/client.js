@@ -250,6 +250,34 @@ class ShopifyClient {
     }
   }
 
+  // 🆕 根据 fulfillment_order 的 GID，反查它所属的 order_id
+  // Webhook payload 里只有 fulfillment_order.id，没有 order_id，需要额外调一次 API
+  async getFulfillmentOrderById(fulfillmentOrderGid) {
+    try {
+      const client = await this.getClient();
+      let numericId = fulfillmentOrderGid;
+      if (fulfillmentOrderGid.startsWith('gid://')) {
+        numericId = fulfillmentOrderGid.split('/').pop();
+      }
+
+      const response = await client.get(`/fulfillment_orders/${numericId}.json`);
+      const fulfillmentOrder = response.data?.fulfillment_order;
+
+      if (!fulfillmentOrder) {
+        throw new Error(`Fulfillment order ${numericId} not found`);
+      }
+
+      return {
+        id: fulfillmentOrder.id,
+        orderId: fulfillmentOrder.order_id?.toString(),
+        status: fulfillmentOrder.status
+      };
+    } catch (error) {
+      console.error('Error fetching fulfillment order:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+
   async createFulfillment({ fulfillmentOrderId, trackingNumber, trackingCompany = 'Canada Post' }) {
     try {
       const client = await this.getClient();

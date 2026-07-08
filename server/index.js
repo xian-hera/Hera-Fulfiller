@@ -14,13 +14,17 @@ const settingsRoutes = require('./routes/settings');
 const webhookRoutes = require('./routes/webhooks');
 const connecteamRoutes = require('./routes/connecteam');
 const shopifyTransferRoutes = require('./routes/shopify-transfer');
+const verifyWebhook = require('./middleware/webhookVerification');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Middleware
 app.use(cors());
-app.use(express.json({ limit: '50mb' }));
+app.use(express.json({
+  limit: '50mb',
+  verify: (req, res, buf) => { req.rawBody = buf; }
+}));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // ---- Shopify OAuth ----
@@ -90,7 +94,7 @@ app.use('/api/picker', pickerRoutes);
 app.use('/api/transfer', transferRoutes);
 app.use('/api/packer', packerRoutes);
 app.use('/api/settings', settingsRoutes);
-app.use('/api/webhooks', webhookRoutes);
+app.use('/api/webhooks', verifyWebhook, webhookRoutes);
 app.use('/api/connecteam', connecteamRoutes);
 app.use('/api/shopify-transfer', shopifyTransferRoutes);
 app.use('/api/gift', giftRoutes);
