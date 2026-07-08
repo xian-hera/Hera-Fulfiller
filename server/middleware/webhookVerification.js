@@ -2,6 +2,8 @@ const crypto = require('crypto');
 
 // Verify Shopify webhook HMAC
 // 🆕 用 req.rawBody（原始字节）而不是 JSON.stringify(req.body) —— 否则签名永远对不上
+// 🆕 密钥用 SHOPIFY_WEBHOOK_SECRET（Notifications 页面显示的 signature key），
+//    不是 SHOPIFY_API_SECRET（那是 app 的 Client Secret，专门给 OAuth 用，跟 webhook 签名是两回事）
 // 🆕 软启动：WEBHOOK_HMAC_ENFORCE !== 'true' 时，验证失败只记日志、不拦截请求
 const verifyWebhook = (req, res, next) => {
   const enforce = process.env.WEBHOOK_HMAC_ENFORCE === 'true';
@@ -20,7 +22,7 @@ const verifyWebhook = (req, res, next) => {
   }
 
   const generatedHash = crypto
-    .createHmac('sha256', process.env.SHOPIFY_API_SECRET)
+    .createHmac('sha256', process.env.SHOPIFY_WEBHOOK_SECRET)
     .update(req.rawBody)
     .digest('base64');
 
