@@ -550,15 +550,34 @@ class OrderWebhookHandler {
         console.log(`No item changes detected — packer status preserved for order ${orderData.name}`);
       }
 
+      // 🆕 同步 Shopify 最新的 shipping address，防止购买运单时用到过期地址
       await db.prepare(`
         UPDATE orders SET 
           total_quantity = ?,
           fulfillment_status = ?,
+          shipping_code = ?,
+          shipping_title = ?,
+          shipping_name = ?,
+          shipping_address1 = ?,
+          shipping_address2 = ?,
+          shipping_city = ?,
+          shipping_province = ?,
+          shipping_zip = ?,
+          shipping_country = ?,
           updated_at = CURRENT_TIMESTAMP
         WHERE shopify_order_id = ?
       `).run(
         activeLineItems.reduce((sum, item) => sum + item.quantity, 0),
         protectedStatus,
+        orderData.shipping_lines?.[0]?.code || '',
+        orderData.shipping_lines?.[0]?.title || '',
+        orderData.shipping_address?.name || '',
+        orderData.shipping_address?.address1 || '',
+        orderData.shipping_address?.address2 || '',
+        orderData.shipping_address?.city || '',
+        orderData.shipping_address?.province || '',
+        orderData.shipping_address?.zip || '',
+        orderData.shipping_address?.country || '',
         orderData.id.toString()
       );
 
