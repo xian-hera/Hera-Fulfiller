@@ -40,6 +40,15 @@ function cleanBarcode(raw) {
   return raw.replace(/^[^0-9]+/, '');
 }
 
+// 🆕 判断扫到的 barcode 是否匹配该 item：main SKU 或 lookups 里的任一 barcode
+function matchesBarcode(item, barcode) {
+  if (item.sku === barcode) return true;
+  if (item.lookups) {
+    return item.lookups.split(',').map(s => s.trim()).includes(barcode);
+  }
+  return false;
+}
+
 const OrderDetail = () => {
   const navigate = useNavigate();
   const { shopifyOrderId } = useParams();
@@ -535,8 +544,8 @@ const OrderDetail = () => {
     const items = lineItemsRef.current;
     const confirmStates = quantityConfirmStatesRef.current;
 
-    // 与当前 order 内所有 item 的 SKU 比对
-    const matchedItems = items.filter(item => item.sku === barcode);
+    // 与当前 order 内所有 item 的 SKU / lookups 比对
+    const matchedItems = items.filter(item => matchesBarcode(item, barcode));
 
     if (matchedItems.length === 0) {
       setShowNoMatch(true);
@@ -546,7 +555,7 @@ const OrderDetail = () => {
     // 检查是否是二次确认扫码（pending scan confirm）
     if (pendingScanConfirmRef.current !== null) {
       const pendingItemId = pendingScanConfirmRef.current;
-      const pendingItem = items.find(i => i.id === pendingItemId && i.sku === barcode);
+      const pendingItem = items.find(i => i.id === pendingItemId && matchesBarcode(i, barcode));
       if (pendingItem) {
         // 二次扫码确认，执行 check
         pendingScanConfirmRef.current = null;

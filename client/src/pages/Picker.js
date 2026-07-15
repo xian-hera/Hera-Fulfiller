@@ -528,6 +528,15 @@ const Picker = () => {
     return sku.match(/.{1,4}/g)?.join(' ') || sku;
   };
 
+  // 🆕 判断扫到的 barcode 是否匹配该 item：main SKU 或 lookups 里的任一 barcode
+  const matchesBarcode = (item, barcode) => {
+    if (item.sku === barcode) return true;
+    if (item.lookups) {
+      return item.lookups.split(',').map(s => s.trim()).includes(barcode);
+    }
+    return false;
+  };
+
   // 🆕 滚动到指定 item
   const scrollToItem = (itemId) => {
     const el = document.getElementById(`picker-item-${itemId}`);
@@ -555,9 +564,9 @@ const Picker = () => {
     const allItems = itemsRef.current;
     const currentFilter = statusFilterRef.current;
 
-    // 只匹配 picking 和 missing 状态的 item
+    // 只匹配 picking 和 missing 状态的 item（SKU 或 lookups 任一匹配）
     const matchedItems = allItems.filter(
-      item => item.sku === barcode && (item.picker_status === 'picking' || item.picker_status === 'missing')
+      item => matchesBarcode(item, barcode) && (item.picker_status === 'picking' || item.picker_status === 'missing')
     );
 
     if (matchedItems.length === 0) {
@@ -682,7 +691,7 @@ const Picker = () => {
   }, [filteredItems, tempVisibleItems]);
 
   const renderItem = (item) => {
-    const { id, quantity, image_url, order_name, display_type, sku, brand, title, size, picker_status, variant_title } = item;
+    const { id, quantity, image_url, order_name, display_type, sku, brand, title, size, picker_status, variant_title, lookups } = item;
 
     const displayName = display_type === 'HAIR & SKIN CARE'
       ? `${title} ${size}`.trim()
@@ -748,7 +757,7 @@ const Picker = () => {
                 </Text>
                 
                 <Text variant="bodySm">
-                  {formatSKU(sku)}
+                  {formatSKU(sku)}{lookups ? `, ${lookups}` : ''}
                 </Text>
                 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -819,7 +828,7 @@ const Picker = () => {
               </div>
               <div style={{ marginBottom: '2px' }}>
                 <Text variant="bodySm">
-                  {formatSKU(sku)}
+                  {formatSKU(sku)}{lookups ? `, ${lookups}` : ''}
                 </Text>
               </div>
               <div>

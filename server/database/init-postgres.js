@@ -63,6 +63,7 @@ async function initPostgres() {
       custom_name TEXT,
       has_weight_warning INTEGER DEFAULT 0,
       variant_title TEXT,
+      lookups TEXT,
       picker_status TEXT DEFAULT 'picking',
       packer_status TEXT DEFAULT 'packing',
       version INTEGER DEFAULT 0,
@@ -264,6 +265,8 @@ async function initPostgres() {
     // 🆕 manifest_shipments refund 相关迁移
     [`ALTER TABLE manifest_shipments ADD COLUMN IF NOT EXISTS refund_link TEXT`, 'refund_link to manifest_shipments'],
     [`ALTER TABLE manifest_shipments ADD COLUMN IF NOT EXISTS refund_status TEXT`, 'refund_status to manifest_shipments'],
+    // 🆕 Lookup barcode (variant metafield custom.lookups)
+    [`ALTER TABLE line_items ADD COLUMN IF NOT EXISTS lookups TEXT`, 'lookups to line_items'],
   ];
 
   for (const [sql, desc] of migrations) {

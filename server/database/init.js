@@ -59,6 +59,7 @@ const initDatabase = async () => {
           wig_number TEXT,
           has_weight_warning INTEGER DEFAULT 0,
           variant_title TEXT,
+          lookups TEXT,
           picker_status TEXT DEFAULT 'picking',
           packer_status TEXT DEFAULT 'packing',
           version INTEGER DEFAULT 0,
@@ -248,6 +249,9 @@ const initDatabase = async () => {
       addColumnIfNotExists('orders', 'manifest_transmitted', 'INTEGER DEFAULT 0');
       addColumnIfNotExists('orders', 'packer_note', 'TEXT');
       addColumnIfNotExists('orders', 'shipping_title', 'TEXT');
+
+      // 🆕 Lookup barcode (variant metafield custom.lookups)
+      addColumnIfNotExists('line_items', 'lookups', 'TEXT');
 
       // ── Default data ────────────────────────────────────────────────────────
 

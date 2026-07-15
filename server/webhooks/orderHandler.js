@@ -75,11 +75,12 @@ class OrderWebhookHandler {
         let productType = item.product_type || '';
         let wigNumber = '';
         let customName = '';
+        let lookups = '';
         
         let weight = item.grams || 0;
         let weightUnit = 'g';
         
-        // 获取 variant 信息（weight + custom_name）
+        // 获取 variant 信息（weight + custom_name + lookups）
         if (item.variant_id) {
           try {
             const variant = await shopifyClient.getProductVariant(item.variant_id);
@@ -97,6 +98,16 @@ class OrderWebhookHandler {
               }
             } catch (err) {
               console.error(`Failed to fetch custom.name for variant ${item.variant_id}:`, err.message);
+            }
+
+            // 🆕 获取 custom.lookups metafield（variant 层级）— 该产品的其他 barcode（逗号分隔）
+            try {
+              lookups = await shopifyClient.getVariantMetafield(item.variant_id, 'custom', 'lookups');
+              if (lookups) {
+                console.log(`Variant ${item.variant_id}: custom.lookups=${lookups}`);
+              }
+            } catch (err) {
+              console.error(`Failed to fetch custom.lookups for variant ${item.variant_id}:`, err.message);
             }
           } catch (err) {
             console.error(`Failed to fetch variant ${item.variant_id}:`, err.message);
@@ -131,8 +142,8 @@ class OrderWebhookHandler {
             shopify_order_id, order_number, shopify_line_item_id, quantity,
             image_url, title, name, brand, size, weight, weight_unit, sku,
             url_handle, product_type, wig_number, custom_name, has_weight_warning, variant_title,
-            picker_status, packer_status
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            lookups, picker_status, packer_status
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT (shopify_line_item_id) DO UPDATE SET
             quantity = EXCLUDED.quantity,
             updated_at = CURRENT_TIMESTAMP
@@ -157,6 +168,7 @@ class OrderWebhookHandler {
           customName,
           hasWeightWarning,
           item.variant_title || '',
+          lookups,
           'picking',
           'packing'
         );
@@ -310,11 +322,12 @@ class OrderWebhookHandler {
         let productType = item.product_type || '';
         let wigNumber = '';
         let customName = '';
+        let lookups = '';
         
         let weight = item.grams || 0;
         let weightUnit = 'g';
         
-        // 获取 variant 信息（weight + custom_name）
+        // 获取 variant 信息（weight + custom_name + lookups）
         if (item.variant_id) {
           try {
             const variant = await shopifyClient.getProductVariant(item.variant_id);
@@ -331,6 +344,16 @@ class OrderWebhookHandler {
               }
             } catch (err) {
               console.error(`Failed to fetch custom.name for variant ${item.variant_id}:`, err.message);
+            }
+
+            // 🆕 获取 custom.lookups metafield（variant 层级）— 该产品的其他 barcode（逗号分隔）
+            try {
+              lookups = await shopifyClient.getVariantMetafield(item.variant_id, 'custom', 'lookups');
+              if (lookups) {
+                console.log(`Variant ${item.variant_id}: custom.lookups=${lookups}`);
+              }
+            } catch (err) {
+              console.error(`Failed to fetch custom.lookups for variant ${item.variant_id}:`, err.message);
             }
           } catch (err) {
             console.error(`Failed to fetch variant ${item.variant_id}:`, err.message);
@@ -370,8 +393,8 @@ class OrderWebhookHandler {
               shopify_order_id, order_number, shopify_line_item_id, quantity,
               image_url, title, name, brand, size, weight, weight_unit, sku,
               url_handle, product_type, wig_number, custom_name, has_weight_warning, variant_title,
-              picker_status, packer_status, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+              lookups, picker_status, packer_status, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT (shopify_line_item_id) DO UPDATE SET
               quantity = EXCLUDED.quantity,
               updated_at = CURRENT_TIMESTAMP
@@ -396,6 +419,7 @@ class OrderWebhookHandler {
             customName,
             hasWeightWarning,
             item.variant_title || '',
+            lookups,
             'picking',
             'packing'
           );
@@ -423,8 +447,8 @@ class OrderWebhookHandler {
                 shopify_order_id, order_number, shopify_line_item_id, quantity,
                 image_url, title, name, brand, size, weight, weight_unit, sku,
                 url_handle, product_type, wig_number, custom_name, has_weight_warning, variant_title,
-                picker_status, packer_status, created_at
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                lookups, picker_status, packer_status, created_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             `);
 
             await insertLineItem.run(
@@ -446,6 +470,7 @@ class OrderWebhookHandler {
               customName,
               hasWeightWarning,
               item.variant_title || '',
+              lookups,
               'picking',
               'packing'
             );
