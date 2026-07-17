@@ -132,8 +132,17 @@ const OrderDetail = () => {
   const lineItemsRef = useRef([]);
   // 🆕 quantityConfirmStates ref（供 scanner 回调中读取最新值）
   const quantityConfirmStatesRef = useRef({});
-  // 🆕 pending scan-confirm: 记录等待二次扫码确认的 itemId
-  const pendingScanConfirmRef = useRef(null);
+
+  // 🆕 重复扫描进度: { [itemId]: 已扫次数 }，用于 quantity >= 2 的 item 在扫码模式下显示 "N/total"
+  const [scanProgress, setScanProgress] = useState({});
+  const scanProgressRef = useRef({});
+  // 🆕 当前正在进行的重复扫描 session: { itemId, count } 或 null
+  const repeatScanRef = useRef(null);
+  // 🆕 重复扫描 5 秒窗口计时器
+  const repeatScanTimerRef = useRef(null);
+  // 🆕 扫到不匹配 barcode 时的短暂提示
+  const [showScanMismatch, setShowScanMismatch] = useState(false);
+  const scanMismatchTimerRef = useRef(null);
 
   // 🆕 同步 lineItems 到 ref
   useEffect(() => {
@@ -144,6 +153,11 @@ const OrderDetail = () => {
   useEffect(() => {
     quantityConfirmStatesRef.current = quantityConfirmStates;
   }, [quantityConfirmStates]);
+
+  // 🆕 同步 scanProgress 到 ref
+  useEffect(() => {
+    scanProgressRef.current = scanProgress;
+  }, [scanProgress]);
 
   useEffect(() => {
     fetchAllOrders();
@@ -422,12 +436,13 @@ const OrderDetail = () => {
   };
 
   // 🆕 实际执行 check/uncheck 的核心逻辑（供点击和扫码共用）
-  const doItemCheck = useCallback(async (item) => {
+  // bypassConfirm: 扫码的重复扫描流程在数到 total 后传 true，跳过下面点击专用的二次确认拦截
+  const doItemCheck = useCallback(async (item, bypassConfirm = false) => {
     const itemId = item.id;
     const currentState = quantityConfirmStatesRef.current[itemId] || {};
 
-    // 拦截：数量 >= 2 的第1次操作
-    if (item.quantity >= 2 && item.packer_status !== 'ready') {
+    // 拦截：数量 >= 2 的第1次操作（仅点击流程；扫码流程通过 bypassConfirm 跳过，确认方式已改为重复扫描）
+    if (!bypassConfirm && item.quantity >= 2 && item.packer_status !== 'ready') {
       if (!currentState.needsConfirm) {
         setQuantityConfirmStates(prev => ({
           ...prev,
@@ -539,44 +554,83 @@ const OrderDetail = () => {
     }
   };
 
+  // 🆕 清除一个 item 的重复扫描 session（超时自然结束，不弹提示）
+  const clearRepeatScan = useCallback((itemId) => {
+    if (repeatScanTimerRef.current) {
+      clearTimeout(repeatScanTimerRef.current);
+      repeatScanTimerRef.current = null;
+    }
+    repeatScanRef.current = null;
+    setScanProgress(prev => {
+      const next = { ...prev };
+      delete next[itemId];
+      return next;
+    });
+    setScanHighlight(prev => {
+      const next = { ...prev };
+      if (next[itemId] === 'confirm_needed') delete next[itemId];
+      return next;
+    });
+  }, []);
+
   // 🆕 处理扫码匹配逻辑
   const handleScan = useCallback(async (barcode) => {
     const items = lineItemsRef.current;
-    const confirmStates = quantityConfirmStatesRef.current;
 
+    // ── 存在正在进行的重复扫描 session ──────────────────────────────────
+    if (repeatScanRef.current !== null) {
+      const { itemId, count } = repeatScanRef.current;
+      const activeItem = items.find(i => i.id === itemId);
+
+      if (activeItem && matchesBarcode(activeItem, barcode)) {
+        // 同一个 item 的 barcode，继续累加
+        clearTimeout(repeatScanTimerRef.current);
+        const newCount = count + 1;
+
+        if (newCount >= activeItem.quantity) {
+          // 达到 total，完成 check
+          repeatScanRef.current = null;
+          setScanProgress(prev => {
+            const next = { ...prev };
+            delete next[itemId];
+            return next;
+          });
+          await doItemCheck(activeItem, true);
+          setScanHighlight(prev => ({ ...prev, [itemId]: 'scanned' }));
+          setTimeout(() => {
+            setScanHighlight(prev => {
+              const next = { ...prev };
+              delete next[itemId];
+              return next;
+            });
+          }, 5000);
+          scrollToItem(itemId);
+        } else {
+          // 还没到 total，更新进度，重新计时 5 秒
+          repeatScanRef.current = { itemId, count: newCount };
+          setScanProgress(prev => ({ ...prev, [itemId]: newCount }));
+          repeatScanTimerRef.current = setTimeout(() => clearRepeatScan(itemId), 5000);
+          scrollToItem(itemId);
+        }
+        return;
+      }
+
+      // 扫到了不属于当前重复扫描 item 的 barcode（不管它是否属于订单其他 item）
+      // → 取消这次重复扫描，回退到未扫描状态，不对这个新 barcode 做任何其他处理
+      clearRepeatScan(itemId);
+      setShowScanMismatch(true);
+      clearTimeout(scanMismatchTimerRef.current);
+      scanMismatchTimerRef.current = setTimeout(() => setShowScanMismatch(false), 2000);
+      return;
+    }
+
+    // ── 没有进行中的重复扫描 session：正常匹配流程 ──────────────────────
     // 与当前 order 内所有 item 的 SKU / lookups 比对
     const matchedItems = items.filter(item => matchesBarcode(item, barcode));
 
     if (matchedItems.length === 0) {
       setShowNoMatch(true);
       return;
-    }
-
-    // 检查是否是二次确认扫码（pending scan confirm）
-    if (pendingScanConfirmRef.current !== null) {
-      const pendingItemId = pendingScanConfirmRef.current;
-      const pendingItem = items.find(i => i.id === pendingItemId && matchesBarcode(i, barcode));
-      if (pendingItem) {
-        // 二次扫码确认，执行 check
-        pendingScanConfirmRef.current = null;
-        setScanHighlight(prev => {
-          const next = { ...prev };
-          delete next[pendingItemId];
-          return next;
-        });
-        await doItemCheck(pendingItem);
-        // check 后背景绿色
-        setScanHighlight(prev => ({ ...prev, [pendingItemId]: 'scanned' }));
-        setTimeout(() => {
-          setScanHighlight(prev => {
-            const next = { ...prev };
-            delete next[pendingItemId];
-            return next;
-          });
-        }, 5000);
-        scrollToItem(pendingItemId);
-        return;
-      }
     }
 
     // 找未被 check 的 match
@@ -604,35 +658,16 @@ const OrderDetail = () => {
     const firstUnchecked = uncheckedMatches[0];
 
     if (firstUnchecked.quantity >= 2) {
-      const confirmState = confirmStates[firstUnchecked.id] || {};
-      if (!confirmState.needsConfirm) {
-        // 第一次扫码：需要二次确认
-        // 高亮粉色，显示 confirm quantity
-        setScanHighlight(prev => ({ ...prev, [firstUnchecked.id]: 'confirm_needed' }));
-        setQuantityConfirmStates(prev => ({
-          ...prev,
-          [firstUnchecked.id]: { needsConfirm: true, confirmed: false }
-        }));
-        pendingScanConfirmRef.current = firstUnchecked.id;
-        scrollToItem(firstUnchecked.id);
-        // 10秒后如果没有二次扫码则清除
-        setTimeout(() => {
-          setScanHighlight(prev => {
-            const next = { ...prev };
-            if (next[firstUnchecked.id] === 'confirm_needed') {
-              delete next[firstUnchecked.id];
-            }
-            return next;
-          });
-          if (pendingScanConfirmRef.current === firstUnchecked.id) {
-            pendingScanConfirmRef.current = null;
-          }
-        }, 10000);
-        return;
-      }
+      // 🆕 quantity >= 2：第一次扫码开始重复扫描 session，显示 1/total，粉色背景
+      repeatScanRef.current = { itemId: firstUnchecked.id, count: 1 };
+      setScanProgress(prev => ({ ...prev, [firstUnchecked.id]: 1 }));
+      setScanHighlight(prev => ({ ...prev, [firstUnchecked.id]: 'confirm_needed' }));
+      repeatScanTimerRef.current = setTimeout(() => clearRepeatScan(firstUnchecked.id), 5000);
+      scrollToItem(firstUnchecked.id);
+      return;
     }
 
-    // quantity 为 1，或者 quantity >= 2 但已经在 confirm 状态：直接 check
+    // quantity 为 1：直接 check
     await doItemCheck(firstUnchecked);
     // check 成功后高亮绿色
     setScanHighlight(prev => ({ ...prev, [firstUnchecked.id]: 'scanned' }));
@@ -644,7 +679,7 @@ const OrderDetail = () => {
       });
     }, 5000);
     scrollToItem(firstUnchecked.id);
-  }, [doItemCheck]);
+  }, [doItemCheck, clearRepeatScan]);
 
   // 🆕 scanner 键盘监听
   useEffect(() => {
@@ -789,6 +824,9 @@ const OrderDetail = () => {
     const quantityColor = showConfirm ? (isConfirmed ? '#00a047' : '#d72c0d') : '#202223';
     const quantitySize = '36px';
 
+    // 🆕 扫码重复扫描进度（quantity >= 2 时，扫码过程中显示 "已扫/total"）
+    const scanRepeatCount = scanProgress[item.id];
+
     // 🆕 扫码高亮背景色
     const highlight = scanHighlight[item.id];
     let itemBgColor = 'transparent';
@@ -930,6 +968,11 @@ const OrderDetail = () => {
                   confirm quantity
                 </span>
               )}
+              {scanRepeatCount && (
+                <span style={{ fontSize: quantitySize, color: '#d72c0d', fontWeight: 'bold', lineHeight: '1' }}>
+                  {scanRepeatCount}/
+                </span>
+              )}
               <span style={{ fontSize: quantitySize, color: quantityColor, fontWeight: 'bold', lineHeight: '1' }}>
                 {item.quantity}
               </span>
@@ -1041,6 +1084,9 @@ const OrderDetail = () => {
             </div>
 
             <div className="orderdetail-quantity-mobile">
+              {scanRepeatCount && (
+                <span style={{ color: '#d72c0d' }}>{scanRepeatCount}/</span>
+              )}
               {item.quantity}
             </div>
 
@@ -1279,6 +1325,32 @@ const OrderDetail = () => {
               boxShadow: '0 4px 24px rgba(0,0,0,0.18)'
             }}>
               No match found
+            </div>
+          </div>
+        )}
+
+        {/* 🆕 重复扫描中扫到不匹配 barcode 的短暂提示（2秒自动消失，不阻挡操作） */}
+        {showScanMismatch && (
+          <div
+            style={{
+              position: 'fixed',
+              top: '16px',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              zIndex: 9999,
+              pointerEvents: 'none'
+            }}
+          >
+            <div style={{
+              backgroundColor: '#d72c0d',
+              color: 'white',
+              borderRadius: '8px',
+              padding: '12px 24px',
+              fontSize: '15px',
+              fontWeight: '600',
+              boxShadow: '0 4px 24px rgba(0,0,0,0.18)'
+            }}>
+              Different barcode — item scan reset
             </div>
           </div>
         )}
