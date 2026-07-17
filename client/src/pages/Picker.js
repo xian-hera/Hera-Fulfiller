@@ -1233,6 +1233,9 @@ const Picker = () => {
                     onBackspace={handleBackspace}
                   />
                 </div>
+
+                {/* Android 底部导航栏占位，防止键盘上 0 和删除键被遮挡 */}
+                <div style={{ height: 'var(--shopify-safe-area-inset-bottom, 80px)' }} />
               </div>
             )}
           </Modal.Section>
