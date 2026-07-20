@@ -166,8 +166,8 @@ const TransferPlanner = () => {
     }
 
     try {
-      // 批量更新
-      await axios.post('/api/transfer/batch-update-planner', {
+      // 批量更新（后端会在这一步顺便自动创建 Shopify Transfer）
+      const response = await axios.post('/api/transfer/batch-update-planner', {
         items: itemsToUpdate.map(({ itemId, location }) => ({
           id: itemId,
           transfer_from: location,
@@ -177,11 +177,16 @@ const TransferPlanner = () => {
         }))
       });
 
-      showToast(`Updated ${itemsToUpdate.length} items`);
-      
-      // 延迟返回，让用户看到 toast
+      const shopifyResult = response.data?.shopifyTransfer;
+      if (shopifyResult?.errors?.length > 0) {
+        showToast(`Updated ${itemsToUpdate.length} items, but Shopify Transfer had issues: ${shopifyResult.errors.join('; ')}`);
+      } else {
+        showToast(`Updated ${itemsToUpdate.length} items`);
+      }
+
+      // 🆕 提交后直接跳转到 Connecteam Task 页面，提醒用户去发布 task（不需要携带任何预选）
       setTimeout(() => {
-        navigate('/transfer');
+        navigate('/connecteam-task');
       }, 1000);
     } catch (error) {
       console.error('Error submitting:', error);

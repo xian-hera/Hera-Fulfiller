@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const db = require('../database/init');
 const shopifyClient = require('../shopify/client');
+// 🆕 复用 shopify-transfer.js 里的自动创建 / 自动 commit 逻辑
+const { createShopifyTransfersForItems, tryAutoCommitShopifyTransfer } = require('./shopify-transfer');
 
 // Emoji mapping for transfer from
 const EMOJI_MAP = {
@@ -356,6 +358,12 @@ router.patch('/items/:id', async (req, res) => {
     const { id } = req.params;
     const { status, transfer_from, estimate_month, estimate_day, out_of_stock } = req.body;
 
+    // 🆕 先取出旧值，供 log 记录（需求5/6）和自动 commit 判断（需求3）使用
+    const existingItem = await db.prepare('SELECT * FROM transfer_items WHERE id = ?').get(id);
+    if (!existingItem) {
+      return res.status(404).json({ error: 'Transfer item not found' });
+    }
+
     const updates = [];
     const values = [];
 
@@ -395,6 +403,11 @@ router.patch('/items/:id', async (req, res) => {
       console.log(`Setting transfer_date to: ${transferDate}`);
     }
 
+    // 🆕 从 received/waiting 退回 waiting（undo），重置扫描进度，避免残留脏数据
+    if (status === 'waiting' && existingItem.status === 'received') {
+      updates.push('received_scanned_count = 0');
+    }
+
     updates.push("updated_at = CURRENT_TIMESTAMP");
     values.push(id);
 
@@ -404,9 +417,116 @@ router.patch('/items/:id', async (req, res) => {
       WHERE id = ?
     `).run(...values);
 
-    res.json({ success: true });
+    // 🆕 需求5：编辑 waiting item 的 Transfer From 或 Estimated Arrival（任一变化），
+    // 且该 item 已经打上 connecteam 或 shopify tag → 写入 log
+    const planFieldsChanged =
+      (transfer_from !== undefined && transfer_from !== existingItem.transfer_from) ||
+      (estimate_month !== undefined && (
+        estimate_month !== existingItem.estimate_month || estimate_day !== existingItem.estimate_day
+      ));
+
+    if (planFieldsChanged && (existingItem.connecteam_tasked || existingItem.shopify_transferred)) {
+      await db.prepare(`
+        INSERT INTO transfer_logs (
+          log_type, sku, quantity,
+          old_transfer_from, old_estimate_month, old_estimate_day,
+          new_transfer_from, new_estimate_month, new_estimate_day
+        ) VALUES ('plan_changed', ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        existingItem.sku,
+        existingItem.quantity,
+        existingItem.transfer_from,
+        existingItem.estimate_month,
+        existingItem.estimate_day,
+        transfer_from !== undefined ? transfer_from : existingItem.transfer_from,
+        estimate_month !== undefined ? estimate_month : existingItem.estimate_month,
+        estimate_day !== undefined ? estimate_day : existingItem.estimate_day
+      );
+      console.log(`Logged plan change for item ${id} (SKU ${existingItem.sku})`);
+    }
+
+    let autoCommit = null;
+
+    // 🆕 需求6：waiting -> received（点击或扫码，走的都是这个 PATCH）写 log
+    // 🆕 需求3+4：如果这个 item 属于某个 Shopify Transfer，检查是不是最后一个，是的话自动 commit + clear
+    if (status === 'received' && existingItem.status !== 'received') {
+      await db.prepare(`
+        INSERT INTO transfer_logs (log_type, sku, quantity, transfer_from, order_number)
+        VALUES ('received', ?, ?, ?, ?)
+      `).run(existingItem.sku, existingItem.quantity, existingItem.transfer_from, existingItem.order_number);
+
+      if (existingItem.shopify_transfer_number) {
+        autoCommit = await tryAutoCommitShopifyTransfer(existingItem.shopify_transfer_number);
+      }
+    }
+
+    res.json({ success: true, autoCommit });
   } catch (error) {
     console.error('Error updating transfer item:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 🆕 需求2 Case C：quantity > 1 的 waiting item 扫码累加进度
+// 每次扫描调用一次，+1；达到 quantity 就变成 received（复用需求3/6同一套 log + 自动 commit 逻辑）
+// 扫到别的 barcode 不会影响这里的进度——因为这个接口只在"确认命中该 item"之后才会被调用一次，
+// 前端每次扫描都是独立判断该扫哪个 item，这个接口本身不需要知道"是不是扫错了"
+router.patch('/items/:id/scan-progress', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const item = await db.prepare('SELECT * FROM transfer_items WHERE id = ?').get(id);
+    if (!item) {
+      return res.status(404).json({ error: 'Transfer item not found' });
+    }
+    if (item.status !== 'waiting') {
+      return res.status(400).json({ error: 'Item is not in waiting status' });
+    }
+
+    const newCount = (item.received_scanned_count || 0) + 1;
+
+    if (newCount >= item.quantity) {
+      // 达到 total：变成 received，走跟需求6/需求3一样的 log + 自动 commit 逻辑
+      await db.prepare(`
+        UPDATE transfer_items
+        SET received_scanned_count = ?, status = 'received', updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(newCount, id);
+
+      await db.prepare(`
+        INSERT INTO transfer_logs (log_type, sku, quantity, transfer_from, order_number)
+        VALUES ('received', ?, ?, ?, ?)
+      `).run(item.sku, item.quantity, item.transfer_from, item.order_number);
+
+      let autoCommit = null;
+      if (item.shopify_transfer_number) {
+        autoCommit = await tryAutoCommitShopifyTransfer(item.shopify_transfer_number);
+      }
+
+      return res.json({
+        success: true,
+        receivedScannedCount: newCount,
+        quantity: item.quantity,
+        completed: true,
+        autoCommit,
+      });
+    } else {
+      // 还没到 total：只更新进度，状态维持 waiting
+      await db.prepare(`
+        UPDATE transfer_items
+        SET received_scanned_count = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(newCount, id);
+
+      return res.json({
+        success: true,
+        receivedScannedCount: newCount,
+        quantity: item.quantity,
+        completed: false,
+      });
+    }
+  } catch (error) {
+    console.error('Error updating scan progress:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -455,8 +575,8 @@ router.post('/items/:id/split', async (req, res) => {
       INSERT INTO transfer_items (
         line_item_id, shopify_order_id, order_number, quantity, sku,
         image_url, title, name, brand, size, weight, weight_unit,
-        url_handle, product_type, variant_title, custom_name, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'transferring')
+        url_handle, product_type, variant_title, custom_name, lookups, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'transferring')
     `).run(
       item.line_item_id,
       item.shopify_order_id,
@@ -473,7 +593,8 @@ router.post('/items/:id/split', async (req, res) => {
       item.url_handle,
       item.product_type,
       item.variant_title,
-      item.custom_name
+      item.custom_name,
+      item.lookups
     );
 
     res.json({ success: true });
@@ -666,12 +787,51 @@ router.post('/batch-update-planner', async (req, res) => {
       console.log(`  ✓ Updated item ${id}: ${transfer_from}, ${transfer_date}`);
     }
 
-    console.log(`✓ Batch update complete\n`);
-    
-    res.json({ success: true, updated: items.length });
+    console.log(`✓ Batch update complete`);
+
+    // 🆕 需求1：Planner 提交之后，立刻自动创建 Shopify Transfer（按 location 分组，永远 create 不 add-to）
+    // 用的是同一批刚刚设为 waiting 的 item id
+    const itemIds = items.map(i => i.id);
+    let shopifyTransferResult = null;
+    try {
+      shopifyTransferResult = await createShopifyTransfersForItems(itemIds);
+      console.log(`✓ Auto-created Shopify Transfer(s):`, shopifyTransferResult.results?.map(r => r.transferNumber));
+      if (shopifyTransferResult.errors?.length > 0) {
+        console.error('Shopify Transfer auto-create errors:', shopifyTransferResult.errors);
+      }
+    } catch (shopifyErr) {
+      console.error('Error auto-creating Shopify Transfer after Planner submit:', shopifyErr.message);
+      shopifyTransferResult = { success: false, results: [], errors: [shopifyErr.message] };
+    }
+
+    res.json({ success: true, updated: items.length, shopifyTransfer: shopifyTransferResult });
   } catch (error) {
     console.error('Error in batch-update-planner:', error);
     res.status(500).json({ error: 'Failed to update items' });
+  }
+});
+
+// 🆕 需求5/6：获取所有 transfer log（混排，按时间倒序，最新在最前）
+router.get('/logs', async (req, res) => {
+  try {
+    const logs = await db.prepare(`
+      SELECT * FROM transfer_logs ORDER BY created_at DESC
+    `).all();
+    res.json(logs);
+  } catch (error) {
+    console.error('Error fetching transfer logs:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 🆕 需求5：清空所有 transfer log
+router.delete('/logs', async (req, res) => {
+  try {
+    await db.prepare('DELETE FROM transfer_logs').run();
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error clearing transfer logs:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 

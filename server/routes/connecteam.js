@@ -412,16 +412,16 @@ router.post('/publish-task', async (req, res) => {
       return res.status(400).json({ error: 'No items selected' });
     }
 
-    // Dedup guard
+    // Dedup guard (2 分钟窗口)
     const requestKey = JSON.stringify([...itemIds].sort());
     const lastRequest = recentPublishRequests.get(requestKey);
-    if (lastRequest && Date.now() - lastRequest < 10000) {
+    if (lastRequest && Date.now() - lastRequest < 120000) {
       console.log('Duplicate publish-task request blocked:', requestKey);
       return res.status(429).json({ error: 'Duplicate request. Please wait a moment before trying again.' });
     }
     recentPublishRequests.set(requestKey, Date.now());
     for (const [key, time] of recentPublishRequests.entries()) {
-      if (Date.now() - time > 30000) recentPublishRequests.delete(key);
+      if (Date.now() - time > 150000) recentPublishRequests.delete(key);
     }
 
     const placeholders = itemIds.map(() => '?').join(',');
@@ -460,12 +460,14 @@ router.post('/publish-task', async (req, res) => {
       if (locLabel) labelIds.push(locLabel);
     });
 
-    const subtasks = [];
+    // 🆕 每个 sub-task 现在是 { title, isCompleted } 对象，直接嵌套进 Create Task 请求里
+    // 数组顺序 = sortedLocationOrder 的顺序（location 内按 item 原顺序），一次请求搞定，顺序有保证
+    const subTasks = [];
     for (const loc of sortedLocationOrder) {
       const locItems = items.filter(i => i.transfer_from === loc);
       for (const item of locItems) {
         const subtaskTitle = await buildSubtaskTitle(item, loc);
-        subtasks.push(subtaskTitle);
+        subTasks.push({ title: subtaskTitle, isCompleted: false });
       }
     }
 
@@ -475,6 +477,7 @@ router.post('/publish-task', async (req, res) => {
 
     const api = await getApiClient();
 
+    // 🆕 Task + 全部 sub-task 一次性建好（比逐个 POST sub-task 快得多，顺序也有保证）
     const taskResponse = await api.post(
       `/tasks/v1/taskboards/${TASK_BOARD_ID}/tasks`,
       {
@@ -486,6 +489,7 @@ router.post('/publish-task', async (req, res) => {
         type: 'oneTime',
         labelIds,
         description: { content: defaultDescription },
+        subTasks,
       }
     );
 
@@ -494,17 +498,6 @@ router.post('/publish-task', async (req, res) => {
 
     if (!taskId) {
       throw new Error('Task created but no ID returned');
-    }
-
-    for (const subtaskTitle of subtasks) {
-      try {
-        await api.post(
-          `/tasks/v1/taskboards/${TASK_BOARD_ID}/tasks/${taskId}/sub-tasks`,
-          { title: subtaskTitle, isCompleted: false }
-        );
-      } catch (err) {
-        console.error(`Failed to create subtask: ${subtaskTitle}`, err.message);
-      }
     }
 
     await db.prepare(`

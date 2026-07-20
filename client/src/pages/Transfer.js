@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from '../api/axios';
 import {
@@ -43,9 +43,29 @@ const Transfer = () => {
   const [isValidating, setIsValidating] = useState(false);
   const [isMarkingTransferred, setIsMarkingTransferred] = useState(false);
 
+  // 🆕 需求2：扫码相关 state
+  const [scanHighlight, setScanHighlight] = useState({}); // { [itemId]: 'scanned' | 'confirm_needed' }
+  const [showNoMatch, setShowNoMatch] = useState(false);
+  const itemsRef = useRef([]);
+  const barcodeBufferRef = useRef('');
+  const barcodeTimeoutRef = useRef(null);
+
+  // 🆕 需求5/6：Log modal 相关 state
+  const [showLogModal, setShowLogModal] = useState(false);
+  const [logs, setLogs] = useState([]);
+
   const showToast = (message) => {
     setToastMessage(message);
     setToastActive(true);
+  };
+
+  // 🆕 判断扫到的 barcode 是否匹配该 item：main SKU 或 lookups 里的任一 barcode
+  const matchesBarcode = (item, barcode) => {
+    if (item.sku === barcode) return true;
+    if (item.lookups) {
+      return item.lookups.split(',').map(s => s.trim()).includes(barcode);
+    }
+    return false;
   };
 
   const fetchItems = useCallback(async () => {
@@ -61,6 +81,22 @@ const Transfer = () => {
   useEffect(() => {
     fetchItems();
   }, [fetchItems]);
+
+  // 🆕 items 同步到 ref，供扫码键盘监听回调读取最新值（避免闭包拿到旧数据）
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
+
+  // 🆕 需求5/6：拉取 log 列表
+  const fetchLogs = useCallback(async () => {
+    try {
+      const response = await axios.get('/api/transfer/logs');
+      setLogs(response.data);
+    } catch (error) {
+      console.error('Error fetching transfer logs:', error);
+      showToast('Error loading logs');
+    }
+  }, []);
 
   // ── Grouping logic ──────────────────────────────────────────────────────────
 
@@ -170,8 +206,13 @@ const Transfer = () => {
   const handleGreenClick = async (item) => {
     const newStatus = item.status === 'transferring' ? 'found' : 'received';
     try {
-      await axios.patch(`/api/transfer/items/${item.id}`, { status: newStatus });
+      const response = await axios.patch(`/api/transfer/items/${item.id}`, { status: newStatus });
       await fetchItems();
+      // 🆕 需求3/10：自动 commit 失败（校验不通过或 API 报错）时弹 toast
+      const autoCommit = response.data?.autoCommit;
+      if (autoCommit && autoCommit.success === false) {
+        showToast(`${autoCommit.transferNumber} failed`);
+      }
     } catch {
       showToast('Error updating status');
     }
@@ -242,6 +283,8 @@ const Transfer = () => {
     try {
       const qty = parseInt(transferData.transferQuantity);
       const originalFrom = transferModal.transfer_from;
+      const originalMonth = transferModal.estimate_month;
+      const originalDay = transferModal.estimate_day;
 
       if (qty < transferModal.quantity) {
         await axios.post(`/api/transfer/items/${transferModal.id}/split`, {
@@ -265,6 +308,13 @@ const Transfer = () => {
         await axios.patch(`/api/transfer/items/${transferModal.id}`, { from_location_changed: 1 });
       }
 
+      // 🆕 需求5：Transfer From 或 Estimated Arrival 任一变化，且已经打上 connecteam/shopify tag → 弹提示
+      // （log 写入由后端 PATCH /items/:id 自动处理，这里只负责弹这个原生 alert）
+      const estimateChanged = originalMonth !== month || originalDay !== day;
+      if ((fromChanged || estimateChanged) && (transferModal.connecteam_tasked || transferModal.shopify_transferred)) {
+        alert('DO NOT FORGET TO UPDATE CONNECTEAM TASK / SHOPIFY TRANSFER');
+      }
+
       await fetchItems();
       setTransferModal(null);
     } catch {
@@ -281,6 +331,134 @@ const Transfer = () => {
       });
     }
   };
+
+  // 🆕 需求2：滚动到指定 item
+  const scrollToItem = (itemId) => {
+    requestAnimationFrame(() => {
+      const el = document.getElementById(`transfer-item-${itemId}`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+  };
+
+  // 🆕 需求2：扫码核心逻辑
+  const handleScan = useCallback(async (barcode) => {
+    const allItems = itemsRef.current;
+    const matched = allItems.filter(item => matchesBarcode(item, barcode));
+
+    if (matched.length === 0) {
+      setShowNoMatch(true);
+      setTimeout(() => setShowNoMatch(false), 2000);
+      return;
+    }
+
+    // 优先级：有扫描进度的 waiting item（created_at 最早）> 没进度的 waiting item（created_at 最早）> transferring/received（任选一个）
+    const byCreatedAt = (a, b) => new Date(a.created_at) - new Date(b.created_at);
+    const inProgress = matched.filter(i => i.status === 'waiting' && (i.received_scanned_count || 0) > 0).sort(byCreatedAt);
+    const freshWaiting = matched.filter(i => i.status === 'waiting' && !((i.received_scanned_count || 0) > 0)).sort(byCreatedAt);
+    const others = matched.filter(i => i.status !== 'waiting');
+
+    const target = inProgress[0] || freshWaiting[0] || others[0];
+    if (!target) {
+      setShowNoMatch(true);
+      setTimeout(() => setShowNoMatch(false), 2000);
+      return;
+    }
+
+    // 🆕 命中的 item 如果被当前 filter 挡住，自动打开对应的 filter
+    if (target.status === 'transferring' && !statusFilter.includes('transferring')) {
+      setStatusFilter(prev => [...prev, 'transferring']);
+    }
+    if (target.status === 'waiting' && !statusFilter.includes('waiting')) {
+      setStatusFilter(prev => [...prev, 'waiting']);
+    }
+    if ((target.status === 'received' || target.status === 'found') && !statusFilter.includes('received')) {
+      setStatusFilter(prev => [...prev, 'received']);
+    }
+    if (taskDateFilter && target.connecteam_task_title_date !== taskDateFilter) {
+      setTaskDateFilter(null);
+    }
+    if (shopifyTransferFilter && target.shopify_transfer_number !== shopifyTransferFilter) {
+      setShopifyTransferFilter(null);
+    }
+
+    const flashGreen = (itemId) => {
+      setScanHighlight(prev => ({ ...prev, [itemId]: 'scanned' }));
+      setTimeout(() => {
+        setScanHighlight(prev => {
+          const next = { ...prev };
+          delete next[itemId];
+          return next;
+        });
+      }, 5000);
+    };
+
+    // Case A: transferring 或 received/found — 只跳转 + 变绿，不做状态变更
+    if (target.status === 'transferring' || target.status === 'received' || target.status === 'found') {
+      flashGreen(target.id);
+      scrollToItem(target.id);
+      return;
+    }
+
+    // Case B: waiting + quantity === 1 — 直接变成 received
+    if (target.quantity === 1) {
+      try {
+        const response = await axios.patch(`/api/transfer/items/${target.id}`, { status: 'received' });
+        await fetchItems();
+        flashGreen(target.id);
+        scrollToItem(target.id);
+        const autoCommit = response.data?.autoCommit;
+        if (autoCommit && autoCommit.success === false) {
+          showToast(`${autoCommit.transferNumber} failed`);
+        }
+      } catch {
+        showToast('Error updating status');
+      }
+      return;
+    }
+
+    // Case C: waiting + quantity > 1 — 累加扫描进度
+    try {
+      const response = await axios.patch(`/api/transfer/items/${target.id}/scan-progress`);
+      await fetchItems();
+      flashGreen(target.id);
+      scrollToItem(target.id);
+      if (response.data.completed) {
+        const autoCommit = response.data?.autoCommit;
+        if (autoCommit && autoCommit.success === false) {
+          showToast(`${autoCommit.transferNumber} failed`);
+        }
+      }
+    } catch {
+      showToast('Error updating scan progress');
+    }
+  }, [statusFilter, taskDateFilter, shopifyTransferFilter, fetchItems]);
+
+  // 🆕 扫码枪键盘输入监听（连续快速按键 + Enter 结束）
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      const activeTag = document.activeElement?.tagName;
+      if (['INPUT', 'TEXTAREA'].includes(activeTag)) return;
+
+      if (e.key === 'Enter') {
+        const barcode = barcodeBufferRef.current.trim();
+        barcodeBufferRef.current = '';
+        if (barcode.length > 0) handleScan(barcode);
+        return;
+      }
+
+      if (e.key.length === 1) {
+        barcodeBufferRef.current += e.key;
+      }
+
+      clearTimeout(barcodeTimeoutRef.current);
+      barcodeTimeoutRef.current = setTimeout(() => {
+        barcodeBufferRef.current = '';
+      }, 300);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleScan]);
 
   // ── Tag label click ─────────────────────────────────────────────────────────
   const handleTaskLabelClick = (titleDate) => {
@@ -362,9 +540,17 @@ const Transfer = () => {
       from_location_changed,
       shopify_transferred,
       shopify_transfer_number,
+      received_scanned_count,
     } = item;
 
     const isWaitingOrReceived = status === 'waiting' || status === 'received' || status === 'found';
+
+    // 🆕 扫码高亮背景色
+    const highlight = scanHighlight[id];
+    const itemBgColor = highlight === 'scanned' ? '#e4fef3' : 'transparent';
+
+    // 🆕 quantity > 1 且正在扫描中的进度
+    const scanProgress = status === 'waiting' && received_scanned_count > 0 ? received_scanned_count : null;
 
     const media = image_url ? (
       <div onClick={() => handleImageClick(item)} style={{ cursor: 'pointer' }}>
@@ -447,7 +633,7 @@ const Transfer = () => {
     ) : null;
 
     return (
-      <div className="transfer-item-container" key={id}>
+      <div className="transfer-item-container" id={`transfer-item-${id}`} key={id} style={{ backgroundColor: itemBgColor, transition: 'background-color 0.3s' }}>
         {/* Desktop layout */}
         <div className="transfer-item-desktop">
           <div style={{ marginRight: '16px', flexShrink: 0 }}>
@@ -455,6 +641,9 @@ const Transfer = () => {
           </div>
 
           <div style={{ fontSize: '38px', lineHeight: 1, marginRight: '20px', marginTop: '5px', minWidth: '50px', flexShrink: 0 }}>
+            {scanProgress && (
+              <span style={{ color: '#d72c0d' }}>{scanProgress}/</span>
+            )}
             {quantity}
           </div>
 
@@ -554,7 +743,12 @@ const Transfer = () => {
 
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
             <div style={{ flexShrink: 0 }}>{media}</div>
-            <div style={{ fontSize: '24px', fontWeight: 'bold', flexShrink: 0, minWidth: '30px', alignSelf: 'center' }}>{quantity}</div>
+            <div style={{ fontSize: '24px', fontWeight: 'bold', flexShrink: 0, minWidth: '30px', alignSelf: 'center' }}>
+              {scanProgress && (
+                <span style={{ color: '#d72c0d' }}>{scanProgress}/</span>
+              )}
+              {quantity}
+            </div>
             <div style={{ marginLeft: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
               {clearMode ? (
                 <input type="checkbox" checked={selectedItems.includes(id)} onChange={() => handleItemSelect(id)} style={{ width: '20px', height: '20px' }} />
@@ -715,6 +909,7 @@ const Transfer = () => {
                   { content: 'Clear Mode', onAction: handleClearToggle },
                   { content: 'Connecteam Task', onAction: () => navigate('/connecteam-task') },
                   { content: 'Shopify Transfer', onAction: () => navigate('/shopify-transfer') },
+                  { content: 'Log', onAction: () => { fetchLogs(); setShowLogModal(true); } },
                 ]
           }
         >
@@ -846,6 +1041,94 @@ const Transfer = () => {
               )}
             </Modal.Section>
           </Modal>
+
+          {/* 🆕 Log modal（需求5/6，混排展示，全英文） */}
+          <Modal
+            open={showLogModal}
+            onClose={() => setShowLogModal(false)}
+            title="Log"
+            secondaryActions={[
+              { content: 'Clear All', destructive: true, onAction: async () => {
+                  try {
+                    await axios.delete('/api/transfer/logs');
+                    setLogs([]);
+                  } catch {
+                    showToast('Failed to clear logs');
+                  }
+                }
+              },
+              { content: 'Close', onAction: () => setShowLogModal(false) },
+            ]}
+          >
+            <Modal.Section>
+              {logs.length === 0 ? (
+                <Text as="p">No log entries.</Text>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '2px solid #e1e3e5', textAlign: 'left' }}>
+                        <th style={{ padding: '8px' }}>Type</th>
+                        <th style={{ padding: '8px' }}>SKU</th>
+                        <th style={{ padding: '8px' }}>Qty</th>
+                        <th style={{ padding: '8px' }}>Details</th>
+                        <th style={{ padding: '8px' }}>Time</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {logs.map(log => (
+                        <tr key={log.id} style={{ borderBottom: '1px solid #e1e3e5' }}>
+                          <td style={{ padding: '8px' }}>
+                            {log.log_type === 'plan_changed' && 'Plan changed'}
+                            {log.log_type === 'received' && 'Item received'}
+                            {log.log_type === 'commit_failed' && 'Auto-commit failed'}
+                          </td>
+                          <td style={{ padding: '8px' }}>{log.sku || '—'}</td>
+                          <td style={{ padding: '8px' }}>{log.quantity ?? '—'}</td>
+                          <td style={{ padding: '8px' }}>
+                            {log.log_type === 'plan_changed' && (
+                              <>
+                                {log.old_transfer_from || '—'} {formatDate(log.old_estimate_month, log.old_estimate_day)}
+                                {' → '}
+                                {log.new_transfer_from || '—'} {formatDate(log.new_estimate_month, log.new_estimate_day)}
+                              </>
+                            )}
+                            {log.log_type === 'received' && (
+                              <>From {log.transfer_from || '—'}, Order #{log.order_number || '—'}</>
+                            )}
+                            {log.log_type === 'commit_failed' && (
+                              <>Transfer #{log.shopify_transfer_number}: {log.error_message}</>
+                            )}
+                          </td>
+                          <td style={{ padding: '8px', whiteSpace: 'nowrap' }}>
+                            {new Date(log.created_at).toLocaleString()}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Modal.Section>
+          </Modal>
+
+          {/* 🆕 No match 提示（2秒自动消失） */}
+          {showNoMatch && (
+            <div
+              style={{
+                position: 'fixed', top: '16px', left: '50%', transform: 'translateX(-50%)',
+                zIndex: 9999, pointerEvents: 'none'
+              }}
+            >
+              <div style={{
+                backgroundColor: '#d72c0d', color: 'white', borderRadius: '8px',
+                padding: '12px 24px', fontSize: '15px', fontWeight: '600',
+                boxShadow: '0 4px 24px rgba(0,0,0,0.18)'
+              }}>
+                No match found
+              </div>
+            </div>
+          )}
 
           {toastMarkup}
         </Page>

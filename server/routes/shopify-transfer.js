@@ -242,6 +242,94 @@ async function markTransferAsTransferred(transferId, lineItems) {
   return { shipmentId, status: 'TRANSFERRED' };
 }
 
+// 🆕 需求3+4：检查某个 shopify_transfer_number 下的 item 是否全部 received，
+// 是的话跑校验，通过就自动 commit（markTransferAsTransferred）+ 自动 clear 这批 item；
+// 校验不过或 commit 报错，都写入 transfer_logs（commit_failed），不自动 clear。
+// 返回 null 表示"还没到最后一个 item，什么都没做"；否则返回 { success, transferNumber, ... }
+async function tryAutoCommitShopifyTransfer(transferNumber) {
+  try {
+    const dbItems = await db.prepare(
+      'SELECT * FROM transfer_items WHERE shopify_transfer_number = ?'
+    ).all(transferNumber);
+
+    if (dbItems.length === 0) return null;
+
+    const allReceived = dbItems.every(item => item.status === 'received');
+    if (!allReceived) return null;
+
+    const transferRecord = await db.prepare(
+      'SELECT * FROM shopify_transfers WHERE transfer_number = ?'
+    ).get(transferNumber);
+    if (!transferRecord) return null;
+
+    // 已经 commit 过就不要重复处理
+    if (transferRecord.status === 'transferred') return null;
+
+    const shopifyTransfer = await getTransferById(transferRecord.transfer_id);
+    if (!shopifyTransfer) return null;
+
+    const shopifyItems = shopifyTransfer.lineItems?.edges?.map(e => ({
+      sku: e.node.inventoryItem?.sku,
+      quantity: e.node.totalQuantity,
+    })) || [];
+
+    // 与手动 validate 接口完全一致的比对逻辑
+    const mismatches = [];
+    for (const dbItem of dbItems) {
+      const shopifyItem = shopifyItems.find(si => si.sku === dbItem.sku);
+      if (!shopifyItem) {
+        mismatches.push(`SKU ${dbItem.sku} is in Fulfiller but not in Shopify transfer`);
+      } else if (shopifyItem.quantity !== dbItem.quantity) {
+        mismatches.push(`SKU ${dbItem.sku}: Fulfiller qty ${dbItem.quantity} ≠ Shopify qty ${shopifyItem.quantity}`);
+      }
+    }
+    for (const shopifyItem of shopifyItems) {
+      const dbItem = dbItems.find(di => di.sku === shopifyItem.sku);
+      if (!dbItem) {
+        mismatches.push(`SKU ${shopifyItem.sku} is in Shopify transfer but not in Fulfiller`);
+      }
+    }
+
+    if (mismatches.length > 0) {
+      await db.prepare(`
+        INSERT INTO transfer_logs (log_type, shopify_transfer_number, error_message)
+        VALUES ('commit_failed', ?, ?)
+      `).run(transferNumber, `Validation mismatch: ${mismatches.join('; ')}`);
+      console.error(`Auto-commit blocked for transfer ${transferNumber} — validation mismatch:`, mismatches);
+      return { success: false, transferNumber, reason: 'mismatch', mismatches };
+    }
+
+    const lineItems = shopifyTransfer.lineItems?.edges?.map(e => e.node) || [];
+
+    try {
+      await markTransferAsTransferred(transferRecord.transfer_id, lineItems);
+
+      await db.prepare(`
+        UPDATE shopify_transfers SET status = 'transferred', updated_at = CURRENT_TIMESTAMP
+        WHERE transfer_number = ?
+      `).run(transferNumber);
+
+      // 🆕 需求4：commit 成功后，自动 clear 这批 received 的 item
+      const itemIds = dbItems.map(i => i.id);
+      const placeholders = itemIds.map(() => '?').join(',');
+      await db.prepare(`DELETE FROM transfer_items WHERE id IN (${placeholders})`).run(...itemIds);
+
+      console.log(`✓ Auto-committed and cleared transfer ${transferNumber} (${itemIds.length} items)`);
+      return { success: true, transferNumber, cleared: itemIds.length };
+    } catch (commitErr) {
+      console.error(`Auto-commit failed for transfer ${transferNumber}:`, commitErr.message);
+      await db.prepare(`
+        INSERT INTO transfer_logs (log_type, shopify_transfer_number, error_message)
+        VALUES ('commit_failed', ?, ?)
+      `).run(transferNumber, commitErr.message);
+      return { success: false, transferNumber, reason: 'commit_error', error: commitErr.message };
+    }
+  } catch (err) {
+    console.error(`Error in tryAutoCommitShopifyTransfer for ${transferNumber}:`, err.message);
+    return null;
+  }
+}
+
 // ============================================================================
 // Routes
 // ============================================================================
@@ -300,115 +388,114 @@ router.get('/draft-transfers', async (req, res) => {
   }
 });
 
+// 🆕 把 /create 的核心逻辑抽成独立函数，供路由本身、以及 transfer.js 的 Planner 自动创建复用
+// 按 transfer_from 分组，每组都无条件新建一个 Shopify Transfer（不检查是否已有 draft）
+async function createShopifyTransfersForItems(itemIds) {
+  if (!itemIds || itemIds.length === 0) {
+    return { success: false, results: [], errors: ['No items selected'] };
+  }
+
+  const settingsRows = await db.prepare('SELECT key, value FROM shopify_transfer_settings').all();
+  const settings = {};
+  settingsRows.forEach(r => {
+    try { settings[r.key] = JSON.parse(r.value); } catch { settings[r.key] = r.value; }
+  });
+
+  const placeholders = itemIds.map(() => '?').join(',');
+  const items = await db.prepare(
+    `SELECT * FROM transfer_items WHERE id IN (${placeholders})`
+  ).all(...itemIds);
+
+  const grouped = {};
+  for (const item of items) {
+    const loc = item.transfer_from;
+    if (!loc) continue;
+    if (!grouped[loc]) grouped[loc] = [];
+    grouped[loc].push(item);
+  }
+
+  const sortedLocations = Object.keys(grouped).sort();
+  const results = [];
+  const errors = [];
+
+  for (const loc of sortedLocations) {
+    const locItems = grouped[loc];
+
+    const lineItemsMap = {};
+    for (const item of locItems) {
+      if (!item.sku) continue;
+      const inventoryItemId = await getInventoryItemBySku(item.sku);
+      if (!inventoryItemId) {
+        errors.push(`SKU ${item.sku} not found in Shopify`);
+        continue;
+      }
+      lineItemsMap[inventoryItemId] = (lineItemsMap[inventoryItemId] || 0) + item.quantity;
+    }
+    const lineItems = Object.entries(lineItemsMap).map(([inventoryItemId, quantity]) => ({
+      inventoryItemId,
+      quantity,
+    }));
+
+    if (lineItems.length === 0) {
+      errors.push(`No valid products for location ${loc}`);
+      continue;
+    }
+
+    try {
+      const transfer = await createShopifyTransfer(loc, lineItems, settings);
+
+      const transferId = transfer.id;
+      const transferNumber = transfer.name?.replace('#', '') || '';
+
+      await db.prepare(`
+        INSERT INTO shopify_transfers
+          (transfer_id, transfer_number, from_location, destination, reference_name, tags, status, item_count)
+        VALUES (?, ?, ?, ?, ?, ?, 'draft', ?)
+        ON CONFLICT (transfer_id) DO UPDATE SET
+          transfer_number = EXCLUDED.transfer_number,
+          status = EXCLUDED.status,
+          item_count = EXCLUDED.item_count,
+          updated_at = CURRENT_TIMESTAMP
+      `).run(
+        transferId,
+        transferNumber,
+        loc,
+        settings.default_destination || 'MTL10',
+        settings.default_reference_name || 'Online Transfer',
+        JSON.stringify(settings.default_tags || ['Online Transfer', 'WEB']),
+        locItems.length
+      );
+
+      for (const item of locItems) {
+        await db.prepare(`
+          UPDATE transfer_items
+          SET shopify_transferred = 1, shopify_transfer_id = ?, shopify_transfer_number = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `).run(transferId, transferNumber, item.id);
+      }
+
+      results.push({
+        location: loc,
+        transferId,
+        transferNumber,
+        itemCount: locItems.length,
+      });
+
+    } catch (err) {
+      errors.push(`Failed to create transfer for location ${loc}: ${err.message}`);
+    }
+  }
+
+  return { success: true, results, errors };
+}
+
 // POST /api/shopify-transfer/create
 // Body: { itemIds }
 router.post('/create', async (req, res) => {
   try {
     const { itemIds } = req.body;
-    if (!itemIds || itemIds.length === 0) {
-      return res.status(400).json({ error: 'No items selected' });
-    }
-
-    // Get settings
-    const settingsRows = await db.prepare('SELECT key, value FROM shopify_transfer_settings').all();
-    const settings = {};
-    settingsRows.forEach(r => {
-      try { settings[r.key] = JSON.parse(r.value); } catch { settings[r.key] = r.value; }
-    });
-
-    // Fetch items
-    const placeholders = itemIds.map(() => '?').join(',');
-    const items = await db.prepare(
-      `SELECT * FROM transfer_items WHERE id IN (${placeholders})`
-    ).all(...itemIds);
-
-    // Group by transfer_from (location)
-    const grouped = {};
-    for (const item of items) {
-      const loc = item.transfer_from;
-      if (!loc) continue;
-      if (!grouped[loc]) grouped[loc] = [];
-      grouped[loc].push(item);
-    }
-
-    // Create transfers in ascending location order
-    const sortedLocations = Object.keys(grouped).sort();
-    const results = [];
-    const errors = [];
-
-    for (const loc of sortedLocations) {
-      const locItems = grouped[loc];
-
-      // Build line items: merge duplicate SKUs by summing quantities
-      const lineItemsMap = {};
-      for (const item of locItems) {
-        if (!item.sku) continue;
-        const inventoryItemId = await getInventoryItemBySku(item.sku);
-        if (!inventoryItemId) {
-          errors.push(`SKU ${item.sku} not found in Shopify`);
-          continue;
-        }
-        lineItemsMap[inventoryItemId] = (lineItemsMap[inventoryItemId] || 0) + item.quantity;
-      }
-      const lineItems = Object.entries(lineItemsMap).map(([inventoryItemId, quantity]) => ({
-        inventoryItemId,
-        quantity,
-      }));
-
-      if (lineItems.length === 0) {
-        errors.push(`No valid products for location ${loc}`);
-        continue;
-      }
-
-      try {
-        const transfer = await createShopifyTransfer(loc, lineItems, settings);
-
-        // Save to DB
-        const transferId = transfer.id;
-        const transferNumber = transfer.name?.replace('#', '') || '';
-
-        await db.prepare(`
-          INSERT INTO shopify_transfers
-            (transfer_id, transfer_number, from_location, destination, reference_name, tags, status, item_count)
-          VALUES (?, ?, ?, ?, ?, ?, 'draft', ?)
-          ON CONFLICT (transfer_id) DO UPDATE SET
-            transfer_number = EXCLUDED.transfer_number,
-            status = EXCLUDED.status,
-            item_count = EXCLUDED.item_count,
-            updated_at = CURRENT_TIMESTAMP
-        `).run(
-          transferId,
-          transferNumber,
-          loc,
-          settings.default_destination || 'MTL10',
-          settings.default_reference_name || 'Online Transfer',
-          JSON.stringify(settings.default_tags || ['Online Transfer', 'WEB']),
-          locItems.length
-        );
-
-        // Update transfer_items
-        for (const item of locItems) {
-          await db.prepare(`
-            UPDATE transfer_items
-            SET shopify_transferred = 1, shopify_transfer_id = ?, shopify_transfer_number = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-          `).run(transferId, transferNumber, item.id);
-        }
-
-        results.push({
-          location: loc,
-          transferId,
-          transferNumber,
-          itemCount: locItems.length,
-        });
-
-      } catch (err) {
-        errors.push(`Failed to create transfer for location ${loc}: ${err.message}`);
-      }
-    }
-
-    res.json({ success: true, results, errors });
-
+    const result = await createShopifyTransfersForItems(itemIds);
+    res.json(result);
   } catch (err) {
     console.error('Error creating Shopify transfers:', err);
     res.status(500).json({ error: err.message });
@@ -662,3 +749,6 @@ router.post('/mark-transferred', async (req, res) => {
 });
 
 module.exports = router;
+// 🆕 供 transfer.js 复用：自动创建 Shopify Transfer（需求1），以及自动 commit 检查（需求3+4）
+module.exports.createShopifyTransfersForItems = createShopifyTransfersForItems;
+module.exports.tryAutoCommitShopifyTransfer = tryAutoCommitShopifyTransfer;
