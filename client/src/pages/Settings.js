@@ -57,17 +57,18 @@ const Settings = () => {
 
   // ── Scanner — UI state & saved state ──────────────────────
   const [scannerUI, setScannerUI] = useState({
-    enabled: false, picker: false, packingOrders: false, packer: false
+    enabled: false, picker: false, packingOrders: false, packer: false, transfer: false
   });
   const [scannerSaved, setScannerSaved] = useState({
-    enabled: false, picker: false, packingOrders: false, packer: false
+    enabled: false, picker: false, packingOrders: false, packer: false, transfer: false
   });
   const [scannerSaving, setScannerSaving] = useState(false);
   const scannerDirty =
     scannerUI.enabled !== scannerSaved.enabled ||
     scannerUI.picker !== scannerSaved.picker ||
     scannerUI.packingOrders !== scannerSaved.packingOrders ||
-    scannerUI.packer !== scannerSaved.packer;
+    scannerUI.packer !== scannerSaved.packer ||
+    scannerUI.transfer !== scannerSaved.transfer;
 
   // ── Pack & Label It — UI state & saved state ───────────────
   const [packLabelUI, setPackLabelUI] = useState({ enabled: false });
@@ -115,7 +116,8 @@ const Settings = () => {
         enabled: s.scanner_enabled === 'true',
         picker: s.scanner_picker === 'true',
         packingOrders: s.scanner_packing_orders === 'true',
-        packer: s.scanner_packer === 'true'
+        packer: s.scanner_packer === 'true',
+        transfer: s.scanner_transfer === 'true'
       };
       setScannerUI(scannerVals);
       setScannerSaved(scannerVals);
@@ -164,6 +166,7 @@ const Settings = () => {
         scannerPicker: scannerUI.picker,
         scannerPackingOrders: scannerUI.packingOrders,
         scannerPacker: scannerUI.packer,
+        scannerTransfer: scannerUI.transfer,
       });
       setScannerSaved({ ...scannerUI });
       showMessage('Scanner settings saved');
@@ -542,6 +545,13 @@ const Settings = () => {
                   checked={scannerUI.packer}
                   disabled={!scannerUI.enabled}
                   onChange={v => handleScannerToggle('packer', v)}
+                />
+                <CheckRow
+                  id="scanner-transfer"
+                  label="Enable scanner in Transfer"
+                  checked={scannerUI.transfer}
+                  disabled={!scannerUI.enabled}
+                  onChange={v => handleScannerToggle('transfer', v)}
                 />
               </div>
               <div style={{ marginTop: '8px' }}>

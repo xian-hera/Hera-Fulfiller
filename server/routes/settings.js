@@ -443,7 +443,7 @@ router.post('/update-multiple', async (req, res) => {
 // 🆕 Update scanner settings
 router.post('/scanner', async (req, res) => {
   try {
-    const { scannerEnabled, scannerPicker, scannerPackingOrders, scannerPacker } = req.body;
+    const { scannerEnabled, scannerPicker, scannerPackingOrders, scannerPacker, scannerTransfer } = req.body;
 
     const upsert = db.prepare(`
       INSERT INTO settings (key, value, updated_at)
@@ -457,6 +457,7 @@ router.post('/scanner', async (req, res) => {
     upsert.run('scanner_picker', scannerPicker ? 'true' : 'false');
     upsert.run('scanner_packing_orders', scannerPackingOrders ? 'true' : 'false');
     upsert.run('scanner_packer', scannerPacker ? 'true' : 'false');
+    upsert.run('scanner_transfer', scannerTransfer ? 'true' : 'false');
 
     res.json({ success: true });
   } catch (error) {
