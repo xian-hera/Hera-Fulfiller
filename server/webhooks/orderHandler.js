@@ -100,11 +100,25 @@ class OrderWebhookHandler {
               console.error(`Failed to fetch custom.name for variant ${item.variant_id}:`, err.message);
             }
 
-            // 🆕 获取 custom.lookups metafield（variant 层级）— 该产品的其他 barcode（逗号分隔）
+            // 🆕 获取 custom.lookups metafield（variant 层级）
+            // 值是引用其他 product 的 GID 数组（JSON 字符串，如 ["gid://shopify/Product/123"]），
+            // 不是直接的 barcode；需要再查一次这些 product 各自唯一 variant 的 SKU，作为该产品的其他 barcode
             try {
-              lookups = await shopifyClient.getVariantMetafield(item.variant_id, 'custom', 'lookups');
-              if (lookups) {
-                console.log(`Variant ${item.variant_id}: custom.lookups=${lookups}`);
+              const rawLookups = await shopifyClient.getVariantMetafield(item.variant_id, 'custom', 'lookups');
+              if (rawLookups) {
+                let gids = [];
+                try {
+                  gids = JSON.parse(rawLookups);
+                } catch (parseErr) {
+                  console.error(`Failed to parse custom.lookups JSON for variant ${item.variant_id}:`, parseErr.message);
+                }
+                if (Array.isArray(gids) && gids.length > 0) {
+                  const skus = await shopifyClient.getSkusForProductGids(gids);
+                  lookups = skus.join(', ');
+                  if (lookups) {
+                    console.log(`Variant ${item.variant_id}: custom.lookups resolved to SKUs=${lookups}`);
+                  }
+                }
               }
             } catch (err) {
               console.error(`Failed to fetch custom.lookups for variant ${item.variant_id}:`, err.message);
@@ -346,11 +360,25 @@ class OrderWebhookHandler {
               console.error(`Failed to fetch custom.name for variant ${item.variant_id}:`, err.message);
             }
 
-            // 🆕 获取 custom.lookups metafield（variant 层级）— 该产品的其他 barcode（逗号分隔）
+            // 🆕 获取 custom.lookups metafield（variant 层级）
+            // 值是引用其他 product 的 GID 数组（JSON 字符串，如 ["gid://shopify/Product/123"]），
+            // 不是直接的 barcode；需要再查一次这些 product 各自唯一 variant 的 SKU，作为该产品的其他 barcode
             try {
-              lookups = await shopifyClient.getVariantMetafield(item.variant_id, 'custom', 'lookups');
-              if (lookups) {
-                console.log(`Variant ${item.variant_id}: custom.lookups=${lookups}`);
+              const rawLookups = await shopifyClient.getVariantMetafield(item.variant_id, 'custom', 'lookups');
+              if (rawLookups) {
+                let gids = [];
+                try {
+                  gids = JSON.parse(rawLookups);
+                } catch (parseErr) {
+                  console.error(`Failed to parse custom.lookups JSON for variant ${item.variant_id}:`, parseErr.message);
+                }
+                if (Array.isArray(gids) && gids.length > 0) {
+                  const skus = await shopifyClient.getSkusForProductGids(gids);
+                  lookups = skus.join(', ');
+                  if (lookups) {
+                    console.log(`Variant ${item.variant_id}: custom.lookups resolved to SKUs=${lookups}`);
+                  }
+                }
               }
             } catch (err) {
               console.error(`Failed to fetch custom.lookups for variant ${item.variant_id}:`, err.message);

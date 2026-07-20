@@ -15,7 +15,6 @@ import {
   Banner,
   Toast,
   Frame,
-  ChoiceList,
 } from '@shopify/polaris';
 import { ImageIcon } from '@shopify/polaris-icons';
 
@@ -476,13 +475,9 @@ const Transfer = () => {
     if (!scannerTransferEnabled) return;
 
     const handleKeyDown = (e) => {
-      // 只在真正的文本输入框（text/number 等）里忽略扫码，checkbox/radio 保留焦点不该挡住扫码
-      const active = document.activeElement;
-      const isTextInput = active && (
-        active.tagName === 'TEXTAREA' ||
-        (active.tagName === 'INPUT' && !['checkbox', 'radio', 'button', 'submit'].includes(active.type))
-      );
-      if (isTextInput) return;
+      // 如果焦点在 input/textarea 内，忽略
+      const activeTag = document.activeElement?.tagName;
+      if (['INPUT', 'TEXTAREA'].includes(activeTag)) return;
 
       if (e.key === 'Enter') {
         clearTimeout(barcodeTimeoutRef.current);
@@ -967,17 +962,37 @@ const Transfer = () => {
             <Layout.Section>
               <Card>
                 <div style={{ padding: '16px' }}>
-                  <ChoiceList
-                    title="Show items"
-                    choices={[
+                  <Text variant="bodyMd" fontWeight="semibold" as="p">Show items</Text>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '8px' }}>
+                    {[
                       { label: `Transferring (${statusCounts.transferring})`, value: 'transferring' },
                       { label: `Waiting (${statusCounts.waiting})`, value: 'waiting' },
                       { label: `Received (${statusCounts.received})`, value: 'received' },
-                    ]}
-                    selected={statusFilter}
-                    onChange={setStatusFilter}
-                    allowMultiple
-                  />
+                    ].map(choice => {
+                      const isSelected = statusFilter.includes(choice.value);
+                      return (
+                        <button
+                          key={choice.value}
+                          onClick={() => {
+                            setStatusFilter(prev =>
+                              prev.includes(choice.value)
+                                ? prev.filter(v => v !== choice.value)
+                                : [...prev, choice.value]
+                            );
+                          }}
+                          style={{
+                            padding: '6px 14px', borderRadius: '20px', border: '1px solid #c9cccf',
+                            background: isSelected ? '#008060' : 'white',
+                            color: isSelected ? 'white' : '#202223',
+                            cursor: 'pointer', fontSize: '13px',
+                            fontWeight: isSelected ? '600' : '400',
+                          }}
+                        >
+                          {choice.label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               </Card>
             </Layout.Section>

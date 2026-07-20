@@ -12,7 +12,6 @@ import {
   Badge,
   Button,
   ButtonGroup,
-  ChoiceList,
   Modal,
   BlockStack,
   Banner,
@@ -1001,19 +1000,6 @@ const Picker = () => {
           min-width: 80px;
         }
 
-        /* 手机端 ChoiceList 横向布局 */
-        @media (max-width: 600px) {
-          .Polaris-ChoiceList__Choices {
-            display: flex !important;
-            flex-direction: row !important;
-            gap: 16px !important;
-          }
-
-          .Polaris-ChoiceList__Choice {
-            margin-bottom: 0 !important;
-          }
-        }
-
         /* Modal 和 Keypad 布局修复 */
         .picker-modal-content {
           position: relative;
@@ -1131,17 +1117,37 @@ const Picker = () => {
           <Layout.Section>
             <Card>
               <div style={{ padding: '16px' }}>
-                <ChoiceList
-                  title="Show items"
-                  choices={[
+                <Text variant="bodyMd" fontWeight="semibold" as="p">Show items</Text>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '8px' }}>
+                  {[
                     { label: `Picking (${statusCounts.picking})`, value: 'picking' },
                     { label: `Missing (${statusCounts.missing})`, value: 'missing' },
                     { label: `Picked (${statusCounts.picked})`, value: 'picked' }
-                  ]}
-                  selected={statusFilter}
-                  onChange={setStatusFilter}
-                  allowMultiple
-                />
+                  ].map(choice => {
+                    const isSelected = statusFilter.includes(choice.value);
+                    return (
+                      <button
+                        key={choice.value}
+                        onClick={() => {
+                          setStatusFilter(prev =>
+                            prev.includes(choice.value)
+                              ? prev.filter(v => v !== choice.value)
+                              : [...prev, choice.value]
+                          );
+                        }}
+                        style={{
+                          padding: '6px 14px', borderRadius: '20px', border: '1px solid #c9cccf',
+                          background: isSelected ? '#008060' : 'white',
+                          color: isSelected ? 'white' : '#202223',
+                          cursor: 'pointer', fontSize: '13px',
+                          fontWeight: isSelected ? '600' : '400',
+                        }}
+                      >
+                        {choice.label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </Card>
           </Layout.Section>
@@ -1233,9 +1239,6 @@ const Picker = () => {
                     onBackspace={handleBackspace}
                   />
                 </div>
-
-                {/* Android 底部导航栏占位，防止键盘上 0 和删除键被遮挡 */}
-                <div style={{ height: 'var(--shopify-safe-area-inset-bottom, 80px)' }} />
               </div>
             )}
           </Modal.Section>

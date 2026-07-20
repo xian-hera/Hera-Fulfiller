@@ -77,6 +77,44 @@ class ShopifyClient {
     }
   }
 
+  // 🆕 lookups metafield 存的是引用其他 product 的 GID 数组，不是 barcode 本身
+  // 这个方法批量查这些被引用 product 各自唯一 variant 的 SKU（业务上确认了这些 lookup 产品只有一个 variant）
+  async getSkusForProductGids(gids) {
+    if (!gids || gids.length === 0) return [];
+    try {
+      const client = await this.getClient();
+      const query = `
+        query getSkusByIds($ids: [ID!]!) {
+          nodes(ids: $ids) {
+            ... on Product {
+              id
+              variants(first: 1) {
+                edges { node { sku } }
+              }
+            }
+          }
+        }
+      `;
+      const response = await client.post('/graphql.json', {
+        query,
+        variables: { ids: gids }
+      });
+
+      if (response.data.errors) {
+        console.error('GraphQL errors in getSkusForProductGids:', JSON.stringify(response.data.errors));
+        return [];
+      }
+
+      const nodes = response.data?.data?.nodes || [];
+      return nodes
+        .map(n => n?.variants?.edges?.[0]?.node?.sku)
+        .filter(Boolean);
+    } catch (error) {
+      console.error('Error fetching SKUs for lookup product GIDs:', error.response?.data || error.message);
+      return [];
+    }
+  }
+
   async updateVariantWeight(variantId, weightInGrams) {
     try {
       const client = await this.getClient();
