@@ -242,12 +242,12 @@ router.patch('/items/:id/status', async (req, res) => {
           INSERT INTO transfer_items (
             line_item_id, shopify_order_id, order_number, quantity, sku, 
             image_url, title, name, brand, size, weight, weight_unit,
-            url_handle, product_type, variant_title, custom_name, status
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'transferring')
+            url_handle, product_type, variant_title, custom_name, lookups, status
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'transferring')
         `).run(
           item.id, item.shopify_order_id, item.order_number, item.quantity, item.sku,
           item.image_url, item.title, item.name, item.brand, item.size, item.weight, item.weight_unit,
-          item.url_handle, item.product_type, item.variant_title, item.custom_name
+          item.url_handle, item.product_type, item.variant_title, item.custom_name, item.lookups
         );
       }
     }
@@ -411,12 +411,12 @@ router.post('/items/:id/split', async (req, res) => {
       INSERT INTO transfer_items (
         line_item_id, shopify_order_id, order_number, quantity, sku,
         image_url, title, name, brand, size, weight, weight_unit,
-        url_handle, product_type, variant_title, custom_name, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'transferring')
+        url_handle, product_type, variant_title, custom_name, lookups, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'transferring')
     `).run(
       newItem.id, item.shopify_order_id, item.order_number, missingQuantity, item.sku,
       item.image_url, item.title, item.name, item.brand, item.size, item.weight, item.weight_unit,
-      item.url_handle, item.product_type, item.variant_title, item.custom_name
+      item.url_handle, item.product_type, item.variant_title, item.custom_name, item.lookups
     );
 
     res.json({ success: true, newItemId: newItem.id });

@@ -19,6 +19,28 @@ import {
 } from '@shopify/polaris';
 import { ImageIcon } from '@shopify/polaris-icons';
 
+// 🆕 Scanner helper functions（跟 Picker.js / OrderDetail.js 保持一致）
+function resolveKey(e) {
+  if (e.key && e.key !== 'Unidentified' && e.key.length === 1) return e.key;
+  if (e.code) {
+    if (e.code.startsWith('Digit')) return e.code.slice(5);
+    if (e.code.startsWith('Numpad') && e.code.length === 7) return e.code.slice(6);
+    if (e.code.startsWith('Key') && e.code.length === 4) {
+      const ch = e.code.slice(3);
+      return e.shiftKey ? ch : ch.toLowerCase();
+    }
+    const sym = { Minus:'-', Equal:'=', BracketLeft:'[', BracketRight:']',
+      Backslash:'\\', Semicolon:';', Quote:"'", Backquote:'`',
+      Comma:',', Period:'.', Slash:'/' };
+    if (sym[e.code]) return sym[e.code];
+  }
+  return null;
+}
+
+function cleanBarcode(raw) {
+  return raw.replace(/^[^0-9]+/, '');
+}
+
 const Transfer = () => {
   const navigate = useNavigate();
   const [items, setItems] = useState([]);
@@ -46,6 +68,7 @@ const Transfer = () => {
   // 🆕 需求2：扫码相关 state
   const [scanHighlight, setScanHighlight] = useState({}); // { [itemId]: 'scanned' | 'confirm_needed' }
   const [showNoMatch, setShowNoMatch] = useState(false);
+  const [scannerTransferEnabled, setScannerTransferEnabled] = useState(false);
   const itemsRef = useRef([]);
   const barcodeBufferRef = useRef('');
   const barcodeTimeoutRef = useRef(null);
@@ -81,6 +104,21 @@ const Transfer = () => {
   useEffect(() => {
     fetchItems();
   }, [fetchItems]);
+
+  // 🆕 读取 scanner 设置（跟 Picker.js / OrderDetail.js 同一套约定：scanner_enabled 总开关 + scanner_transfer 本页开关）
+  const fetchScannerSettings = useCallback(async () => {
+    try {
+      const response = await axios.get('/api/settings');
+      const s = response.data.settings || {};
+      setScannerTransferEnabled(s.scanner_enabled === 'true' && s.scanner_transfer === 'true');
+    } catch (error) {
+      console.error('Error fetching scanner settings:', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchScannerSettings();
+  }, [fetchScannerSettings]);
 
   // 🆕 items 同步到 ref，供扫码键盘监听回调读取最新值（避免闭包拿到旧数据）
   useEffect(() => {
@@ -435,30 +473,41 @@ const Transfer = () => {
 
   // 🆕 扫码枪键盘输入监听（连续快速按键 + Enter 结束）
   useEffect(() => {
+    if (!scannerTransferEnabled) return;
+
     const handleKeyDown = (e) => {
-      const activeTag = document.activeElement?.tagName;
-      if (['INPUT', 'TEXTAREA'].includes(activeTag)) return;
+      // 只在真正的文本输入框（text/number 等）里忽略扫码，checkbox/radio 保留焦点不该挡住扫码
+      const active = document.activeElement;
+      const isTextInput = active && (
+        active.tagName === 'TEXTAREA' ||
+        (active.tagName === 'INPUT' && !['checkbox', 'radio', 'button', 'submit'].includes(active.type))
+      );
+      if (isTextInput) return;
 
       if (e.key === 'Enter') {
-        const barcode = barcodeBufferRef.current.trim();
+        clearTimeout(barcodeTimeoutRef.current);
+        const barcode = cleanBarcode(barcodeBufferRef.current.trim());
         barcodeBufferRef.current = '';
         if (barcode.length > 0) handleScan(barcode);
         return;
       }
 
-      if (e.key.length === 1) {
-        barcodeBufferRef.current += e.key;
+      const ch = resolveKey(e);
+      if (ch) {
+        barcodeBufferRef.current += ch;
+        clearTimeout(barcodeTimeoutRef.current);
+        barcodeTimeoutRef.current = setTimeout(() => {
+          barcodeBufferRef.current = '';
+        }, 500);
       }
-
-      clearTimeout(barcodeTimeoutRef.current);
-      barcodeTimeoutRef.current = setTimeout(() => {
-        barcodeBufferRef.current = '';
-      }, 300);
     };
 
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleScan]);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      clearTimeout(barcodeTimeoutRef.current);
+    };
+  }, [scannerTransferEnabled, handleScan]);
 
   // ── Tag label click ─────────────────────────────────────────────────────────
   const handleTaskLabelClick = (titleDate) => {
