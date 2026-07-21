@@ -468,15 +468,9 @@ const Transfer = () => {
 
   // 🆕 扫码枪键盘输入监听（连续快速按键 + Enter 结束）
   useEffect(() => {
-    // 🔧 临时诊断：确认这个 effect 有没有跑、scannerTransferEnabled 到底是不是 true（排查完可以删除）
-    showToast(`[DEBUG] Scanner effect running, enabled=${scannerTransferEnabled}`);
-
     if (!scannerTransferEnabled) return;
 
     const handleKeyDown = (e) => {
-      // 🔧 临时诊断：确认按键是否真的到达这里（排查完可以删除）
-      showToast(`[DEBUG] Key received: ${e.key} (code: ${e.code})`);
-
       // 如果焦点在 input/textarea 内，忽略
       const activeTag = document.activeElement?.tagName;
       if (['INPUT', 'TEXTAREA'].includes(activeTag)) return;
