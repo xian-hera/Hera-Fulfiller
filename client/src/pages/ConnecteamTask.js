@@ -491,10 +491,21 @@ const ConnecteamTask = () => {
       await fetchLatestTask();
       setSelectedItemIds([]);
     } catch (err) {
-      const detail = err.response?.data?.details
-        ? JSON.stringify(err.response.data.details)
-        : (err.response?.data?.error || err.message);
-      showToast(`Failed to publish task: ${detail}`);
+      // 🆕 客户端请求超时 ≠ 后端失败：后端可能仍在处理、甚至已经成功了，只是响应没能及时送回来
+      // 不再直接判定为失败，而是重新拉取数据确认真实结果
+      const isTimeout = err.code === 'ECONNABORTED' || /timeout/i.test(err.message || '');
+      if (isTimeout) {
+        showToast('Request is taking longer than expected — checking status...');
+        setTimeout(async () => {
+          await fetchItems();
+          await fetchLatestTask();
+        }, 3000);
+      } else {
+        const detail = err.response?.data?.details
+          ? JSON.stringify(err.response.data.details)
+          : (err.response?.data?.error || err.message);
+        showToast(`Failed to publish task: ${detail}`);
+      }
     } finally {
       setIsPublishing(false);
     }

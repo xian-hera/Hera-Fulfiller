@@ -182,9 +182,10 @@ async function getClockedInUserIds(locations) {
   const clockedInIds = new Set();
   const today = new Date().toISOString().split('T')[0];
 
-  for (const loc of locations) {
+  // 🆕 并发查询所有 location 的打卡状态（Connecteam 确认 Enterprise 计划无并发限制）
+  await Promise.all(locations.map(async (loc) => {
     const clockId = TIME_CLOCK_IDS[loc];
-    if (!clockId) continue;
+    if (!clockId) return;
 
     try {
       const response = await axios.get(
@@ -201,7 +202,7 @@ async function getClockedInUserIds(locations) {
     } catch (err) {
       console.error(`Error checking time clock for location ${loc}:`, err.message);
     }
-  }
+  }));
 
   return [...clockedInIds];
 }
@@ -209,20 +210,20 @@ async function getClockedInUserIds(locations) {
 // ── Helper: send message via Custom Publisher ────────────────────────────────
 async function sendMessageToUsers(userIds, api) {
   const message = 'Hi there, a transfer task for your store has been published / updated, please refresh Connecteam and check it out, thank you very much!';
-  const results = [];
 
-  for (const userId of userIds) {
+  // 🆕 并发发送私信，不再逐个排队等待
+  const results = await Promise.all(userIds.map(async (userId) => {
     try {
       await api.post(`/chat/v1/conversations/privateMessage/${userId}`, {
         senderId: CUSTOM_PUBLISHER_ID,
         text: message,
       });
-      results.push({ userId, sent: true });
+      return { userId, sent: true };
     } catch (err) {
       console.error(`Failed to send message to user ${userId}:`, err.message);
-      results.push({ userId, sent: false });
+      return { userId, sent: false };
     }
-  }
+  }));
 
   return results;
 }

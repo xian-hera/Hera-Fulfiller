@@ -379,44 +379,13 @@ const Transfer = () => {
 
   // 🆕 需求2：扫码核心逻辑
   const handleScan = useCallback(async (barcode) => {
+    // 🆕 扫码时无条件打开全部 3 个 status filter（不管之前是什么状态）
+    setStatusFilter(['transferring', 'waiting', 'received']);
+    setTaskDateFilter(null);
+    setShopifyTransferFilter(null);
+
     const allItems = itemsRef.current;
     const matched = allItems.filter(item => matchesBarcode(item, barcode));
-
-    if (matched.length === 0) {
-      setShowNoMatch(true);
-      setTimeout(() => setShowNoMatch(false), 2000);
-      return;
-    }
-
-    // 优先级：有扫描进度的 waiting item（created_at 最早）> 没进度的 waiting item（created_at 最早）> transferring/received（任选一个）
-    const byCreatedAt = (a, b) => new Date(a.created_at) - new Date(b.created_at);
-    const inProgress = matched.filter(i => i.status === 'waiting' && (i.received_scanned_count || 0) > 0).sort(byCreatedAt);
-    const freshWaiting = matched.filter(i => i.status === 'waiting' && !((i.received_scanned_count || 0) > 0)).sort(byCreatedAt);
-    const others = matched.filter(i => i.status !== 'waiting');
-
-    const target = inProgress[0] || freshWaiting[0] || others[0];
-    if (!target) {
-      setShowNoMatch(true);
-      setTimeout(() => setShowNoMatch(false), 2000);
-      return;
-    }
-
-    // 🆕 命中的 item 如果被当前 filter 挡住，自动打开对应的 filter
-    if (target.status === 'transferring' && !statusFilter.includes('transferring')) {
-      setStatusFilter(prev => [...prev, 'transferring']);
-    }
-    if (target.status === 'waiting' && !statusFilter.includes('waiting')) {
-      setStatusFilter(prev => [...prev, 'waiting']);
-    }
-    if ((target.status === 'received' || target.status === 'found') && !statusFilter.includes('received')) {
-      setStatusFilter(prev => [...prev, 'received']);
-    }
-    if (taskDateFilter && target.connecteam_task_title_date !== taskDateFilter) {
-      setTaskDateFilter(null);
-    }
-    if (shopifyTransferFilter && target.shopify_transfer_number !== shopifyTransferFilter) {
-      setShopifyTransferFilter(null);
-    }
 
     const flashGreen = (itemId) => {
       setScanHighlight(prev => ({ ...prev, [itemId]: 'scanned' }));
@@ -429,15 +398,34 @@ const Transfer = () => {
       }, 5000);
     };
 
-    // Case A: transferring 或 received/found — 只跳转 + 变绿，不做状态变更
-    if (target.status === 'transferring' || target.status === 'received' || target.status === 'found') {
+    if (matched.length === 0) {
+      setShowNoMatch(true);
+      setTimeout(() => setShowNoMatch(false), 2000);
+      return;
+    }
+
+    // D：多个匹配，按 waiting > received > transferring 的优先级选一个
+    const target =
+      matched.find(i => i.status === 'waiting') ||
+      matched.find(i => i.status === 'received' || i.status === 'found') ||
+      matched.find(i => i.status === 'transferring');
+
+    if (!target) {
+      setShowNoMatch(true);
+      setTimeout(() => setShowNoMatch(false), 2000);
+      return;
+    }
+
+    // B/C：received/found 或 transferring — 只跳转 + 变绿，不做状态变更
+    if (target.status !== 'waiting') {
       flashGreen(target.id);
       scrollToItem(target.id);
       return;
     }
 
-    // Case B: waiting + quantity === 1 — 直接变成 received
+    // A：waiting
     if (target.quantity === 1) {
+      // quantity === 1，直接变成 received（跟手动点击一样）
       try {
         const response = await axios.patch(`/api/transfer/items/${target.id}`, { status: 'received' });
         await fetchItems();
@@ -453,7 +441,7 @@ const Transfer = () => {
       return;
     }
 
-    // Case C: waiting + quantity > 1 — 累加扫描进度
+    // quantity > 1，用持久化的 received_scanned_count 累加，到达 total 才变 received
     try {
       const response = await axios.patch(`/api/transfer/items/${target.id}/scan-progress`);
       await fetchItems();
@@ -468,7 +456,7 @@ const Transfer = () => {
     } catch {
       showToast('Error updating scan progress');
     }
-  }, [statusFilter, taskDateFilter, shopifyTransferFilter, fetchItems]);
+  }, [fetchItems]);
 
   // 🆕 扫码枪键盘输入监听（连续快速按键 + Enter 结束）
   useEffect(() => {

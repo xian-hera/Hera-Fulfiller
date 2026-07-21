@@ -77,10 +77,8 @@ const Picker = () => {
 
   // 🆕 Scanner state
   const [scannerPickerEnabled, setScannerPickerEnabled] = useState(false);
-  // 🆕 扫码高亮: { [itemId]: true }
+  // 🆕 扫码高亮: { [itemId]: 'green' | 'pink' }
   const [scanHighlight, setScanHighlight] = useState({});
-  // 🆕 临时置顶的 item ids（扫码命中但当前 filter 不可见）
-  const [tempVisibleItems, setTempVisibleItems] = useState([]);
   // 🆕 no match 弹窗
   const [showNoMatch, setShowNoMatch] = useState(false);
   // 🆕 scanner buffer refs
@@ -90,8 +88,6 @@ const Picker = () => {
   const itemsRef = useRef([]);
   // 🆕 statusFilter ref（供 scanner 回调读取最新值）
   const statusFilterRef = useRef(['picking', 'missing', 'picked']);
-  // 🆕 tempVisible timers: { [itemId]: timerId }
-  const tempVisibleTimersRef = useRef({});
 
   // 🆕 同步 items 到 ref
   useEffect(() => {
@@ -375,9 +371,10 @@ const Picker = () => {
     }
   };
 
-  const updateItemStatus = async (itemId, newStatus) => {
+  // 🔒 FIX: 用 itemsRef.current（永远最新）读取 version，避免被闭包捕获旧数据（扫码/其他 useCallback 场景下曾经因此错误触发 409 冲突）
+  const updateItemStatus = useCallback(async (itemId, newStatus) => {
     // Find current item to get its version
-    const currentItem = items.find(i => i.id === itemId);
+    const currentItem = itemsRef.current.find(i => i.id === itemId);
     const currentVersion = currentItem?.version ?? 0;
 
     try {
@@ -436,7 +433,7 @@ const Picker = () => {
         console.error('Error updating status:', error);
       }
     }
-  };
+  }, []);
 
   const handleGreenClick = (item) => {
     if (item.picker_status === 'picked') {
@@ -544,93 +541,56 @@ const Picker = () => {
     }
   };
 
-  // 🆕 清除某个 item 的临时可见状态
-  const clearTempVisible = useCallback((itemId) => {
-    setTempVisibleItems(prev => prev.filter(id => id !== itemId));
-    setScanHighlight(prev => {
-      const next = { ...prev };
-      delete next[itemId];
-      return next;
-    });
-    if (tempVisibleTimersRef.current[itemId]) {
-      clearTimeout(tempVisibleTimersRef.current[itemId]);
-      delete tempVisibleTimersRef.current[itemId];
-    }
-  }, []);
-
-  // 🆕 处理 Picker 扫码逻辑
+  // 🆕 Picker 扫码：只在当前 filter 可见的 item 里找，优先级 picking > missing > picked
   const handleScan = useCallback(async (barcode) => {
     const allItems = itemsRef.current;
     const currentFilter = statusFilterRef.current;
 
-    // 只匹配 picking 和 missing 状态的 item（SKU 或 lookups 任一匹配）
-    const matchedItems = allItems.filter(
-      item => matchesBarcode(item, barcode) && (item.picker_status === 'picking' || item.picker_status === 'missing')
+    // 只匹配当前可见状态的 item（不可见的不去管）
+    const visibleMatches = allItems.filter(
+      item => matchesBarcode(item, barcode) && currentFilter.includes(item.picker_status)
     );
 
-    if (matchedItems.length === 0) {
-      setShowNoMatch(true);
-      return;
-    }
-
-    // 高亮所有匹配的 item（5秒后恢复）
-    matchedItems.forEach(item => {
-      setScanHighlight(prev => ({ ...prev, [item.id]: true }));
+    const flashHighlight = (itemId, color) => {
+      setScanHighlight(prev => ({ ...prev, [itemId]: color }));
       setTimeout(() => {
         setScanHighlight(prev => {
           const next = { ...prev };
-          delete next[item.id];
+          delete next[itemId];
           return next;
         });
       }, 5000);
-    });
+    };
 
-    // 找出当前不可见的匹配 item（因为 filter 原因）
-    const hiddenMatches = matchedItems.filter(item => !currentFilter.includes(item.picker_status));
-
-    // 将隐藏的 item 加入临时可见列表，10秒后自动移除
-    hiddenMatches.forEach(item => {
-      // 如果已经有定时器，先清除
-      if (tempVisibleTimersRef.current[item.id]) {
-        clearTimeout(tempVisibleTimersRef.current[item.id]);
-      }
-      setTempVisibleItems(prev => {
-        if (prev.includes(item.id)) return prev;
-        return [item.id, ...prev];
-      });
-      tempVisibleTimersRef.current[item.id] = setTimeout(() => {
-        clearTempVisible(item.id);
-      }, 10000);
-    });
-
-    // 找 quantity 为 1 且 picking 的 item，自动 check（status → picked）
-    const autoCheckCandidates = matchedItems.filter(
-      item => item.picker_status === 'picking' && item.quantity === 1
-    );
-
-    if (autoCheckCandidates.length > 0) {
-      // 自动 check 第一个
-      const target = autoCheckCandidates[0];
-      await updateItemStatus(target.id, 'picked');
-      // 如果 picked 状态当前不可见，10秒后移除临时可见
-      if (!currentFilter.includes('picked')) {
-        if (tempVisibleTimersRef.current[target.id]) {
-          clearTimeout(tempVisibleTimersRef.current[target.id]);
-        }
-        setTempVisibleItems(prev => {
-          if (prev.includes(target.id)) return prev;
-          return [target.id, ...prev];
-        });
-        tempVisibleTimersRef.current[target.id] = setTimeout(() => {
-          clearTempVisible(target.id);
-        }, 10000);
-      }
-      scrollToItem(target.id);
-    } else {
-      // 没有自动 check，滚动到第一个匹配 item
-      scrollToItem(matchedItems[0].id);
+    if (visibleMatches.length === 0) {
+      // E：没有匹配到，提示当前可见的状态，提醒用户可能要去检查别的 status
+      const labelMap = { picking: 'Picking', missing: 'Missing', picked: 'Picked' };
+      const visibleLabel = currentFilter.map(s => labelMap[s] || s).join(', ');
+      setShowNoMatch(`No match found in ${visibleLabel}`);
+      setTimeout(() => setShowNoMatch(false), 2500);
+      return;
     }
-  }, [clearTempVisible]);
+
+    // D：多个匹配，按 picking > missing > picked 优先级选一个
+    const target =
+      visibleMatches.find(i => i.picker_status === 'picking') ||
+      visibleMatches.find(i => i.picker_status === 'missing') ||
+      visibleMatches.find(i => i.picker_status === 'picked');
+
+    if (target.picker_status === 'picking') {
+      // A：变成 picked，标绿
+      await updateItemStatus(target.id, 'picked');
+      flashHighlight(target.id, 'green');
+    } else if (target.picker_status === 'missing') {
+      // C：标粉，不改状态
+      flashHighlight(target.id, 'pink');
+    } else {
+      // B：picked，标绿，不改状态
+      flashHighlight(target.id, 'green');
+    }
+
+    scrollToItem(target.id);
+  }, [updateItemStatus]);
 
   // 🆕 scanner 键盘监听
   useEffect(() => {
@@ -666,29 +626,6 @@ const Picker = () => {
     };
   }, [scannerPickerEnabled, handleScan]);
 
-  // 🆕 当 items 状态改变时，检查 tempVisibleItems 中的 item 是否已符合当前 filter
-  useEffect(() => {
-    if (tempVisibleItems.length === 0) return;
-    tempVisibleItems.forEach(itemId => {
-      const item = items.find(i => i.id === itemId);
-      if (item && statusFilter.includes(item.picker_status)) {
-        // 已经符合当前 filter，移除临时可见
-        clearTempVisible(itemId);
-      }
-    });
-  }, [items, statusFilter, tempVisibleItems, clearTempVisible]);
-
-  // 🆕 构建最终显示列表：tempVisibleItems 置顶 + 普通 filteredItems
-  const displayItems = React.useMemo(() => {
-    if (tempVisibleItems.length === 0) return filteredItems;
-    const allCurrentItems = itemsRef.current;
-    const tempItems = tempVisibleItems
-      .map(id => allCurrentItems.find(i => i.id === id))
-      .filter(Boolean);
-    const regularItems = filteredItems.filter(item => !tempVisibleItems.includes(item.id));
-    return [...tempItems, ...regularItems];
-  }, [filteredItems, tempVisibleItems]);
-
   const renderItem = (item) => {
     const { id, quantity, image_url, order_name, display_type, sku, brand, title, size, picker_status, variant_title, lookups } = item;
 
@@ -709,8 +646,8 @@ const Picker = () => {
     );
 
     // 🆕 扫码高亮背景
-    const isHighlighted = !!scanHighlight[item.id];
-    const itemBgColor = isHighlighted ? '#e4fef3' : 'transparent';
+    const highlight = scanHighlight[item.id];
+    const itemBgColor = highlight === 'green' ? '#e4fef3' : highlight === 'pink' ? '#fee4ef' : 'transparent';
 
     return (
       <div
@@ -1155,10 +1092,10 @@ const Picker = () => {
           <Layout.Section>
             <Card>
               <div>
-                {displayItems.length === 0 ? (
+                {filteredItems.length === 0 ? (
                   <Banner>No items to pick</Banner>
                 ) : (
-                  displayItems.map(item => (
+                  filteredItems.map(item => (
                     <div key={item.id} style={{ borderBottom: '1px solid #e1e3e5' }}>
                       {renderItem(item)}
                     </div>
@@ -1323,7 +1260,7 @@ const Picker = () => {
             color: '#d72c0d',
             boxShadow: '0 4px 24px rgba(0,0,0,0.18)'
           }}>
-            No match found
+            {typeof showNoMatch === 'string' ? showNoMatch : 'No match found'}
           </div>
         </div>
       )}
