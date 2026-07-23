@@ -10,7 +10,6 @@ import {
   Text,
   Badge,
   Button,
-  ChoiceList,
   BlockStack,
   Banner
 } from '@shopify/polaris';
@@ -496,40 +495,58 @@ const Packer = () => {
           <Card>
             <div style={{ padding: '16px' }}>
               <BlockStack gap="4">
-                <ChoiceList
-                  title="Show orders"
-                  choices={[
-                    { label: `Packing (${statusCounts.packing})`, value: 'packing' },
-                    { label: `Waiting (${statusCounts.waiting})`, value: 'waiting' },
-                    { label: `Holding (${statusCounts.holding})`, value: 'holding' },
-                    { label: `Ready (${statusCounts.ready})`, value: 'ready' }
-                  ]}
-                  selected={statusFilter}
-                  onChange={setStatusFilter}
-                  allowMultiple
-                />
-                
-                {/* Edited 单独的复选框 */}
-                <div style={{ 
-                  paddingTop: '12px', 
-                  borderTop: '1px solid #e1e3e5',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px'
+                <div>
+                  <Text variant="bodyMd" fontWeight="semibold" as="p">Show orders</Text>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '8px' }}>
+                    {[
+                      { label: `Packing (${statusCounts.packing})`, value: 'packing' },
+                      { label: `Waiting (${statusCounts.waiting})`, value: 'waiting' },
+                      { label: `Holding (${statusCounts.holding})`, value: 'holding' },
+                      { label: `Ready (${statusCounts.ready})`, value: 'ready' }
+                    ].map(choice => {
+                      const isSelected = statusFilter.includes(choice.value);
+                      return (
+                        <button
+                          key={choice.value}
+                          onClick={() => {
+                            setStatusFilter(prev =>
+                              prev.includes(choice.value)
+                                ? prev.filter(v => v !== choice.value)
+                                : [...prev, choice.value]
+                            );
+                          }}
+                          style={{
+                            padding: '6px 14px', borderRadius: '20px', border: '1px solid #c9cccf',
+                            background: isSelected ? '#008060' : 'white',
+                            color: isSelected ? 'white' : '#202223',
+                            cursor: 'pointer', fontSize: '13px',
+                            fontWeight: isSelected ? '600' : '400',
+                          }}
+                        >
+                          {choice.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Edited 单独的筛选，改成按钮胶囊（原来是 checkbox） */}
+                <div style={{
+                  paddingTop: '12px',
+                  borderTop: '1px solid #e1e3e5'
                 }}>
-                  <input
-                    type="checkbox"
-                    id="edited-filter"
-                    checked={showEditedOnly}
-                    onChange={(e) => setShowEditedOnly(e.target.checked)}
-                    style={{ cursor: 'pointer' }}
-                  />
-                  <label 
-                    htmlFor="edited-filter" 
-                    style={{ cursor: 'pointer', fontSize: '14px' }}
+                  <button
+                    onClick={() => setShowEditedOnly(prev => !prev)}
+                    style={{
+                      padding: '6px 14px', borderRadius: '20px', border: '1px solid #c9cccf',
+                      background: showEditedOnly ? '#008060' : 'white',
+                      color: showEditedOnly ? 'white' : '#202223',
+                      cursor: 'pointer', fontSize: '13px',
+                      fontWeight: showEditedOnly ? '600' : '400',
+                    }}
                   >
                     Show only Edited orders ({statusCounts.edited})
-                  </label>
+                  </button>
                 </div>
               </BlockStack>
             </div>
