@@ -49,11 +49,6 @@ const Packer = () => {
     return saved ? JSON.parse(saved) : ['packing', 'waiting', 'holding', 'ready'];
   });
   
-  const [showEditedOnly, setShowEditedOnly] = useState(() => {
-    const saved = localStorage.getItem('packerShowEditedOnly');
-    return saved === 'true';
-  });
-  
   const [isSorted, setIsSorted] = useState(false);
   const [showRefundModal, setShowRefundModal] = useState(false);
   const [packLabelEnabled, setPackLabelEnabled] = useState(false);
@@ -93,18 +88,9 @@ const Packer = () => {
     localStorage.setItem('packerStatusFilter', JSON.stringify(statusFilter));
   }, [statusFilter]);
 
-  useEffect(() => {
-    localStorage.setItem('packerShowEditedOnly', showEditedOnly.toString());
-  }, [showEditedOnly]);
-
   const applyFilters = useCallback(() => {
     let filtered = orders.filter(order => statusFilter.includes(order.orderStatus));
-    
-    // 如果启用了 "只显示 Edited"，进一步过滤
-    if (showEditedOnly) {
-      filtered = filtered.filter(order => order.is_edited);
-    }
-    
+
     // 如果启用了排序，按订单号排序
     if (isSorted) {
       filtered = filtered.sort((a, b) => {
@@ -115,7 +101,7 @@ const Packer = () => {
     }
     
     setFilteredOrders(filtered);
-  }, [orders, statusFilter, showEditedOnly, isSorted]);
+  }, [orders, statusFilter, isSorted]);
 
   useEffect(() => {
     fetchOrders();
@@ -124,7 +110,7 @@ const Packer = () => {
 
   useEffect(() => {
     applyFilters();
-  }, [orders, statusFilter, showEditedOnly, isSorted, applyFilters]);
+  }, [orders, statusFilter, isSorted, applyFilters]);
 
   // 🆕 当 orders 或 statusFilter 改变时，检查 tempVisibleOrders 中的 order 是否已符合当前 filter
   useEffect(() => {
@@ -501,8 +487,7 @@ const Packer = () => {
                     {[
                       { label: `Packing (${statusCounts.packing})`, value: 'packing' },
                       { label: `Waiting (${statusCounts.waiting})`, value: 'waiting' },
-                      { label: `Holding (${statusCounts.holding})`, value: 'holding' },
-                      { label: `Ready (${statusCounts.ready})`, value: 'ready' }
+                      { label: `Holding (${statusCounts.holding})`, value: 'holding' }
                     ].map(choice => {
                       const isSelected = statusFilter.includes(choice.value);
                       return (
@@ -528,25 +513,6 @@ const Packer = () => {
                       );
                     })}
                   </div>
-                </div>
-
-                {/* Edited 单独的筛选，改成按钮胶囊（原来是 checkbox） */}
-                <div style={{
-                  paddingTop: '12px',
-                  borderTop: '1px solid #e1e3e5'
-                }}>
-                  <button
-                    onClick={() => setShowEditedOnly(prev => !prev)}
-                    style={{
-                      padding: '6px 14px', borderRadius: '20px', border: '1px solid #c9cccf',
-                      background: showEditedOnly ? '#008060' : 'white',
-                      color: showEditedOnly ? 'white' : '#202223',
-                      cursor: 'pointer', fontSize: '13px',
-                      fontWeight: showEditedOnly ? '600' : '400',
-                    }}
-                  >
-                    Show only Edited orders ({statusCounts.edited})
-                  </button>
                 </div>
               </BlockStack>
             </div>
