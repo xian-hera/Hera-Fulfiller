@@ -440,7 +440,9 @@ const PhoneNumbersModal = ({ open, onClose, settings }) => {
   const locState = clockState[activeTab] || {};
   const clockedInIds = locState.clockedInIds || null;
 
-  const isClockedIn = (id) => !!clockedInIds && (clockedInIds.includes(id) || clockedInIds.includes(Number(id)));
+  // Compare as strings — Connecteam's API and our stored member ids don't reliably agree
+  // on number vs string, so a strict .includes() can silently miss every match.
+  const isClockedIn = (id) => !!clockedInIds && clockedInIds.some(cid => String(cid) === String(id));
 
   // Clocked-in members float to the top once we've checked; otherwise keep the saved order.
   const sortedMemberIds = clockedInIds
