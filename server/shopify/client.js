@@ -335,7 +335,7 @@ class ShopifyClient {
 
       const variables = {
         fulfillment: {
-          notifyCustomer: false,
+          notifyCustomer: true,
           trackingInfo: { company: trackingCompany, number: trackingNumber, url: trackingUrl },
           lineItemsByFulfillmentOrder: [{ fulfillmentOrderId }]
         }
