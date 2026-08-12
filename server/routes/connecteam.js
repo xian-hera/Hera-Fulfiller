@@ -196,10 +196,16 @@ async function getClockedInUserIds(locations) {
           params: { startDate: today, endDate: today },
         }
       );
-      const activities = response.data?.data?.activities || [];
-      activities
-        .filter(a => a.clockIn && !a.clockOut)
-        .forEach(a => clockedInIds.add(a.userId));
+      // 🆕 实际返回结构是按 user 分组的 timeActivitiesByUsers，每个 user 下面是 shifts 数组；
+      // 一个 shift 只有 start、没有 end，代表这个人现在还在打卡中（还没下班）
+      const usersActivities = response.data?.data?.timeActivitiesByUsers || [];
+      usersActivities.forEach(userActivity => {
+        const shifts = userActivity.shifts || [];
+        const stillClockedIn = shifts.some(shift => shift.start && !shift.end);
+        if (stillClockedIn) {
+          clockedInIds.add(userActivity.userId);
+        }
+      });
     } catch (err) {
       console.error(`Error checking time clock for location ${loc}:`, err.message);
     }
@@ -304,15 +310,14 @@ router.get('/users', async (req, res) => {
   }
 });
 
-// GET /api/connecteam/clocked-in?location=01
-// 🆕 Phone Numbers modal — "Check Clock In" button for a single location
+// GET /api/connecteam/clocked-in            → checks every configured location's time clock
+// GET /api/connecteam/clocked-in?location=01 → checks a single location only
+// 🆕 Phone Numbers modal — "Check Clock In" button
 router.get('/clocked-in', async (req, res) => {
   try {
     const { location } = req.query;
-    if (!location) {
-      return res.status(400).json({ error: 'location is required' });
-    }
-    const clockedInUserIds = await getClockedInUserIds([location]);
+    const locations = location ? [location] : Object.keys(TIME_CLOCK_IDS);
+    const clockedInUserIds = await getClockedInUserIds(locations);
     res.json({ clockedInUserIds });
   } catch (err) {
     console.error('Error checking clocked-in status:', err.message);

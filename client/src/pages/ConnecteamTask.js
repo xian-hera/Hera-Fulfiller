@@ -406,8 +406,9 @@ const AssigneeList = ({ userIds, onRemove }) => {
 const PhoneNumbersModal = ({ open, onClose, settings }) => {
   const [activeTab, setActiveTab] = useState('01');
   const [users, setUsers] = useState({});
-  // Per-location cache: { checking, checkedAt, clockedInIds, error }
-  const [clockState, setClockState] = useState({});
+  // 🆕 One check covers every location at once — not per-tab. Switching tabs
+  // just re-reads this same result, no re-checking needed.
+  const [clockCheck, setClockCheck] = useState({ checking: false, checkedAt: null, clockedInIds: null, error: false });
 
   useEffect(() => {
     if (!open) return;
@@ -419,26 +420,19 @@ const PhoneNumbersModal = ({ open, onClose, settings }) => {
   }, [open]);
 
   const handleCheckClockIn = async () => {
-    const loc = activeTab;
-    setClockState(prev => ({ ...prev, [loc]: { ...(prev[loc] || {}), checking: true, error: false } }));
+    setClockCheck(prev => ({ ...prev, checking: true, error: false }));
     try {
-      const res = await axios.get('/api/connecteam/clocked-in', { params: { location: loc } });
+      // No `location` param — the backend checks every configured location's time clock at once.
+      const res = await axios.get('/api/connecteam/clocked-in');
       const checkedAt = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-      setClockState(prev => ({
-        ...prev,
-        [loc]: { checking: false, checkedAt, clockedInIds: res.data.clockedInUserIds || [], error: false }
-      }));
+      setClockCheck({ checking: false, checkedAt, clockedInIds: res.data.clockedInUserIds || [], error: false });
     } catch {
-      setClockState(prev => ({
-        ...prev,
-        [loc]: { ...(prev[loc] || {}), checking: false, error: true }
-      }));
+      setClockCheck(prev => ({ ...prev, checking: false, error: true }));
     }
   };
 
   const memberIds = (settings.location_members || {})[activeTab] || [];
-  const locState = clockState[activeTab] || {};
-  const clockedInIds = locState.clockedInIds || null;
+  const clockedInIds = clockCheck.clockedInIds;
 
   // Compare as strings — Connecteam's API and our stored member ids don't reliably agree
   // on number vs string, so a strict .includes() can silently miss every match.
@@ -477,16 +471,16 @@ const PhoneNumbersModal = ({ open, onClose, settings }) => {
             ))}
           </div>
 
-          {/* Check Clock In — bottom-right of the tab row */}
+          {/* Check Clock In — checks every location at once, bottom-right of the tab row */}
           <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '8px', marginTop: '-6px' }}>
-            {locState.checking && <Text variant="bodySm" tone="subdued">Checking...</Text>}
-            {!locState.checking && locState.checkedAt && (
-              <Text variant="bodySm" tone="subdued">Checked at {locState.checkedAt}</Text>
+            {clockCheck.checking && <Text variant="bodySm" tone="subdued">Checking...</Text>}
+            {!clockCheck.checking && clockCheck.checkedAt && (
+              <Text variant="bodySm" tone="subdued">Checked at {clockCheck.checkedAt}</Text>
             )}
-            {!locState.checking && locState.error && (
+            {!clockCheck.checking && clockCheck.error && (
               <Text variant="bodySm" tone="critical">Check failed, try again</Text>
             )}
-            <Button onClick={handleCheckClockIn} loading={locState.checking} disabled={locState.checking} size="slim">
+            <Button onClick={handleCheckClockIn} loading={clockCheck.checking} disabled={clockCheck.checking} size="slim">
               Check Clock In
             </Button>
           </div>
