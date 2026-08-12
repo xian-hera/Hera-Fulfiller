@@ -73,6 +73,7 @@ const TIME_CLOCK_IDS = {
   '07': 6905892,  // MTL02 & 07_M
   '08': 6905896,  // MTL08_M
   '09': 6905904,  // MTL09_M
+  '10': 6905921,  // MTL10_M (confirmed via API testing)
   '11': 6905956,  // MTL11_M
 };
 
@@ -303,6 +304,22 @@ router.get('/users', async (req, res) => {
   }
 });
 
+// GET /api/connecteam/clocked-in?location=01
+// 🆕 Phone Numbers modal — "Check Clock In" button for a single location
+router.get('/clocked-in', async (req, res) => {
+  try {
+    const { location } = req.query;
+    if (!location) {
+      return res.status(400).json({ error: 'location is required' });
+    }
+    const clockedInUserIds = await getClockedInUserIds([location]);
+    res.json({ clockedInUserIds });
+  } catch (err) {
+    console.error('Error checking clocked-in status:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /api/connecteam/sync-users
 router.post('/sync-users', async (req, res) => {
   try {
@@ -322,13 +339,14 @@ router.post('/sync-users', async (req, res) => {
     for (const user of allUsers) {
       const userId = user.id || user.userId;
       await db.prepare(`
-        INSERT INTO connecteam_users 
-          (user_id, first_name, last_name, email, user_type, is_archived, synced_at)
-        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        INSERT INTO connecteam_users
+          (user_id, first_name, last_name, email, phone_number, user_type, is_archived, synced_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT (user_id) DO UPDATE SET
           first_name = EXCLUDED.first_name,
           last_name = EXCLUDED.last_name,
           email = EXCLUDED.email,
+          phone_number = EXCLUDED.phone_number,
           user_type = EXCLUDED.user_type,
           is_archived = EXCLUDED.is_archived,
           synced_at = CURRENT_TIMESTAMP
@@ -337,6 +355,7 @@ router.post('/sync-users', async (req, res) => {
         user.firstName || '',
         user.lastName || '',
         user.email || '',
+        user.phoneNumber || '',
         user.userType || '',
         user.isArchived ? 1 : 0
       );

@@ -253,6 +253,9 @@ const initDatabase = async () => {
       // 🆕 Lookup barcode (variant metafield custom.lookups)
       addColumnIfNotExists('line_items', 'lookups', 'TEXT');
 
+      // 🆕 Phone Numbers modal — capture mobile number from Connecteam
+      addColumnIfNotExists('connecteam_users', 'phone_number', 'TEXT');
+
       // ── Default data ────────────────────────────────────────────────────────
 
       // Box types
@@ -291,7 +294,7 @@ const initDatabase = async () => {
       insertCtSetting.run('default_description', 'Please double check the SKU and quantity, Thank you.');
       insertCtSetting.run('location_members', JSON.stringify({
         '01': [], '02': [], '03': [], '04': [], '05': [],
-        '06': [], '07': [], '08': [], '09': [], '11': []
+        '06': [], '07': [], '08': [], '09': [], '10': [], '11': []
       }));
 
       // 🆕 Default Shopify transfer settings

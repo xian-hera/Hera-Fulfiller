@@ -19,7 +19,7 @@ import { ImageIcon } from '@shopify/polaris-icons';
 
 // ── Drag-and-drop location order selector ────────────────────────────────────
 
-const LOCATIONS = ['01','02','03','04','05','06','07','08','09','11'];
+const LOCATIONS = ['01','02','03','04','05','06','07','08','09','10','11'];
 
 const LocationOrderSelector = ({ selectedLocations, onLocationsChange }) => {
   const [dragIndex, setDragIndex] = useState(null);
@@ -306,6 +306,23 @@ const SettingsModal = ({ open, onClose, settings, onSave }) => {
               ))}
             </div>
 
+            {/* 🆕 Store phone number for the active location */}
+            <div style={{ marginTop: '10px' }}>
+              <TextField
+                label={`MTL${activeLocationTab} phone number`}
+                placeholder="e.g. +15145551234"
+                value={(localSettings.location_phone_numbers || {})[activeLocationTab] || ''}
+                onChange={(v) => {
+                  const phones = localSettings.location_phone_numbers || {};
+                  setLocalSettings({
+                    ...localSettings,
+                    location_phone_numbers: { ...phones, [activeLocationTab]: v }
+                  });
+                }}
+                autoComplete="off"
+              />
+            </div>
+
             <div style={{ marginTop: '10px' }}>
               <AssigneeList
                 userIds={(localSettings.location_members || {})[activeLocationTab] || []}
@@ -384,6 +401,135 @@ const AssigneeList = ({ userIds, onRemove }) => {
   );
 };
 
+// ── Phone Numbers modal ────────────────────────────────────────────────────────
+
+const PhoneNumbersModal = ({ open, onClose, settings }) => {
+  const [activeTab, setActiveTab] = useState('01');
+  const [users, setUsers] = useState({});
+  // Per-location cache: { checking, checkedAt, clockedInIds, error }
+  const [clockState, setClockState] = useState({});
+
+  useEffect(() => {
+    if (!open) return;
+    axios.get('/api/connecteam/users').then(res => {
+      const map = {};
+      res.data.forEach(u => { map[u.user_id] = u; });
+      setUsers(map);
+    }).catch(() => {});
+  }, [open]);
+
+  const handleCheckClockIn = async () => {
+    const loc = activeTab;
+    setClockState(prev => ({ ...prev, [loc]: { ...(prev[loc] || {}), checking: true, error: false } }));
+    try {
+      const res = await axios.get('/api/connecteam/clocked-in', { params: { location: loc } });
+      const checkedAt = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      setClockState(prev => ({
+        ...prev,
+        [loc]: { checking: false, checkedAt, clockedInIds: res.data.clockedInUserIds || [], error: false }
+      }));
+    } catch {
+      setClockState(prev => ({
+        ...prev,
+        [loc]: { ...(prev[loc] || {}), checking: false, error: true }
+      }));
+    }
+  };
+
+  const memberIds = (settings.location_members || {})[activeTab] || [];
+  const locState = clockState[activeTab] || {};
+  const clockedInIds = locState.clockedInIds || null;
+
+  const isClockedIn = (id) => !!clockedInIds && (clockedInIds.includes(id) || clockedInIds.includes(Number(id)));
+
+  // Clocked-in members float to the top once we've checked; otherwise keep the saved order.
+  const sortedMemberIds = clockedInIds
+    ? [...memberIds].sort((a, b) => Number(isClockedIn(b)) - Number(isClockedIn(a)))
+    : memberIds;
+
+  const locationPhone = (settings.location_phone_numbers || {})[activeTab] || '';
+
+  return (
+    <Modal open={open} onClose={onClose} title="Phone Numbers" large
+      secondaryActions={[{ content: 'Close', onAction: onClose }]}
+    >
+      <Modal.Section>
+        <BlockStack gap="4">
+
+          {/* Location tabs */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+            {LOCATIONS.map(loc => (
+              <button
+                key={loc}
+                onClick={() => setActiveTab(loc)}
+                style={{
+                  padding: '4px 12px', borderRadius: '6px', fontSize: '13px', cursor: 'pointer',
+                  border: activeTab === loc ? '2px solid #0080FF' : '2px solid #c9cccf',
+                  backgroundColor: activeTab === loc ? '#e8f0ff' : 'white',
+                  color: activeTab === loc ? '#0080FF' : '#202223',
+                  fontWeight: activeTab === loc ? '600' : '400',
+                }}
+              >
+                MTL{loc}
+              </button>
+            ))}
+          </div>
+
+          {/* Check Clock In — bottom-right of the tab row */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '8px', marginTop: '-6px' }}>
+            {locState.checking && <Text variant="bodySm" tone="subdued">Checking...</Text>}
+            {!locState.checking && locState.checkedAt && (
+              <Text variant="bodySm" tone="subdued">Checked at {locState.checkedAt}</Text>
+            )}
+            {!locState.checking && locState.error && (
+              <Text variant="bodySm" tone="critical">Check failed, try again</Text>
+            )}
+            <Button onClick={handleCheckClockIn} loading={locState.checking} disabled={locState.checking} size="slim">
+              Check Clock In
+            </Button>
+          </div>
+
+          {/* Store phone number */}
+          <div style={{ padding: '10px 12px', backgroundColor: '#f6f6f7', borderRadius: '6px' }}>
+            <Text variant="bodySm" tone="subdued">MTL{activeTab} phone number</Text>
+            <Text variant="bodyMd" fontWeight="semibold">{locationPhone || 'Not set'}</Text>
+          </div>
+
+          {/* Management list */}
+          <div>
+            <Text variant="bodyMd" fontWeight="semibold">Management</Text>
+            {memberIds.length === 0 ? (
+              <Text variant="bodySm" tone="subdued">No members assigned to this location yet.</Text>
+            ) : (
+              <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                {sortedMemberIds.map(id => {
+                  const u = users[id];
+                  const name = u ? `${u.first_name} ${u.last_name}`.trim() : `ID: ${id}`;
+                  const phone = u?.phone_number || '—';
+                  const clockedIn = isClockedIn(id);
+                  const dimmed = !!clockedInIds && !clockedIn;
+                  return (
+                    <div key={id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 4px' }}>
+                      <span style={{ width: '14px', color: '#108043', fontSize: '14px', flexShrink: 0 }}>
+                        {clockedIn ? '✓' : ''}
+                      </span>
+                      <span style={{ minWidth: '160px', color: dimmed ? '#8c9196' : '#202223', fontWeight: clockedIn ? 600 : 400 }}>
+                        {name}
+                      </span>
+                      <span style={{ color: dimmed ? '#8c9196' : '#202223' }}>{phone}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+        </BlockStack>
+      </Modal.Section>
+    </Modal>
+  );
+};
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 const ConnecteamTask = () => {
@@ -396,8 +542,10 @@ const ConnecteamTask = () => {
     default_assignee_ids: [],
     default_description: 'Please double check the SKU and quantity, Thank you.',
     location_members: {},
+    location_phone_numbers: {},
   });
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [phoneNumbersOpen, setPhoneNumbersOpen] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
   const [toastActive, setToastActive] = useState(false);
@@ -678,6 +826,7 @@ const ConnecteamTask = () => {
                     </Button>
 
                     <Button onClick={() => setSettingsOpen(true)}>Settings</Button>
+                    <Button onClick={() => setPhoneNumbersOpen(true)}>Phone Numbers</Button>
                   </div>
 
                   {/* Select all / deselect all */}
@@ -722,6 +871,12 @@ const ConnecteamTask = () => {
           onClose={() => setSettingsOpen(false)}
           settings={settings}
           onSave={handleSaveSettings}
+        />
+
+        <PhoneNumbersModal
+          open={phoneNumbersOpen}
+          onClose={() => setPhoneNumbersOpen(false)}
+          settings={settings}
         />
 
         {toastMarkup}
