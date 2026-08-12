@@ -62,18 +62,25 @@ const LABEL_IDS = {
   'MTL11': '65de2f1d8e76b7a064e738ba',
 };
 
-// MTL time clock IDs for clocked-in check (confirmed via API testing)
+// MTL time clock IDs for clocked-in check.
+// 🆕 Each location actually has TWO time clocks in Connecteam: an "_E" clock,
+// which is where people actually punch in/out day to day, and an "_M" clock,
+// which turned out to have no real shift data for at least one confirmed
+// case (Sophie Seo @ MTL09 — showed clocked in on Connecteam, but had zero
+// shifts on the "_M" clock and a real open shift on the "_E" clock). We now
+// check both and merge the results, so nothing gets missed either way.
 const TIME_CLOCK_IDS = {
-  '01': 6905828,  // MTL01_M
-  '02': 6905850,  // MTL02_M
-  '03': 6905862,  // MTL03_M
-  '04': 6905877,  // MTL04_M
-  '05': 6905888,  // MTL05_M  (05 & 06 share managers)
-  '06': 6905890,  // MTL05 & 06_M
-  '07': 6905892,  // MTL02 & 07_M
-  '08': 6905896,  // MTL08_M
-  '09': 6905904,  // MTL09_M
-  '11': 6905956,  // MTL11_M
+  '01': [6599793, 6905828],   // MTL01_E, MTL01_M
+  '02': [6611916, 6905850],   // MTL02_E, MTL02_M
+  '03': [6611929, 6905862],   // MTL03_E, MTL03_M
+  '04': [6596580, 6905877],   // MTL04_E, MTL04_M
+  '05': [6611938, 6905888],   // MTL05_E, MTL05_M
+  '06': [6611951, 6905890],   // MTL06_E, MTL05 & 06_M
+  '07': [6611957, 6905892],   // MTL07_E, MTL02 & 07_M
+  '08': [6611959, 6905896],   // MTL08_E, MTL08_M
+  '09': [6611962, 6905904],   // MTL09_E, MTL09_M
+  '10': [6611972, 6905921],   // MTL10_E, MTL10_M
+  '11': [6612017, 6905956],   // MTL11_E, MTL11_M
 };
 
 let accessToken = null;
@@ -182,11 +189,17 @@ async function getClockedInUserIds(locations) {
   const clockedInIds = new Set();
   const today = new Date().toISOString().split('T')[0];
 
-  // 🆕 并发查询所有 location 的打卡状态（Connecteam 确认 Enterprise 计划无并发限制）
-  await Promise.all(locations.map(async (loc) => {
-    const clockId = TIME_CLOCK_IDS[loc];
-    if (!clockId) return;
+  // 🆕 每个 location 现在对应两个 clock id（_E 和 _M），全部展开成一份去重后的
+  // clock id 列表，并发逐个查询，结果合并到同一个 clockedInIds 里
+  const clockIdsToCheck = new Set();
+  locations.forEach(loc => {
+    const ids = TIME_CLOCK_IDS[loc];
+    if (!ids) return;
+    (Array.isArray(ids) ? ids : [ids]).forEach(id => clockIdsToCheck.add(id));
+  });
 
+  // 🆕 并发查询所有时钟的打卡状态（Connecteam 确认 Enterprise 计划无并发限制）
+  await Promise.all([...clockIdsToCheck].map(async (clockId) => {
     try {
       const response = await axios.get(
         `${CONNECTEAM_BASE_URL}/time-clock/v1/time-clocks/${clockId}/time-activities`,
@@ -195,12 +208,18 @@ async function getClockedInUserIds(locations) {
           params: { startDate: today, endDate: today },
         }
       );
-      const activities = response.data?.data?.activities || [];
-      activities
-        .filter(a => a.clockIn && !a.clockOut)
-        .forEach(a => clockedInIds.add(a.userId));
+      // 🆕 实际返回结构是按 user 分组的 timeActivitiesByUsers，每个 user 下面是 shifts 数组；
+      // 一个 shift 只有 start、没有 end，代表这个人现在还在打卡中（还没下班）
+      const usersActivities = response.data?.data?.timeActivitiesByUsers || [];
+      usersActivities.forEach(userActivity => {
+        const shifts = userActivity.shifts || [];
+        const stillClockedIn = shifts.some(shift => shift.start && !shift.end);
+        if (stillClockedIn) {
+          clockedInIds.add(userActivity.userId);
+        }
+      });
     } catch (err) {
-      console.error(`Error checking time clock for location ${loc}:`, err.message);
+      console.error(`Error checking time clock ${clockId}:`, err.message);
     }
   }));
 
@@ -303,6 +322,21 @@ router.get('/users', async (req, res) => {
   }
 });
 
+// GET /api/connecteam/clocked-in            → checks every configured location's time clock
+// GET /api/connecteam/clocked-in?location=01 → checks a single location only
+// 🆕 Phone Numbers modal — "Check Clock In" button
+router.get('/clocked-in', async (req, res) => {
+  try {
+    const { location } = req.query;
+    const locations = location ? [location] : Object.keys(TIME_CLOCK_IDS);
+    const clockedInUserIds = await getClockedInUserIds(locations);
+    res.json({ clockedInUserIds });
+  } catch (err) {
+    console.error('Error checking clocked-in status:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /api/connecteam/sync-users
 router.post('/sync-users', async (req, res) => {
   try {
@@ -322,13 +356,14 @@ router.post('/sync-users', async (req, res) => {
     for (const user of allUsers) {
       const userId = user.id || user.userId;
       await db.prepare(`
-        INSERT INTO connecteam_users 
-          (user_id, first_name, last_name, email, user_type, is_archived, synced_at)
-        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        INSERT INTO connecteam_users
+          (user_id, first_name, last_name, email, phone_number, user_type, is_archived, synced_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT (user_id) DO UPDATE SET
           first_name = EXCLUDED.first_name,
           last_name = EXCLUDED.last_name,
           email = EXCLUDED.email,
+          phone_number = EXCLUDED.phone_number,
           user_type = EXCLUDED.user_type,
           is_archived = EXCLUDED.is_archived,
           synced_at = CURRENT_TIMESTAMP
@@ -337,6 +372,7 @@ router.post('/sync-users', async (req, res) => {
         user.firstName || '',
         user.lastName || '',
         user.email || '',
+        user.phoneNumber || '',
         user.userType || '',
         user.isArchived ? 1 : 0
       );

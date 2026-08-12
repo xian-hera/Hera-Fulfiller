@@ -458,6 +458,8 @@ async function initPostgres() {
     [`ALTER TABLE manifest_shipments ADD COLUMN IF NOT EXISTS refund_status TEXT`, 'refund_status to manifest_shipments'],
     // 🆕 Lookup barcode (variant metafield custom.lookups)
     [`ALTER TABLE line_items ADD COLUMN IF NOT EXISTS lookups TEXT`, 'lookups to line_items'],
+    // 🆕 Phone Numbers modal — capture mobile number from Connecteam
+    [`ALTER TABLE connecteam_users ADD COLUMN IF NOT EXISTS phone_number TEXT`, 'phone_number to connecteam_users'],
   ];
 
   for (const [sql, desc] of migrations) {
@@ -526,7 +528,7 @@ async function initPostgres() {
     ['default_description', 'Please double check the SKU and quantity, Thank you.'],
     ['location_members', JSON.stringify({
       '01': [], '02': [], '03': [], '04': [], '05': [],
-      '06': [], '07': [], '08': [], '09': [], '11': []
+      '06': [], '07': [], '08': [], '09': [], '10': [], '11': []
     })],
   ];
   for (const [key, value] of connecteamDefaults) {
