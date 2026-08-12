@@ -392,6 +392,136 @@ class ShopifyClient {
       throw error;
     }
   }
+
+  // ============================================================
+  // 🆕 Return Management — 退款/库存相关方法
+  // ============================================================
+
+  // 统一的退款方法，走 GraphQL refundCreate（2026-04 起 idempotency key 是必填的）
+  // allocation: 'store_credit' | 'original_payment'
+  // refundLineItems: [{ lineItemId, quantity }]（lineItemId 不带 gid:// 前缀会自动拼）
+  // notify: 对应 admin 端 6.8.4 那个 "Send Shopify refund notification" checkbox
+  async createRefund({
+    orderId,
+    refundLineItems,
+    allocation,
+    storeCreditAmount,
+    currencyCode = 'CAD',
+    note = '',
+    notify = true,
+  }) {
+    try {
+      const client = await this.getClient();
+      const crypto = require('crypto');
+
+      const orderGid = orderId.toString().startsWith('gid://')
+        ? orderId
+        : `gid://shopify/Order/${orderId}`;
+
+      const mappedLineItems = refundLineItems.map(item => ({
+        lineItemId: item.lineItemId.toString().startsWith('gid://')
+          ? item.lineItemId
+          : `gid://shopify/LineItem/${item.lineItemId}`,
+        quantity: item.quantity,
+        restockType: 'NO_RESTOCK' // 我们自己的 POS/admin 流程另外处理 restock，不让 Shopify 自动调库存
+      }));
+
+      const input = {
+        orderId: orderGid,
+        note,
+        notify,
+        refundLineItems: mappedLineItems,
+      };
+
+      if (allocation === 'store_credit') {
+        input.transactions = [];
+        input.refundMethods = [{
+          storeCreditRefund: {
+            amount: { amount: storeCreditAmount.toFixed(2), currencyCode }
+          }
+        }];
+      } else {
+        // 原支付方式：不传 refundMethods，transactions 传空数组让 Shopify 自动判断
+        input.transactions = [];
+      }
+
+      const idempotencyKey = crypto.randomUUID();
+
+      const mutation = `
+        mutation RefundCreate($input: RefundInput!) {
+          refundCreate(input: $input) @idempotent(key: "${idempotencyKey}") {
+            refund {
+              id
+              totalRefundedSet { presentmentMoney { amount currencyCode } }
+            }
+            userErrors { field message }
+          }
+        }
+      `;
+
+      const response = await client.post('/graphql.json', { query: mutation, variables: { input } });
+
+      const result = response.data?.data?.refundCreate;
+      const userErrors = result?.userErrors || [];
+      if (userErrors.length > 0) {
+        const errorMsg = userErrors.map(e => `${e.field}: ${e.message}`).join('; ');
+        throw new Error(`Shopify refund error: ${errorMsg}`);
+      }
+
+      return result?.refund;
+    } catch (error) {
+      console.error('Error creating refund:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  // Restock：把退货数量补回指定 location 的库存（GraphQL inventoryAdjustQuantities）
+  async adjustInventoryQuantity(inventoryItemId, locationId, quantityDelta) {
+    try {
+      const client = await this.getClient();
+      const mutation = `
+        mutation inventoryAdjustQuantities($input: InventoryAdjustQuantitiesInput!) {
+          inventoryAdjustQuantities(input: $input) {
+            inventoryAdjustmentGroup { createdAt }
+            userErrors { field message }
+          }
+        }
+      `;
+
+      const inventoryItemGid = inventoryItemId.toString().startsWith('gid://')
+        ? inventoryItemId
+        : `gid://shopify/InventoryItem/${inventoryItemId}`;
+      const locationGid = locationId.toString().startsWith('gid://')
+        ? locationId
+        : `gid://shopify/Location/${locationId}`;
+
+      const variables = {
+        input: {
+          reason: 'restock',
+          name: 'available',
+          changes: [{
+            inventoryItemId: inventoryItemGid,
+            locationId: locationGid,
+            delta: quantityDelta
+          }]
+        }
+      };
+
+      const response = await client.post('/graphql.json', { query: mutation, variables });
+
+      const result = response.data?.data?.inventoryAdjustQuantities;
+      const userErrors = result?.userErrors || [];
+      if (userErrors.length > 0) {
+        const errorMsg = userErrors.map(e => `${e.field}: ${e.message}`).join('; ');
+        throw new Error(`Shopify inventory adjustment error: ${errorMsg}`);
+      }
+
+      return result?.inventoryAdjustmentGroup;
+    } catch (error) {
+      console.error('Error adjusting inventory:', error.response?.data || error.message);
+      throw error;
+    }
+  }
 }
 
 module.exports = new ShopifyClient();

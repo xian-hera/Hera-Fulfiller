@@ -15,6 +15,9 @@ const webhookRoutes = require('./routes/webhooks');
 const connecteamRoutes = require('./routes/connecteam');
 const shopifyTransferRoutes = require('./routes/shopify-transfer');
 const verifyWebhook = require('./middleware/webhookVerification');
+const returnsRoutes = require('./routes/returns');
+const returnSettingsRoutes = require('./routes/return-settings');
+const returnRulesRoutes = require('./routes/return-rules');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -98,6 +101,9 @@ app.use('/api/webhooks', verifyWebhook, webhookRoutes);
 app.use('/api/connecteam', connecteamRoutes);
 app.use('/api/shopify-transfer', shopifyTransferRoutes);
 app.use('/api/gift', giftRoutes);
+app.use('/api/returns', returnsRoutes);
+app.use('/api/return-settings', returnSettingsRoutes);
+app.use('/api/return-rules', returnRulesRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

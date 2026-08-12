@@ -233,6 +233,197 @@ async function initPostgres() {
     )
   `);
 
+  // ============================================================
+  // 🆕 Return Management — 新增表
+  // ============================================================
+
+  // Returns 主表（订单相关信息做软引用，不建外键，避免被 cleanup.js 的 60 天清理逻辑连带影响）
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS returns (
+      id SERIAL PRIMARY KEY,
+      shopify_order_id TEXT NOT NULL,
+      order_name TEXT NOT NULL,
+      customer_id TEXT,
+      customer_email TEXT,
+      customer_first_name TEXT,
+      customer_last_name TEXT,
+      status TEXT DEFAULT 'awaiting_approval',
+      auto_approved BOOLEAN DEFAULT FALSE,
+      return_method TEXT,
+      return_location_id TEXT,
+      return_location_name TEXT,
+      tracking_number TEXT,
+      label_url TEXT,
+      label_fee NUMERIC,
+      internal_return_note TEXT,
+      order_fulfilled_date TIMESTAMP,
+      order_subtotal NUMERIC,
+      customer_paid_shipping NUMERIC,
+      actual_shipping_charge NUMERIC,
+      submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      approved_at TIMESTAMP,
+      archived_at TIMESTAMP,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Return items（对应每个 line item 的退货明细）
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS return_items (
+      id SERIAL PRIMARY KEY,
+      return_id INTEGER NOT NULL REFERENCES returns(id) ON DELETE CASCADE,
+      shopify_line_item_id TEXT,
+      product_id TEXT,
+      variant_id TEXT,
+      product_title TEXT,
+      variant_title TEXT,
+      image_url TEXT,
+      price NUMERIC,
+      requested_quantity INTEGER NOT NULL DEFAULT 1,
+      approved_quantity INTEGER DEFAULT 0,
+      received_quantity INTEGER DEFAULT 0,
+      refunded_quantity INTEGER DEFAULT 0,
+      replacement_provided_quantity INTEGER DEFAULT 0,
+      approve_status TEXT DEFAULT 'pending',
+      reason_id INTEGER,
+      reason_name_snapshot TEXT,
+      customer_note TEXT,
+      photos TEXT,
+      refund_option TEXT,
+      pos_rejection_reason TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Return item 的 Question/Answer 作答记录
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS return_item_question_answers (
+      id SERIAL PRIMARY KEY,
+      return_item_id INTEGER NOT NULL REFERENCES return_items(id) ON DELETE CASCADE,
+      question_id INTEGER,
+      question_body_snapshot TEXT,
+      answer TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Return 状态流转记录（History timeline）
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS return_status_history (
+      id SERIAL PRIMARY KEY,
+      return_id INTEGER NOT NULL REFERENCES returns(id) ON DELETE CASCADE,
+      event_type TEXT NOT NULL,
+      note TEXT,
+      staff_member_id TEXT,
+      staff_user_id TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Return reasons（Settings > Reasons）
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS return_reasons (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      name_fr TEXT,
+      note_requirement TEXT DEFAULT 'disabled',
+      photo_requirement TEXT DEFAULT 'disabled',
+      sort_order INTEGER DEFAULT 0,
+      is_archived BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Return questions（Settings > Questions，支持 follow-up 自引用）
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS return_questions (
+      id SERIAL PRIMARY KEY,
+      parent_question_id INTEGER REFERENCES return_questions(id) ON DELETE CASCADE,
+      body TEXT NOT NULL,
+      body_fr TEXT,
+      trigger_mode TEXT DEFAULT 'always',
+      condition_logic TEXT DEFAULT 'AND',
+      conditions TEXT,
+      answer_type TEXT DEFAULT 'text',
+      options TEXT,
+      sort_order INTEGER DEFAULT 0,
+      is_active BOOLEAN DEFAULT TRUE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Return rules（Rules 页面）
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS return_rules (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      is_active BOOLEAN DEFAULT TRUE,
+      condition_groups TEXT,
+      group_logic TEXT DEFAULT 'AND',
+      actions TEXT,
+      priority INTEGER DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Return 功能专属的 key-value 设置（Policy / Photo upload / Klaviyo / Canada Post 等）
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS return_settings (
+      id SERIAL PRIMARY KEY,
+      key TEXT UNIQUE NOT NULL,
+      value TEXT,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Portal > Location mapping
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS return_portal_locations (
+      id SERIAL PRIMARY KEY,
+      shopify_location_id TEXT NOT NULL,
+      store_name TEXT,
+      store_address TEXT,
+      store_city TEXT,
+      opening_hours TEXT,
+      sort_order INTEGER DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Portal > Messages before submitting
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS return_portal_messages (
+      id SERIAL PRIMARY KEY,
+      title TEXT,
+      title_fr TEXT,
+      body TEXT,
+      body_fr TEXT,
+      condition_type TEXT DEFAULT 'always',
+      sort_order INTEGER DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Portal > Wording and translation
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS return_wording (
+      id SERIAL PRIMARY KEY,
+      wording_key TEXT UNIQUE NOT NULL,
+      default_text TEXT NOT NULL,
+      modified_text TEXT,
+      french_text TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
   // ── Migrations ─────────────────────────────────────────────────────────────
   console.log('Running database migrations...');
 
@@ -368,6 +559,13 @@ async function initPostgres() {
   await client.query('CREATE INDEX IF NOT EXISTS idx_transfer_items_connecteam_tasked ON transfer_items(connecteam_tasked)');
   await client.query('CREATE INDEX IF NOT EXISTS idx_transfer_items_shopify_transferred ON transfer_items(shopify_transferred)');
   await client.query('CREATE INDEX IF NOT EXISTS idx_transfer_items_from ON transfer_items(transfer_from)');
+
+  // 🆕 Return Management indexes
+  await client.query('CREATE INDEX IF NOT EXISTS idx_returns_shopify_order_id ON returns(shopify_order_id)');
+  await client.query('CREATE INDEX IF NOT EXISTS idx_returns_status ON returns(status)');
+  await client.query('CREATE INDEX IF NOT EXISTS idx_return_items_return_id ON return_items(return_id)');
+  await client.query('CREATE INDEX IF NOT EXISTS idx_return_status_history_return_id ON return_status_history(return_id)');
+  await client.query('CREATE INDEX IF NOT EXISTS idx_return_item_question_answers_item_id ON return_item_question_answers(return_item_id)');
 
   console.log('PostgreSQL database initialized successfully');
 

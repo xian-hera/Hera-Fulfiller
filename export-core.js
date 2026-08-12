@@ -6,6 +6,7 @@ const files = [
   'package.json',
   'server/index.js',
   'server/database/adapter.js',
+  'server/database/init.js',
   'server/database/init-postgres.js',
   'server/shopify/client.js',
   'server/websocket.js',
@@ -14,8 +15,32 @@ const files = [
   'server/routes/transfer.js',
   'server/routes/shopify-transfer.js',
   'server/routes/settings.js',
+  'server/routes/connecteam.js',
+  'server/routes/gift.js',
+  'server/routes/webhooks.js',
+  'server/middleware/webhookVerification.js',
   'server/webhooks/orderHandler.js',
+  'server/webhooks/giftHandler.js',
   'server/canadapost/client.js',
+  'server/utils/logger.js',
+  'server/utils/cleanup.js',
+
+  'client/package.json',
+  'client/src/App.js',
+  'client/src/api/axios.js',
+  'client/src/pages/Dashboard.js',
+  'client/src/pages/Transfer.js',
+  'client/src/pages/OrderDetail.js',
+  'client/src/pages/Settings.js',
+  'client/src/components/RefundLabelModal.js',
+  'client/src/components/CompleteOrderModal.js',
+
+  'extensions/gift/src/Checkout.jsx',
+  'extensions/gift/shopify.extension.toml',
+  'extensions/gift/locales/en.default.json',
+  'extensions/gift/locales/fr.json',
+
+  'shopify.app.toml',
 ];
 
 let out = `# Hera Fulfiller — 核心代码导出\n`;

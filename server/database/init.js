@@ -211,6 +211,183 @@ const initDatabase = async () => {
         )
       `);
 
+      // 🆕 Return Management — 新增表
+      db.db.exec(`
+        CREATE TABLE IF NOT EXISTS returns (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          shopify_order_id TEXT NOT NULL,
+          order_name TEXT NOT NULL,
+          customer_id TEXT,
+          customer_email TEXT,
+          customer_first_name TEXT,
+          customer_last_name TEXT,
+          status TEXT DEFAULT 'awaiting_approval',
+          auto_approved INTEGER DEFAULT 0,
+          return_method TEXT,
+          return_location_id TEXT,
+          return_location_name TEXT,
+          tracking_number TEXT,
+          label_url TEXT,
+          label_fee REAL,
+          internal_return_note TEXT,
+          order_fulfilled_date TEXT,
+          order_subtotal REAL,
+          customer_paid_shipping REAL,
+          actual_shipping_charge REAL,
+          submitted_at TEXT DEFAULT CURRENT_TIMESTAMP,
+          approved_at TEXT,
+          archived_at TEXT,
+          created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      db.db.exec(`
+        CREATE TABLE IF NOT EXISTS return_items (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          return_id INTEGER NOT NULL REFERENCES returns(id) ON DELETE CASCADE,
+          shopify_line_item_id TEXT,
+          product_id TEXT,
+          variant_id TEXT,
+          product_title TEXT,
+          variant_title TEXT,
+          image_url TEXT,
+          price REAL,
+          requested_quantity INTEGER NOT NULL DEFAULT 1,
+          approved_quantity INTEGER DEFAULT 0,
+          received_quantity INTEGER DEFAULT 0,
+          refunded_quantity INTEGER DEFAULT 0,
+          replacement_provided_quantity INTEGER DEFAULT 0,
+          approve_status TEXT DEFAULT 'pending',
+          reason_id INTEGER,
+          reason_text TEXT,
+          customer_note TEXT,
+          photos TEXT,
+          refund_option TEXT,
+          pos_rejection_reason TEXT,
+          created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      db.db.exec(`
+        CREATE TABLE IF NOT EXISTS return_item_question_answers (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          return_item_id INTEGER NOT NULL REFERENCES return_items(id) ON DELETE CASCADE,
+          question_id INTEGER,
+          question_body_snapshot TEXT,
+          answer TEXT,
+          created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      db.db.exec(`
+        CREATE TABLE IF NOT EXISTS return_status_history (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          return_id INTEGER NOT NULL REFERENCES returns(id) ON DELETE CASCADE,
+          event_type TEXT NOT NULL,
+          note TEXT,
+          staff_member_id TEXT,
+          staff_user_id TEXT,
+          created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      db.db.exec(`
+        CREATE TABLE IF NOT EXISTS return_reasons (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          name_fr TEXT,
+          note_requirement TEXT DEFAULT 'disabled',
+          photo_requirement TEXT DEFAULT 'disabled',
+          sort_order INTEGER DEFAULT 0,
+          is_archived INTEGER DEFAULT 0,
+          created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      db.db.exec(`
+        CREATE TABLE IF NOT EXISTS return_questions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          parent_question_id INTEGER REFERENCES return_questions(id) ON DELETE CASCADE,
+          body TEXT NOT NULL,
+          body_fr TEXT,
+          trigger_mode TEXT DEFAULT 'always',
+          condition_logic TEXT DEFAULT 'AND',
+          conditions TEXT,
+          answer_type TEXT DEFAULT 'text',
+          options TEXT,
+          sort_order INTEGER DEFAULT 0,
+          is_active INTEGER DEFAULT 1,
+          created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      db.db.exec(`
+        CREATE TABLE IF NOT EXISTS return_rules (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          is_active INTEGER DEFAULT 1,
+          condition_groups TEXT,
+          group_logic TEXT DEFAULT 'AND',
+          actions TEXT,
+          priority INTEGER DEFAULT 0,
+          created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      db.db.exec(`
+        CREATE TABLE IF NOT EXISTS return_settings (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          key TEXT UNIQUE NOT NULL,
+          value TEXT,
+          updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      db.db.exec(`
+        CREATE TABLE IF NOT EXISTS return_portal_locations (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          shopify_location_id TEXT NOT NULL,
+          store_name TEXT,
+          store_address TEXT,
+          store_city TEXT,
+          opening_hours TEXT,
+          sort_order INTEGER DEFAULT 0,
+          created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      db.db.exec(`
+        CREATE TABLE IF NOT EXISTS return_portal_messages (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          title TEXT,
+          title_fr TEXT,
+          body TEXT,
+          body_fr TEXT,
+          condition_type TEXT DEFAULT 'always',
+          sort_order INTEGER DEFAULT 0,
+          created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      db.db.exec(`
+        CREATE TABLE IF NOT EXISTS return_wording (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          wording_key TEXT UNIQUE NOT NULL,
+          default_text TEXT NOT NULL,
+          modified_text TEXT,
+          french_text TEXT,
+          created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
       // ── Migrations ──────────────────────────────────────────────────────────
       const addColumnIfNotExists = (table, column, definition) => {
         try {
