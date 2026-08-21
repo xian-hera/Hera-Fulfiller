@@ -8,8 +8,14 @@ function calculateOrderStatus(order, lineItems, transferItems) {
     return 'holding';
   }
 
+  // 🆕 如果有 lineitem 还停留在 picking（Picker 里还没处理过），订单不能算 packing，归为 waiting
+  const hasUnpickedItems = lineItems.some(item => item.picker_status === 'picking');
+  if (hasUnpickedItems) {
+    return 'waiting';
+  }
+
   // 如果有 transferring 或 waiting 状态的 transfer item，订单状态为 waiting
-  const waitingOrTransferringItems = transferItems.filter(ti => 
+  const waitingOrTransferringItems = transferItems.filter(ti =>
     ti.status === 'waiting' || ti.status === 'transferring'
   );
   if (waitingOrTransferringItems.length > 0) {

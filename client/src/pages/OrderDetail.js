@@ -816,6 +816,15 @@ const OrderDetail = () => {
     const hasWarning = item.has_weight_warning === 1;
     const isOutOfStock = item.outOfStock === true;
     const isUpdating = item._updating;
+
+    // 🆕 数量下方的提示文字：picking 中 → "Picking"；missing 但还没分配 transfer 计划 → "Transfer not assigned"；已分配计划 → 原有的 Transfer 详情
+    const transferLine = item.picker_status === 'picking'
+      ? 'Picking'
+      : item.transferStatus === 'transferring'
+        ? 'Transfer not assigned'
+        : item.transferInfo
+          ? `Transfer: ${item.transferInfo.quantity} from ${item.transferInfo.transferFrom}, Est: ${formatDate(item.transferInfo.estimateMonth, item.transferInfo.estimateDay)}`
+          : null;
     
     // 确认状态和样式
     const confirmState = quantityConfirmStates[item.id] || {};
@@ -978,9 +987,9 @@ const OrderDetail = () => {
               </span>
             </div>
             
-            {item.transferInfo && !isOutOfStock && (
+            {transferLine && !isOutOfStock && (
               <Text variant="bodySm" fontWeight="bold" tone="info">
-                Transfer: {item.transferInfo.quantity} from {item.transferInfo.transferFrom}, Est: {formatDate(item.transferInfo.estimateMonth, item.transferInfo.estimateDay)}
+                {transferLine}
               </Text>
             )}
           </div>
@@ -1058,15 +1067,15 @@ const OrderDetail = () => {
               {formatSKU(item.sku)}
             </div>
 
-            {item.transferInfo && !isOutOfStock && (
-              <div style={{ 
+            {transferLine && !isOutOfStock && (
+              <div style={{
                 fontSize: '12px',
                 color: '#0080FF',
                 fontWeight: '600',
                 marginBottom: '8px',
                 wordBreak: 'break-word'
               }}>
-                Transfer: {item.transferInfo.quantity} from {item.transferInfo.transferFrom}, Est: {formatDate(item.transferInfo.estimateMonth, item.transferInfo.estimateDay)}
+                {transferLine}
               </div>
             )}
 

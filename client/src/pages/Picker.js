@@ -1013,7 +1013,7 @@ const Picker = () => {
 
           .picker-btn-group-mobile {
             display: flex;
-            flex-direction: column;
+            flex-direction: row;
             gap: 8px;
           }
 
