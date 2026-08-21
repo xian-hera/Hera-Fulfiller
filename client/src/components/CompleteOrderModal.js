@@ -91,7 +91,7 @@ const CompleteOrderModal = ({
       {/* Complete Order on top (large, easy to tap) | Cancel at the bottom (small) */}
       <div className="complete-order-actions">
         <div className="complete-order-btn-complete">
-          <Button variant="primary" onClick={handleComplete} loading={isSubmitting} disabled={isSubmitting} fullWidth>
+          <Button variant="primary" onClick={handleComplete} loading={isSubmitting} disabled={isSubmitting || !boxType} fullWidth>
             {isSubmitting ? 'Processing...' : 'Complete Order'}
           </Button>
         </div>
