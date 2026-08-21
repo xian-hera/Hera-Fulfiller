@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const db = require('../database/init');
 const shopifyClient = require('../shopify/client');
+const canadaPostClient = require('../canadapost/client');
+const klaviyoClient = require('../klaviyo/client');
 const { evaluateRules, ruleAppliesToItem } = require('../services/returnRuleEngine');
 
 // ── 工具函数 ──────────────────────────────────────────────────────────────
@@ -26,6 +28,58 @@ async function recalculateReturnStatus(returnId) {
   if (allRejected) return 'rejected';
   if (hasApproved) return 'awaiting_return';
   return 'awaiting_approval';
+}
+
+// 🆕 approve 成功后，如果 return_method 是 shipping，创建退货 label
+// 失败不阻断 approve 流程本身，只记录 history，让人工介入补救
+async function createReturnLabelIfNeeded(returnId, returnRecord, staffMemberId, staffUserId) {
+  if (returnRecord.return_method !== 'shipping') return;
+
+  try {
+    const order = await shopifyClient.getOrder(returnRecord.shopify_order_id);
+    const shippingAddress = order.shipping_address || {};
+
+    const returnerInfo = {
+      name: shippingAddress.name || `${returnRecord.customer_first_name || ''} ${returnRecord.customer_last_name || ''}`.trim(),
+      address1: shippingAddress.address1,
+      address2: shippingAddress.address2,
+      city: shippingAddress.city,
+      province: shippingAddress.province_code || shippingAddress.province,
+      postalCode: shippingAddress.zip
+    };
+
+    const returnAddressSetting = await db.prepare(
+      `SELECT value FROM return_settings WHERE key = 'return_address'`
+    ).get();
+
+    if (!returnAddressSetting) {
+      console.error(`Return address not configured in Settings; skipping label creation for return ${returnId}`);
+      await logHistory(returnId, 'label_creation_skipped', 'Return address not configured in Settings', staffMemberId, staffUserId);
+      return;
+    }
+
+    const receiverInfo = JSON.parse(returnAddressSetting.value);
+
+    const label = await canadaPostClient.createAuthorizedReturn({
+      returnerInfo,
+      receiverInfo,
+      customerRef1: returnRecord.order_name
+    });
+
+    await db.prepare(`
+      UPDATE returns
+      SET tracking_number = ?, label_qr_code = ?, label_url = ?, label_public_url_expiry = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(label.trackingPin, label.qrCodeBase64, label.publicUrl, label.publicUrlExpiryDate, returnId);
+
+    await logHistory(returnId, 'label_created', `Tracking: ${label.trackingPin}`, staffMemberId, staffUserId);
+
+    // 注：Return Approved 的 Klaviyo event 由调用方（approve 接口 / POST / 自动通过分支）负责触发，
+    // 这样才能拿到完整的 approved/rejected item 列表，这个函数本身只管创建 label
+  } catch (error) {
+    console.error(`Failed to create return label for return ${returnId}:`, error.message);
+    await logHistory(returnId, 'label_creation_failed', error.message, staffMemberId, staffUserId);
+  }
 }
 
 // ── 顾客提交退货申请 ─────────────────────────────────────────────────────
@@ -234,8 +288,41 @@ router.post('/', async (req, res) => {
       await logHistory(returnId, 'auto_approved', 'Approved automatically by rule');
     }
 
-    // TODO: 触发 Klaviyo event（Return request submitted，如果 isRejected/isAutoApproved 还要再触发对应的 approved/rejected event）
-    // Klaviyo 模块还没写，下一步补
+    // 🆕 自动通过的情况下，也要走一遍 label 创建逻辑（跟人工 approve 是同一套）
+    if (isAutoApproved) {
+      const returnRecord = await db.prepare('SELECT * FROM returns WHERE id = ?').get(returnId);
+      await createReturnLabelIfNeeded(returnId, returnRecord, null, null);
+    }
+
+    // 🆕 触发 Klaviyo events
+    await klaviyoClient.trackReturnRequestSubmitted(body.customerEmail, {
+      orderName: body.orderName,
+      orderId: body.shopifyOrderId,
+      items: body.items
+    });
+
+    if (isRejected) {
+      await klaviyoClient.trackReturnRequestRejected(body.customerEmail, {
+        orderName: body.orderName,
+        orderId: body.shopifyOrderId,
+        rejectedItems: body.items.map(i => ({ productTitle: i.productTitle, variantTitle: i.variantTitle, quantity: i.requestedQuantity })),
+        rejectionMessage: effectiveActions.find(a => a.type === 'reject_return')?.customerMessage || null
+      });
+    } else if (isAutoApproved) {
+      const returnRecordAfterLabel = await db.prepare('SELECT * FROM returns WHERE id = ?').get(returnId);
+      await klaviyoClient.trackReturnRequestApproved(body.customerEmail, {
+        orderName: body.orderName,
+        orderId: body.shopifyOrderId,
+        customerFirstName: body.customerFirstName,
+        returnMethod: body.returnMethod,
+        locationName: body.returnLocationName,
+        trackingNumber: returnRecordAfterLabel.tracking_number,
+        qrCodeImage: returnRecordAfterLabel.label_qr_code,
+        labelPublicUrl: returnRecordAfterLabel.label_url,
+        approvedItems: body.items.map(i => ({ productTitle: i.productTitle, variantTitle: i.variantTitle, quantity: i.requestedQuantity })),
+        rejectedItems: []
+      });
+    }
 
     res.json({
       success: true,
@@ -437,6 +524,30 @@ router.patch('/:id/approve', async (req, res) => {
       staffUserId
     );
 
+    // 🆕 状态推进到 awaiting_return 且是 shipping 方式，创建退货 label
+    if (newStatus === 'awaiting_return') {
+      const updatedReturnRecord = await db.prepare('SELECT * FROM returns WHERE id = ?').get(id);
+      await createReturnLabelIfNeeded(id, updatedReturnRecord, staffMemberId, staffUserId);
+
+      const finalReturnRecord = await db.prepare('SELECT * FROM returns WHERE id = ?').get(id);
+      const allItemsAfterApprove = await db.prepare('SELECT * FROM return_items WHERE return_id = ?').all(id);
+      const approvedItemsList = allItemsAfterApprove.filter(i => i.approve_status === 'approved');
+      const rejectedItemsList = allItemsAfterApprove.filter(i => i.approve_status === 'rejected');
+
+      await klaviyoClient.trackReturnRequestApproved(finalReturnRecord.customer_email, {
+        orderName: finalReturnRecord.order_name,
+        orderId: finalReturnRecord.shopify_order_id,
+        customerFirstName: finalReturnRecord.customer_first_name,
+        returnMethod: finalReturnRecord.return_method,
+        locationName: finalReturnRecord.return_location_name,
+        trackingNumber: finalReturnRecord.tracking_number,
+        qrCodeImage: finalReturnRecord.label_qr_code,
+        labelPublicUrl: finalReturnRecord.label_url,
+        approvedItems: approvedItemsList.map(i => ({ productTitle: i.product_title, variantTitle: i.variant_title, quantity: i.approved_quantity })),
+        rejectedItems: rejectedItemsList.map(i => ({ productTitle: i.product_title, variantTitle: i.variant_title, quantity: i.requested_quantity }))
+      });
+    }
+
     res.json({ success: true, status: newStatus });
   } catch (error) {
     console.error('Error approving return:', error);
@@ -469,6 +580,13 @@ router.patch('/:id/reject-all', async (req, res) => {
     `).run(id);
 
     await logHistory(id, 'rejected', null, staffMemberId, staffUserId);
+
+    const allRejectedItems = await db.prepare('SELECT * FROM return_items WHERE return_id = ?').all(id);
+    await klaviyoClient.trackReturnRequestRejected(returnRecord.customer_email, {
+      orderName: returnRecord.order_name,
+      orderId: returnRecord.shopify_order_id,
+      rejectedItems: allRejectedItems.map(i => ({ productTitle: i.product_title, variantTitle: i.variant_title, quantity: i.requested_quantity }))
+    });
 
     res.json({ success: true, status: 'rejected' });
   } catch (error) {
@@ -525,10 +643,50 @@ router.patch('/:id/mark-received', async (req, res) => {
 
     await logHistory(id, 'received', null, staffMemberId, staffUserId);
 
+    const receivedItemsList = await db.prepare(
+      'SELECT * FROM return_items WHERE return_id = ? AND received_quantity > 0'
+    ).all(id);
+    await klaviyoClient.trackReturnReceived(returnRecord.customer_email, {
+      orderName: returnRecord.order_name,
+      orderId: returnRecord.shopify_order_id,
+      receivedItems: receivedItemsList.map(i => ({ productTitle: i.product_title, variantTitle: i.variant_title, quantity: i.received_quantity }))
+    });
+
     res.json({ success: true, status: 'received' });
   } catch (error) {
     console.error('Error marking return as received:', error);
     res.status(500).json({ error: 'Failed to mark return as received: ' + error.message });
+  }
+});
+
+// 🆕 PATCH /api/returns/:id/refresh-tracking — 手动刷新一次物流状态（用 Get Tracking Summary）
+router.patch('/:id/refresh-tracking', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const returnRecord = await db.prepare('SELECT * FROM returns WHERE id = ?').get(id);
+    if (!returnRecord) {
+      return res.status(404).json({ error: 'Return not found' });
+    }
+    if (!returnRecord.tracking_number) {
+      return res.status(400).json({ error: 'This return has no tracking number yet' });
+    }
+
+    const summary = await canadaPostClient.getTrackingSummary(returnRecord.tracking_number);
+    if (!summary) {
+      return res.status(502).json({ error: 'Failed to fetch tracking summary from Canada Post' });
+    }
+
+    await db.prepare(`
+      UPDATE returns
+      SET last_tracking_event = ?, last_tracking_date = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(summary.eventDescription, summary.eventDateTime, id);
+
+    res.json({ success: true, tracking: summary });
+  } catch (error) {
+    console.error('Error refreshing tracking:', error);
+    res.status(500).json({ error: 'Failed to refresh tracking: ' + error.message });
   }
 });
 
@@ -664,6 +822,13 @@ router.patch('/:id/issue-refund', async (req, res) => {
           staffMemberId,
           staffUserId
         );
+
+        await klaviyoClient.trackRefundIssued(returnRecord.customer_email, {
+          orderName: returnRecord.order_name,
+          orderId: returnRecord.shopify_order_id,
+          refundAmount,
+          refundMethod: storeCreditItems.length > 0 ? 'split' : 'original_payment'
+        });
       }
       // 如果这单还有别的 item 没在这次 itemIds 里、尚未退款，状态先保持 received，等后续继续处理
 

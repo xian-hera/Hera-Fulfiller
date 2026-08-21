@@ -45,12 +45,30 @@
   background-color: #f6f6f7;
 }
 
-/* 操作按钮行 */
+/* 操作按钮区：Complete Order 在上（大），Cancel 在下（小），中间留出较大间距防误触 */
 .complete-order-actions {
   display: flex;
-  gap: 12px;
-  justify-content: flex-end;
-  margin-top: 8px;
+  flex-direction: column;
+  gap: 32px;
+  margin-top: 16px;
+}
+
+.complete-order-actions > * {
+  width: 100%;
+}
+
+/* Complete Order：高度放大到约原来的 4 倍，方便点击 */
+.complete-order-btn-complete :where(button) {
+  min-height: 160px;
+  font-size: 24px;
+  font-weight: 700;
+  border-radius: 12px;
+}
+
+/* Cancel：保持较小尺寸，作为次要操作放在左下角 */
+.complete-order-btn-cancel :where(button) {
+  min-height: 40px;
+  font-size: 14px;
 }
 
 /* ---------- 右列 / 键盘区 ---------- */
@@ -81,16 +99,9 @@
     gap: 12px;
   }
 
-  /* 让按钮在左列中始终靠底 */
+  /* 让按钮区在左列中始终靠底 */
   .complete-order-actions {
     margin-top: auto;
-    flex-direction: column;  /* 纵向排列按钮，宽度更宽好点击 */
-    gap: 10px;
-  }
-
-  /* 按钮全宽，更适合触屏 */
-  .complete-order-actions > * {
-    width: 100%;
   }
 
   /* 横屏时显示框字号略小，节省垂直空间 */
@@ -108,9 +119,9 @@
   }
 }
 
-/* 更大的横屏（桌面或大 iPad Pro），恢复默认列宽 */
+/* 更大的横屏（桌面或大 iPad Pro），Complete Order / Cancel 依然保持上下堆叠（放大后的按钮所有模式下一致） */
 @media (orientation: landscape) and (min-height: 821px) {
   .complete-order-actions {
-    flex-direction: row;
+    flex-direction: column;
   }
 }

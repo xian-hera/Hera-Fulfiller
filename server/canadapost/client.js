@@ -131,7 +131,7 @@ class CanadaPostClient {
   buildSenderXml(senderInfo) {
     return `
     <sender>
-      ${senderInfo.contact ? `<name>${senderInfo.contact}</name>` : ''}
+      ${senderInfo.contact ? `<n>${senderInfo.contact}</n>` : ''}
       <company>${senderInfo.company || 'HERA BEAUTÉ'}</company>
       <contact-phone>0000000000</contact-phone>
       <address-details>
@@ -149,7 +149,7 @@ class CanadaPostClient {
   buildDestinationXml(order) {
     return `
     <destination>
-      <name>${this.escapeXml(order.shipping_name || '')}</name>
+      <n>${this.escapeXml(order.shipping_name || '')}</n>
       <address-details>
         <address-line-1>${this.escapeXml(order.shipping_address1 || '')}</address-line-1>
         ${order.shipping_address2 ? `<address-line-2>${this.escapeXml(order.shipping_address2)}</address-line-2>` : ''}
@@ -286,10 +286,6 @@ class CanadaPostClient {
   </delivery-spec>
 </shipment>`;
 
-    // ============================================================
-    // CP_DEBUG — 发送前：核对发给 Canada Post 的数据
-    // 在 Render 日志搜 "CP_DEBUG" 可定位全部；搜 "REQUEST START" 跳到起点
-    // ============================================================
     console.log('\n===== CP_DEBUG REQUEST START =====');
     console.log(`[CP_DEBUG] Environment        : ${this.isProduction ? 'PRODUCTION' : 'SANDBOX'}`);
     console.log(`[CP_DEBUG] Order             : ${order.name}`);
@@ -340,15 +336,10 @@ class CanadaPostClient {
         }
       );
 
-      // ============================================================
-      // CP_DEBUG — 收到后：核对 Canada Post 返回的数据
-      // 在 Render 日志搜 "RESPONSE START" 跳到起点
-      // ============================================================
       console.log('\n===== CP_DEBUG RESPONSE START =====');
       console.log(`[CP_DEBUG] HTTP status       : ${response.status}`);
       console.log('[CP_DEBUG] --- 完整响应 XML（原文，价格/警告都在这里面找）---');
       console.log(typeof response.data === 'string' ? response.data : JSON.stringify(response.data));
-      // 探测价格字段（不同账户/配置返回的字段名可能不同，全部尝试打印）
       try {
         const infoForPrice = (await this.parseXml(response.data))?.['shipment-info'] || {};
         const priceCandidates = ['shipment-price', 'price', 'due-amount', 'total-amount', 'cc-charge-amount'];
@@ -682,6 +673,169 @@ class CanadaPostClient {
     } catch (error) {
       console.error('Error getting manifest PDF:', error.message);
       throw new Error(`Failed to get manifest PDF: ${error.message}`);
+    }
+  }
+
+  // ============================================================
+  // 🆕 CREATE AUTHORIZED RETURN
+  // 创建退货 label（bill on scan，不需要传 weight/dimensions —— 网点自己称重测量）
+  // returnerInfo = 顾客地址（label 上的 "From"）
+  // receiverInfo = 我们的 Return address（Portal Settings 里配置，label 上的 "To"）
+  // 走 QR code 路线（create-public-key + create-qr-code），不用 Get Artifact 取 PDF
+  // 返回 { trackingPin, qrCodeBase64, publicUrl, publicUrlExpiryDate }
+  // ============================================================
+  async createAuthorizedReturn({ returnerInfo, receiverInfo, serviceCode = 'DOM.EP', customerRef1 }) {
+    console.log('\n========== CANADA POST CREATE AUTHORIZED RETURN ==========');
+    console.log(`Returner: ${returnerInfo.name}, ${returnerInfo.city}`);
+    console.log(`Receiver: ${receiverInfo.name || receiverInfo.company}, ${receiverInfo.city}`);
+    console.log(`Service code: ${serviceCode}`);
+
+    const returnerXml = `
+    <returner>
+      <name>${this.escapeXml(returnerInfo.name)}</name>
+      ${returnerInfo.company ? `<company>${this.escapeXml(returnerInfo.company)}</company>` : ''}
+      <domestic-address>
+        <address-line-1>${this.escapeXml(returnerInfo.address1)}</address-line-1>
+        ${returnerInfo.address2 ? `<address-line-2>${this.escapeXml(returnerInfo.address2)}</address-line-2>` : ''}
+        <city>${this.escapeXml(returnerInfo.city)}</city>
+        <province>${this.getProvinceCode(returnerInfo.province || '')}</province>
+        <postal-code>${(returnerInfo.postalCode || '').replace(/\s/g, '')}</postal-code>
+      </domestic-address>
+    </returner>`;
+
+    const receiverXml = `
+    <receiver>
+      <name>${this.escapeXml(receiverInfo.name || receiverInfo.company)}</name>
+      ${receiverInfo.company ? `<company>${this.escapeXml(receiverInfo.company)}</company>` : ''}
+      <domestic-address>
+        <address-line-1>${this.escapeXml(receiverInfo.address1)}</address-line-1>
+        ${receiverInfo.address2 ? `<address-line-2>${this.escapeXml(receiverInfo.address2)}</address-line-2>` : ''}
+        <city>${this.escapeXml(receiverInfo.city)}</city>
+        <province>${this.getProvinceCode(receiverInfo.province || '')}</province>
+        <postal-code>${(receiverInfo.postalCode || '').replace(/\s/g, '')}</postal-code>
+      </domestic-address>
+    </receiver>`;
+
+    const requestXml = `<?xml version="1.0" encoding="utf-8"?>
+<authorized-return xmlns="http://www.canadapost.ca/ws/authreturn-v2">
+  <create-public-key>true</create-public-key>
+  <create-qr-code>true</create-qr-code>
+  <service-code>${serviceCode}</service-code>
+  ${returnerXml}
+  ${receiverXml}
+  <print-preferences>
+    <output-format>8.5x11</output-format>
+  </print-preferences>
+  ${customerRef1 ? `<references><customer-ref-1>${this.escapeXml(customerRef1)}</customer-ref-1></references>` : ''}
+</authorized-return>`;
+
+    console.log('[CP_DEBUG] --- Create Authorized Return 请求 XML（原文）---');
+    console.log(requestXml);
+
+    try {
+      const response = await axios.post(
+        `${this.baseUrl}/rs/${this.customerNumber}/${this.customerNumber}/authorizedreturn`,
+        requestXml,
+        {
+          headers: {
+            'Content-Type': 'application/vnd.cpc.authreturn-v2+xml',
+            'Accept': 'application/vnd.cpc.authreturn-v2+xml',
+            'Authorization': this.getAuthHeader(),
+            'Accept-language': 'en-CA'
+          }
+        }
+      );
+
+      console.log('[CP_DEBUG] --- Create Authorized Return 响应 XML（原文）---');
+      console.log(typeof response.data === 'string' ? response.data : JSON.stringify(response.data));
+
+      const parsed = await this.parseXml(response.data);
+      const info = parsed?.['authorized-return-info'];
+
+      if (!info) {
+        throw new Error('Unexpected response structure from Canada Post (Create Authorized Return)');
+      }
+
+      const trackingPin = info['tracking-pin'];
+      const publicKeyInfo = info['public-key-info'] || {};
+      const publicUrl = publicKeyInfo.url || null;
+      const publicUrlExpiryDate = publicKeyInfo['expiry-date'] || null;
+      const qrCodeBase64 = info['qr-code'] || null;
+
+      console.log(`✓ Authorized return created. Tracking: ${trackingPin}`);
+      console.log(`  Public URL: ${publicUrl} (expires ${publicUrlExpiryDate})`);
+      console.log(`  QR code present: ${!!qrCodeBase64}`);
+      console.log('=================================================\n');
+
+      return { trackingPin, qrCodeBase64, publicUrl, publicUrlExpiryDate };
+    } catch (error) {
+      if (error.response) {
+        console.error('Canada Post Authorized Return error status:', error.response.status);
+        console.error('Canada Post Authorized Return error data:', error.response.data);
+        try {
+          const parsed = await this.parseXml(error.response.data);
+          const errorMsg = this.extractErrors(parsed);
+          throw new Error(`Canada Post Authorized Return error: ${errorMsg}`);
+        } catch (parseErr) {
+          if (parseErr.message.startsWith('Canada Post Authorized Return error:')) throw parseErr;
+          throw new Error(`Canada Post Authorized Return error (${error.response.status}): ${error.response.data}`);
+        }
+      }
+      throw error;
+    }
+  }
+
+  // ============================================================
+  // 🆕 GET TRACKING SUMMARY
+  // 用 tracking PIN 查最新一次物流事件（不是完整历史，用 Get Tracking Details 才能查全部）
+  // 返回 { eventDateTime, eventDescription, eventType, actualDeliveryDate, expectedDeliveryDate }
+  // ============================================================
+  async getTrackingSummary(trackingPin) {
+    console.log(`\nFetching tracking summary for PIN: ${trackingPin}`);
+    try {
+      const response = await axios.get(
+        `${this.baseUrl}/vis/track/pin/${trackingPin}/summary`,
+        {
+          headers: {
+            'Accept': 'application/vnd.cpc.track-v2+xml',
+            'Authorization': this.getAuthHeader(),
+            'Accept-language': 'en-CA'
+          }
+        }
+      );
+
+      const parsed = await this.parseXml(response.data);
+      const summary = parsed?.['tracking-summary']?.['pin-summary'];
+
+      if (!summary) {
+        throw new Error('Unexpected response structure from Canada Post (Get Tracking Summary)');
+      }
+
+      const result = {
+        eventDateTime: summary['event-date-time'] || null,
+        eventDescription: summary['event-description'] || null,
+        eventType: summary['event-type'] || null,
+        actualDeliveryDate: summary['actual-delivery-date'] || null,
+        expectedDeliveryDate: summary['expected-delivery-date'] || null
+      };
+
+      console.log(`✓ Tracking summary fetched: [${result.eventType}] ${result.eventDescription} @ ${result.eventDateTime}`);
+      return result;
+    } catch (error) {
+      if (error.response) {
+        console.error('Get Tracking Summary error status:', error.response.status);
+        try {
+          const parsed = await this.parseXml(error.response.data);
+          const errorMsg = this.extractErrors(parsed);
+          console.error(`Get Tracking Summary error: ${errorMsg}`);
+        } catch {
+          console.error(`Get Tracking Summary error (${error.response.status}): ${error.response.data}`);
+        }
+      } else {
+        console.error('Error fetching tracking summary:', error.message);
+      }
+      // 查 tracking 失败不应阻断主流程，返回 null 让调用方自行决定怎么展示
+      return null;
     }
   }
 }
