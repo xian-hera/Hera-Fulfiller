@@ -5,7 +5,12 @@ const db = require('../database/init');
 class ShopifyClient {
   constructor() {
     this.shopUrl = process.env.SHOPIFY_SHOP_NAME || process.env.SHOPIFY_STORE_URL;
-    this.apiVersion = '2025-01';
+    // 🆕 从早已过期的 2025-01 升级到当前最新稳定版 2026-07（支持到 2027-07）。
+    // 已排查过：REST Admin API 整体处于 "legacy" 状态但没有被移除，本项目实际用到的 REST 端点
+    // （orders/customers/variants/locations/fulfillment_orders/metafields）都不在已知废弃列表里；
+    // GraphQL 这边 refundCreate 的 @idempotent 指令本来就要求 2026-04+（这次升级顺带修好了一个
+    // "代码按新版本写、但 pin 的是旧版本"的不一致）。详见这次跟用户的讨论记录。
+    this.apiVersion = '2026-07';
     this._client = null;
     this._token = null;
 
@@ -73,6 +78,22 @@ class ShopifyClient {
       return '';
     } catch (error) {
       console.error(`Error fetching variant metafield:`, error.message);
+      return '';
+    }
+  }
+
+  // 🆕 Return 功能用：读 orders/{id}/metafields.json 上的 custom.fulfillment
+  // （Packer 正向发货成功后写入的那个格式化字符串，例如 "Expedited Parcel - 12x9x3 in - 500 g - $11.61"）
+  async getOrderMetafield(orderId, namespace, key) {
+    try {
+      const client = await this.getClient();
+      const response = await client.get(`/orders/${orderId}/metafields.json`);
+      const metafields = response.data.metafields || [];
+      const metafield = metafields.find(m => m.namespace === namespace && m.key === key);
+      if (metafield) return metafield.value;
+      return '';
+    } catch (error) {
+      console.error(`Error fetching order metafield:`, error.message);
       return '';
     }
   }
@@ -205,6 +226,31 @@ class ShopifyClient {
     } catch (error) {
       console.error('Error fetching order:', error.response?.data || error.message);
       throw error;
+    }
+  }
+
+  // 🆕 Return 功能用：Portal Settings > Location mapping 的 location 下拉、退货详情页 Restock 的 location 下拉
+  async getLocations() {
+    try {
+      const client = await this.getClient();
+      const response = await client.get('/locations.json');
+      return response.data.locations || [];
+    } catch (error) {
+      console.error('Error fetching locations:', error.response?.data || error.message);
+      return [];
+    }
+  }
+
+  // 🆕 Return 功能用：退货详情页 Customer 卡片的 "total orders" 数字（方案文档 6.5 第 4 点）
+  // 用 customer.orders_count（Shopify 原生字段，包含所有历史订单，不区分渠道）
+  async getCustomer(customerId) {
+    try {
+      const client = await this.getClient();
+      const response = await client.get(`/customers/${customerId}.json`);
+      return response.data.customer;
+    } catch (error) {
+      console.error('Error fetching customer:', error.response?.data || error.message);
+      return null;
     }
   }
 
@@ -471,6 +517,37 @@ class ShopifyClient {
       return result?.refund;
     } catch (error) {
       console.error('Error creating refund:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  // 🆕 触发自定义 Flow trigger（方案文档 8.1.1，"New return request" 商家内部通知）
+  // handle 必须跟 extensions/flow-return-request/shopify.extension.toml 里的 handle 完全一致；
+  // payload 的 key 必须跟该 toml 里每个 field 声明的 key 完全一致（reference 类型字段固定用
+  // `{type}_id`，例如 order_reference → "order_id"；自定义字段用它自己声明的 key 原样作为 payload key，
+  // 不做大小写/下划线转换）——这是已跟 Shopify 官方文档（shopify.dev）核实过的行为，不是猜测。
+  async triggerFlow(handle, payload) {
+    try {
+      const client = await this.getClient();
+      const mutation = `
+        mutation flowTriggerReceive($handle: String!, $payload: JSON!) {
+          flowTriggerReceive(handle: $handle, payload: $payload) {
+            userErrors { field message }
+          }
+        }
+      `;
+
+      const response = await client.post('/graphql.json', { query: mutation, variables: { handle, payload } });
+
+      const userErrors = response.data?.data?.flowTriggerReceive?.userErrors || [];
+      if (userErrors.length > 0) {
+        const errorMsg = userErrors.map(e => `${e.field}: ${e.message}`).join('; ');
+        throw new Error(`Shopify Flow trigger error: ${errorMsg}`);
+      }
+
+      return true;
+    } catch (error) {
+      console.error(`Error firing Flow trigger "${handle}":`, error.response?.data || error.message);
       throw error;
     }
   }

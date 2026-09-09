@@ -18,6 +18,9 @@ const verifyWebhook = require('./middleware/webhookVerification');
 const returnsRoutes = require('./routes/returns');
 const returnSettingsRoutes = require('./routes/return-settings');
 const returnRulesRoutes = require('./routes/return-rules');
+const returnPortalRoutes = require('./routes/return-portal');
+const posReturnRoutes = require('./routes/pos-return');
+const posSessionAuth = require('./middleware/posSessionAuth');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -104,6 +107,9 @@ app.use('/api/gift', giftRoutes);
 app.use('/api/returns', returnsRoutes);
 app.use('/api/return-settings', returnSettingsRoutes);
 app.use('/api/return-rules', returnRulesRoutes);
+app.use('/api/return-portal', returnPortalRoutes);
+// POS Extension 专属：整条路由都要求 Session token 鉴权（方案文档 7.6），跟 embedded admin app 用同一套 HS256 验证
+app.use('/api/pos-return', posSessionAuth, posReturnRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -136,7 +142,17 @@ const server = http.createServer(app);
 const { initWebSocket } = require('./websocket');
 initWebSocket(server);
 
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-});
+// 🆕 等数据库真正连上、迁移跑完（db.ready，见 database/init.js）之后再开始监听端口 ——
+// 之前是 server.listen() 立刻执行，数据库连接/建表迁移在后台异步跑，如果这时候正好有请求
+// 打进来就会 500。本地现在直连远程 Render Postgres，这个窗口比以前连本地 SQLite 明显很多。
+db.ready
+  .then(() => {
+    server.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+      console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+    });
+  })
+  .catch((error) => {
+    console.error('Server did not start — database was not ready:', error);
+    process.exit(1);
+  });

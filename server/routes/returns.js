@@ -5,6 +5,7 @@ const shopifyClient = require('../shopify/client');
 const canadaPostClient = require('../canadapost/client');
 const klaviyoClient = require('../klaviyo/client');
 const { evaluateRules, ruleAppliesToItem } = require('../services/returnRuleEngine');
+const { parseShippingChargeFromMetafield } = require('../utils/shippingCharge');
 
 // ── 工具函数 ──────────────────────────────────────────────────────────────
 
@@ -60,10 +61,19 @@ async function createReturnLabelIfNeeded(returnId, returnRecord, staffMemberId, 
 
     const receiverInfo = JSON.parse(returnAddressSetting.value);
 
+    // Settings > Canada Post Integration 里配置的 label 类型/box-free/service code，没配置过就用默认值
+    const cpSettingRow = await db.prepare(
+      `SELECT value FROM return_settings WHERE key = 'canada_post_settings'`
+    ).get();
+    const cpSettings = cpSettingRow ? JSON.parse(cpSettingRow.value) : {};
+
     const label = await canadaPostClient.createAuthorizedReturn({
       returnerInfo,
       receiverInfo,
-      customerRef1: returnRecord.order_name
+      customerRef1: returnRecord.order_name,
+      serviceCode: cpSettings.serviceCode || 'DOM.EP',
+      labelType: cpSettings.labelType || 'label_free',
+      boxFree: !!cpSettings.boxFree
     });
 
     await db.prepare(`
@@ -81,6 +91,94 @@ async function createReturnLabelIfNeeded(returnId, returnRecord, staffMemberId, 
     await logHistory(returnId, 'label_creation_failed', error.message, staffMemberId, staffUserId);
   }
 }
+
+// ── 顾客端选品页面实时置灰预判 ───────────────────────────────────────────────
+
+// POST /api/returns/preview-restrictions
+// 顾客在选品页面（方案文档 12.3）针对某一个 item 选 reason 之前，用这个接口预判"哪些 reason/method
+// 应该被置灰"，避免等到最终 submit 才被后端拒绝。这是一个 UX 提示接口，不是权威校验——
+// 权威校验仍然在 POST /api/returns 里对完整的 return（所有 item 都选好之后）做一次（见上面的注释）。
+//
+// 因为顾客还在逐个 item 选择，这里没有"整单所有 item"的完整上下文，所以不跑 matchAllItems /
+// group_logic 那套整单聚合逻辑，只用 ruleAppliesToItem() 针对当前这一个 item 逐条规则判定
+// （跟 POST / 里校验 allow_replacement 解锁用的是同一个函数）。
+//
+// body: {
+//   orderContext: { customerTags, orderDate, daysSinceOrdered, fulfillmentLocationId, orderTags,
+//                    orderTotal, remainingValueAfterReturns, salesChannelName },
+//   item: { productTags, productCollections, productType, variantSku, vendor }
+// }
+// 返回: {
+//   disallowedReasonIds: [...],       -- 这些 reason 对这个 item 应该被置灰
+//   disallowedReturnMethods: [...],   -- 'shipping' / 'in_store'，应该被置灰
+//   replacementUnlockedReasonIds: [...] -- 顾客选了这些 reason 时，"Receive a replacement" 才应该出现
+// }
+router.post('/preview-restrictions', async (req, res) => {
+  try {
+    const { orderContext = {}, item = {} } = req.body;
+
+    const activeRules = await db.prepare('SELECT * FROM return_rules WHERE is_active = TRUE').all();
+    const activeReasons = await db.prepare('SELECT id, name FROM return_reasons WHERE is_archived = FALSE').all();
+
+    const parsedRules = activeRules.map(r => ({
+      ...r,
+      condition_groups: JSON.parse(r.condition_groups || '[]'),
+      actions: JSON.parse(r.actions || '[]')
+    }));
+
+    const baseItem = {
+      productTags: item.productTags || [],
+      productCollections: item.productCollections || [],
+      productType: item.productType,
+      variantSku: item.variantSku,
+      vendor: item.vendor
+    };
+
+    const disallowedReasonIds = new Set();
+    const disallowedReturnMethods = new Set();
+    const replacementUnlockedReasonIds = new Set();
+
+    // 跟每个候选 reason 组合一遍，逐条规则判定（不依赖其他 item，也不依赖顾客还没选的 return method）
+    for (const reason of activeReasons) {
+      const itemWithReason = { ...baseItem, reason: reason.name };
+
+      for (const rule of parsedRules) {
+        if (!ruleAppliesToItem(rule, itemWithReason, orderContext)) continue;
+
+        for (const action of rule.actions) {
+          if (action.type === 'disallow_reason' && action.value === reason.name) {
+            disallowedReasonIds.add(reason.id);
+          }
+          if (action.type === 'disallow_return_method' && action.value) {
+            disallowedReturnMethods.add(action.value);
+          }
+          if (action.type === 'allow_replacement') {
+            replacementUnlockedReasonIds.add(reason.id);
+          }
+        }
+      }
+    }
+
+    // 不依赖 reason 的规则（condition 里没有 return.reason）也要跑一遍，避免漏判 disallow_return_method
+    for (const rule of parsedRules) {
+      if (!ruleAppliesToItem(rule, baseItem, orderContext)) continue;
+      for (const action of rule.actions) {
+        if (action.type === 'disallow_return_method' && action.value) {
+          disallowedReturnMethods.add(action.value);
+        }
+      }
+    }
+
+    res.json({
+      disallowedReasonIds: [...disallowedReasonIds],
+      disallowedReturnMethods: [...disallowedReturnMethods],
+      replacementUnlockedReasonIds: [...replacementUnlockedReasonIds]
+    });
+  } catch (error) {
+    console.error('Error previewing return restrictions:', error);
+    res.status(500).json({ error: 'Failed to preview return restrictions: ' + error.message });
+  }
+});
 
 // ── 顾客提交退货申请 ─────────────────────────────────────────────────────
 
@@ -228,14 +326,25 @@ router.post('/', async (req, res) => {
     if (isRejected) initialStatus = 'rejected';
     else if (isAutoApproved) initialStatus = 'awaiting_return';
 
+    // 🆕 读原发货的 custom.fulfillment metafield，解析出 "Actual shipping charge"
+    // （不是干净数字字段，是 packer.js 拼出的格式化字符串，见 utils/shippingCharge.js）
+    // 读取失败不阻断提交流程，只是这个字段留空，后续商家可以手动核对
+    let actualShippingCharge = null;
+    try {
+      const fulfillmentMetafield = await shopifyClient.getOrderMetafield(body.shopifyOrderId, 'custom', 'fulfillment');
+      actualShippingCharge = parseShippingChargeFromMetafield(fulfillmentMetafield);
+    } catch (error) {
+      console.error(`Failed to read/parse custom.fulfillment metafield for order ${body.shopifyOrderId}:`, error.message);
+    }
+
     // 插入 returns 主记录
     const returnResult = await db.prepare(`
       INSERT INTO returns (
         shopify_order_id, order_name, customer_id, customer_email, customer_first_name, customer_last_name,
         status, auto_approved, return_method, return_location_id, return_location_name,
-        order_fulfilled_date, order_subtotal, customer_paid_shipping, matched_rules,
+        order_fulfilled_date, order_subtotal, customer_paid_shipping, actual_shipping_charge, matched_rules,
         approved_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       body.shopifyOrderId, body.orderName, body.customerId || null, body.customerEmail || null,
       body.customerFirstName || null, body.customerLastName || null,
@@ -243,6 +352,7 @@ router.post('/', async (req, res) => {
       body.returnMethod === 'in_store' ? body.returnLocationId : null,
       body.returnMethod === 'in_store' ? body.returnLocationName : null,
       body.orderFulfilledDate || null, body.orderSubtotal || null, body.customerPaidShipping || null,
+      actualShippingCharge,
       JSON.stringify(matchedRuleSummaries),
       (isRejected || isAutoApproved) ? new Date().toISOString() : null
     );
@@ -300,6 +410,23 @@ router.post('/', async (req, res) => {
       orderId: body.shopifyOrderId,
       items: body.items
     });
+
+    // 🆕 触发 Flow trigger "New return request"（方案文档 8.1.1），商家内部通知用，
+    // 跟上面的 Klaviyo event（发给顾客）完全独立。无论最终是自动通过/自动拒绝/待人工审批，
+    // 只要有新的退货申请提交就触发一次。失败不阻断提交流程本身，只记录 log。
+    try {
+      const customerName = `${body.customerFirstName || ''} ${body.customerLastName || ''}`.trim() || 'Guest';
+      await shopifyClient.triggerFlow('new-return-request', {
+        order_id: `gid://shopify/Order/${body.shopifyOrderId}`,
+        'Order name': body.orderName,
+        'Customer name': customerName,
+        'Customer email': body.customerEmail || '',
+        'Return method': body.returnMethod === 'in_store' ? 'In-store' : 'Shipping',
+        'Item count': String(body.items.length)
+      });
+    } catch (flowError) {
+      console.error('Failed to fire "New return request" Flow trigger (non-blocking):', flowError.message);
+    }
 
     if (isRejected) {
       await klaviyoClient.trackReturnRequestRejected(body.customerEmail, {
@@ -381,10 +508,14 @@ router.patch('/archive', async (req, res) => {
     }
 
     for (const id of returnIds) {
+      // 记一下 archive 之前的状态，方便详情页在 archived 状态下正确渲染 Items 卡片（见方案文档 6.8.8）
+      const current = await db.prepare('SELECT status FROM returns WHERE id = ?').get(id);
+      if (!current || current.status === 'archived') continue;
+
       await db.prepare(`
-        UPDATE returns SET status = 'archived', archived_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+        UPDATE returns SET status = 'archived', pre_archive_status = ?, archived_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
-      `).run(id);
+      `).run(current.status, id);
       await logHistory(id, 'archived');
     }
 
@@ -439,11 +570,37 @@ router.get('/:id', async (req, res) => {
       SELECT * FROM return_status_history WHERE return_id = ? ORDER BY created_at ASC
     `).all(id);
 
+    // 🆕 Customer 卡片需要的三个统计数字 + tag（方案文档 6.5 第 4 点）
+    let customerStats = { totalOrders: null, totalReturnsSubmitted: 0, totalReturnsApproved: 0, customerTags: [] };
+    if (returnRecord.customer_id) {
+      const customer = await shopifyClient.getCustomer(returnRecord.customer_id);
+      if (customer) {
+        customerStats.totalOrders = customer.orders_count;
+        customerStats.customerTags = customer.tags
+          ? customer.tags.split(',').map(t => t.trim()).filter(Boolean)
+          : [];
+      }
+
+      const submittedCountRow = await db.prepare(
+        'SELECT COUNT(*) as count FROM returns WHERE customer_id = ?'
+      ).get(returnRecord.customer_id);
+      // "approved" = 曾经离开过 awaiting_approval 且没有被 rejected（自动/人工 approve 都算）
+      const approvedCountRow = await db.prepare(
+        `SELECT COUNT(*) as count FROM returns WHERE customer_id = ? AND status NOT IN ('awaiting_approval', 'rejected')`
+      ).get(returnRecord.customer_id);
+
+      customerStats.totalReturnsSubmitted = parseInt(submittedCountRow.count) || 0;
+      customerStats.totalReturnsApproved = parseInt(approvedCountRow.count) || 0;
+    }
+
     res.json({
       ...returnRecord,
       matched_rules: returnRecord.matched_rules ? JSON.parse(returnRecord.matched_rules) : [],
       items: itemsWithAnswers,
-      history
+      history,
+      customerStats,
+      // 前端拼 Shopify admin 链接用（order/customer/product/variant 页面，见方案文档 6.2/6.3/6.5）
+      shopDomain: process.env.SHOPIFY_STORE_URL || null
     });
   } catch (error) {
     console.error('Error fetching return details:', error);
@@ -477,7 +634,7 @@ router.post('/:id/internal-note', async (req, res) => {
 router.patch('/:id/approve', async (req, res) => {
   try {
     const { id } = req.params;
-    const { itemIds, isAutoApproved = false, staffMemberId, staffUserId } = req.body;
+    const { itemIds, isAutoApproved = false, staffMemberId, staffUserId, internalReturnNote } = req.body;
 
     const returnRecord = await db.prepare('SELECT * FROM returns WHERE id = ?').get(id);
     if (!returnRecord) {
@@ -515,6 +672,14 @@ router.patch('/:id/approve', async (req, res) => {
       SET status = ?, auto_approved = ?, approved_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(newStatus, isAutoApproved, id);
+
+    // 🆕 in-store return 专属：Approve 弹窗里商家填写的这条 note，除了走 logHistory 进时间线，
+    // 还要单独存进 returns.internal_return_note —— 这是 POS Extension 7.3 详情屏要显示的那条 note
+    if (internalReturnNote && internalReturnNote.trim()) {
+      await db.prepare(`
+        UPDATE returns SET internal_return_note = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+      `).run(internalReturnNote.trim(), id);
+    }
 
     await logHistory(
       id,
@@ -883,6 +1048,24 @@ router.patch('/:id/mark-resolved', async (req, res) => {
 });
 
 // ── Restock 操作（refunded 状态下）─────────────────────────────────────────
+//
+// 🆕 逻辑改版（跟用户确认过）：restock 的计量基准是 received_quantity（不是 refunded_quantity——
+// 已收到但出于某种原因没退款的 item，物理上东西已经在手上，也应该能补回库存），逐 item 用
+// restocked_quantity 追踪"已经被分配 restock 的数量"，范围 0~received_quantity。
+// "Restock all/selected to" 可以分批多次点击，每次把当时还没 restock 完的部分（received - restocked）
+// 补给指定 location；直到全部有 received_quantity 的 item 都 restocked_quantity = received_quantity，
+// 这个 return 才自动进入 archived。"Manually restock" 保持原样——不调用任何 Shopify 库存 API，
+// 点击后无条件立即 archive（含义仍然是"restock 这一步我们线下/另外处理，不需要 APP 管"）。
+
+// GET /api/returns/:id/restock-progress — 前端用来算"还剩多少没 restock"，也可以直接从 GET /:id 的
+// items 里自己算（received_quantity - restocked_quantity），这个端点只是图方便，非必须
+async function getRestockRemaining(returnId) {
+  const items = await db.prepare(`
+    SELECT id, product_title, variant_title, received_quantity, restocked_quantity
+    FROM return_items WHERE return_id = ? AND received_quantity > 0
+  `).all(returnId);
+  return items.filter(i => i.restocked_quantity < i.received_quantity);
+}
 
 // PATCH /api/returns/:id/restock
 // body: { mode: 'all' | 'selected' | 'manual', itemIds, locationId, staffMemberId, staffUserId }
@@ -899,66 +1082,129 @@ router.patch('/:id/restock', async (req, res) => {
       return res.status(400).json({ error: 'Return is not in refunded status' });
     }
 
-    if (mode === 'all' || mode === 'selected') {
-      if (!locationId) {
-        return res.status(400).json({ error: 'locationId is required for restock' });
-      }
+    if (mode === 'manual') {
+      // 不做任何库存调整，无条件立即 archive（跟旧行为一致，这是唯一保留"强制结束"语义的按钮）
+      await db.prepare(`
+        UPDATE returns SET status = 'archived', pre_archive_status = 'refunded', archived_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(id);
+      await logHistory(id, 'archived', 'Manually restock', staffMemberId, staffUserId);
+      return res.json({ success: true, status: 'archived' });
+    }
 
-      let items;
-      if (mode === 'selected') {
-        if (!Array.isArray(itemIds) || itemIds.length === 0) {
-          return res.status(400).json({ error: 'itemIds is required for mode=selected' });
+    if (mode !== 'all' && mode !== 'selected') {
+      return res.status(400).json({ error: 'mode must be all, selected, or manual' });
+    }
+    if (!locationId) {
+      return res.status(400).json({ error: 'locationId is required for restock' });
+    }
+
+    let items;
+    if (mode === 'selected') {
+      if (!Array.isArray(itemIds) || itemIds.length === 0) {
+        return res.status(400).json({ error: 'itemIds is required for mode=selected' });
+      }
+      const placeholders = itemIds.map(() => '?').join(',');
+      items = await db.prepare(`
+        SELECT id, variant_id, received_quantity, restocked_quantity FROM return_items
+        WHERE return_id = ? AND id IN (${placeholders})
+      `).all(id, ...itemIds);
+    } else {
+      items = await db.prepare(`
+        SELECT id, variant_id, received_quantity, restocked_quantity FROM return_items WHERE return_id = ?
+      `).all(id);
+    }
+
+    const restockFailures = [];
+    let restockedAny = false;
+
+    for (const item of items) {
+      const remaining = (item.received_quantity || 0) - (item.restocked_quantity || 0);
+      if (remaining <= 0) continue; // 这个 item 已经在之前某一轮 restock 完了，跳过
+      if (!item.variant_id) {
+        restockFailures.push({ itemId: item.id, error: 'Missing variant_id' });
+        continue;
+      }
+      try {
+        const variant = await shopifyClient.getProductVariant(item.variant_id);
+        if (!variant || !variant.inventory_item_id) {
+          restockFailures.push({ itemId: item.id, error: 'Variant or inventory item not found' });
+          continue;
         }
-        const placeholders = itemIds.map(() => '?').join(',');
-        items = await db.prepare(`
-          SELECT id, variant_id, refunded_quantity FROM return_items
-          WHERE return_id = ? AND id IN (${placeholders})
-        `).all(id, ...itemIds);
-      } else {
-        items = await db.prepare(`
-          SELECT id, variant_id, refunded_quantity FROM return_items WHERE return_id = ?
-        `).all(id);
-      }
-
-      const restockFailures = [];
-
-      for (const item of items) {
-        if (!item.variant_id || !item.refunded_quantity) continue;
-        try {
-          const variant = await shopifyClient.getProductVariant(item.variant_id);
-          if (!variant || !variant.inventory_item_id) continue;
-          await shopifyClient.adjustInventoryQuantity(variant.inventory_item_id, locationId, item.refunded_quantity);
-        } catch (error) {
-          restockFailures.push({ itemId: item.id, error: error.message });
-        }
-      }
-
-      await logHistory(
-        id,
-        'restocked',
-        `mode=${mode}, locationId=${locationId}${itemIds ? `, items=${itemIds.join(',')}` : ''}` +
-          (restockFailures.length > 0 ? ` — ${restockFailures.length} item(s) failed to restock` : ''),
-        staffMemberId,
-        staffUserId
-      );
-
-      if (restockFailures.length > 0) {
-        console.error(`Restock partially failed for return ${id}:`, restockFailures);
+        await shopifyClient.adjustInventoryQuantity(variant.inventory_item_id, locationId, remaining);
+        await db.prepare(`
+          UPDATE return_items SET restocked_quantity = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+        `).run(item.received_quantity, item.id);
+        restockedAny = true;
+      } catch (error) {
+        restockFailures.push({ itemId: item.id, error: error.message });
       }
     }
-    // mode === 'manual' → 不做任何库存调整，只记录
 
-    await db.prepare(`
-      UPDATE returns SET status = 'archived', archived_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `).run(id);
+    await logHistory(
+      id,
+      'restocked',
+      `mode=${mode}, locationId=${locationId}${itemIds ? `, items=${itemIds.join(',')}` : ''}` +
+        (restockFailures.length > 0 ? ` — ${restockFailures.length} item(s) failed to restock` : ''),
+      staffMemberId,
+      staffUserId
+    );
 
-    await logHistory(id, 'archived', mode === 'manual' ? 'Manually restock' : null, staffMemberId, staffUserId);
+    if (restockFailures.length > 0) {
+      console.error(`Restock partially failed for return ${id}:`, restockFailures);
+    }
 
-    res.json({ success: true, status: 'archived' });
+    // 只有当这个 return 里所有"收到过"的 item 都已经 restocked_quantity = received_quantity，
+    // 才自动 archive；否则留在 refunded，让商家之后继续处理剩下的
+    const remainingItems = await getRestockRemaining(id);
+    if (remainingItems.length === 0) {
+      await db.prepare(`
+        UPDATE returns SET status = 'archived', pre_archive_status = 'refunded', archived_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(id);
+      await logHistory(id, 'archived', null, staffMemberId, staffUserId);
+      return res.json({ success: true, status: 'archived', restockFailures });
+    }
+
+    res.json({
+      success: true,
+      status: 'refunded',
+      restockedAny,
+      restockFailures,
+      remainingItems: remainingItems.map(i => ({
+        id: i.id,
+        productTitle: i.product_title,
+        variantTitle: i.variant_title,
+        remaining: i.received_quantity - i.restocked_quantity
+      }))
+    });
   } catch (error) {
     console.error('Error restocking return:', error);
     res.status(500).json({ error: 'Failed to restock return: ' + error.message });
+  }
+});
+
+// DELETE /api/returns/:id — 彻底删除（不是软删除），只允许对 archived 状态的 return 操作
+// 方案文档 6.8.8：archived 状态下右栏按钮卡片只剩一个 Delete，点击后物理删除数据
+// return_items / return_item_question_answers / return_status_history 都是 ON DELETE CASCADE，删主表会连带清掉
+router.delete('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const returnRecord = await db.prepare('SELECT * FROM returns WHERE id = ?').get(id);
+    if (!returnRecord) {
+      return res.status(404).json({ error: 'Return not found' });
+    }
+    if (returnRecord.status !== 'archived') {
+      return res.status(400).json({ error: 'Only archived returns can be deleted' });
+    }
+
+    await db.prepare('DELETE FROM returns WHERE id = ?').run(id);
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting return:', error);
+    res.status(500).json({ error: 'Failed to delete return: ' + error.message });
   }
 });
 

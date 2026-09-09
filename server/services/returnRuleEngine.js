@@ -122,6 +122,22 @@ function ruleMatchesReturn(rule, items, orderContext) {
   return rule.group_logic === 'OR' ? groupResults.some(Boolean) : groupResults.every(Boolean);
 }
 
+// 🆕 判断某条规则是否命中单个 item（不考虑 matchAllItems，用于校验 replacement 是否真的被解锁，
+// 以及顾客选品页面的实时置灰预判 preview-restrictions）
+// 跟 ruleMatchesReturn 的区别：这里只有一个 item，不需要"至少一个/全部"这套聚合逻辑，
+// 每个 group 直接用这一个 item 判定（item-scope 的 group）或只看 orderContext（非 item-scope 的 group）
+function ruleAppliesToItem(rule, item, orderContext) {
+  const groupResults = rule.condition_groups.map(group => {
+    const hasItemScopeCondition = group.conditions.some(c =>
+      c.property.startsWith('product.') || c.property === 'return.reason'
+    );
+    const target = hasItemScopeCondition ? { ...orderContext, item } : { ...orderContext, item: null };
+    return evaluateConditionGroup(group, target);
+  });
+
+  return rule.group_logic === 'OR' ? groupResults.some(Boolean) : groupResults.every(Boolean);
+}
+
 // 两个 action 是否互斥（同时命中时不能都生效）
 const ORDER_DISPOSITION_TYPES = ['skip_approval', 'require_approval', 'reject_return'];
 
@@ -223,4 +239,4 @@ async function evaluateRules(context) {
   };
 }
 
-module.exports = { evaluateRules };
+module.exports = { evaluateRules, ruleAppliesToItem };

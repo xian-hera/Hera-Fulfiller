@@ -1,5 +1,6 @@
 require('dotenv').config();
 const axios = require('axios');
+const db = require('../database/init');
 
 class KlaviyoClient {
   constructor() {
@@ -9,6 +10,22 @@ class KlaviyoClient {
 
     if (!this.apiKey) {
       console.error('ERROR: KLAVIYO_API_KEY is not set!');
+    }
+  }
+
+  // Settings > Klaviyo Integration 里每个 event 的 on/off 开关，默认全部开
+  // toggleKey: 'request_submitted' | 'approved' | 'rejected' | 'received' | 'refund_issued'
+  async isEventEnabled(toggleKey) {
+    try {
+      const row = await db.prepare(
+        `SELECT value FROM return_settings WHERE key = 'klaviyo_event_toggles'`
+      ).get();
+      if (!row || !row.value) return true;
+      const toggles = JSON.parse(row.value);
+      return toggles[toggleKey] !== false;
+    } catch (error) {
+      console.error('Error reading Klaviyo event toggles, defaulting to enabled:', error.message);
+      return true;
     }
   }
 
@@ -78,6 +95,7 @@ class KlaviyoClient {
   // ── 5 个 Return 相关 event 的封装（对应方案文档 8.1） ────────────────────
 
   async trackReturnRequestSubmitted(customerEmail, { orderName, orderId, items }) {
+    if (!(await this.isEventEnabled('request_submitted'))) return null;
     return this.trackEvent('Return request submitted', customerEmail, {
       order_name: orderName,
       order_id: orderId,
@@ -93,6 +111,7 @@ class KlaviyoClient {
     orderName, orderId, customerFirstName, returnMethod, locationName,
     trackingNumber, qrCodeImage, labelPublicUrl, approvedItems, rejectedItems
   }) {
+    if (!(await this.isEventEnabled('approved'))) return null;
     return this.trackEvent('Return request approved', customerEmail, {
       order_name: orderName,
       order_id: orderId,
@@ -108,6 +127,7 @@ class KlaviyoClient {
   }
 
   async trackReturnRequestRejected(customerEmail, { orderName, orderId, rejectedItems, rejectionMessage }) {
+    if (!(await this.isEventEnabled('rejected'))) return null;
     return this.trackEvent('Return request rejected', customerEmail, {
       order_name: orderName,
       order_id: orderId,
@@ -117,6 +137,7 @@ class KlaviyoClient {
   }
 
   async trackReturnReceived(customerEmail, { orderName, orderId, receivedItems }) {
+    if (!(await this.isEventEnabled('received'))) return null;
     return this.trackEvent('Return received', customerEmail, {
       order_name: orderName,
       order_id: orderId,
@@ -125,6 +146,7 @@ class KlaviyoClient {
   }
 
   async trackRefundIssued(customerEmail, { orderName, orderId, refundAmount, refundMethod }) {
+    if (!(await this.isEventEnabled('refund_issued'))) return null;
     return this.trackEvent('Refund issued', customerEmail, {
       order_name: orderName,
       order_id: orderId,

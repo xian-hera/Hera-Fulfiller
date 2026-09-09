@@ -7,7 +7,10 @@ const Dashboard = () => {
   const navigate = useNavigate();
 
   return (
-    <Page title="Hera Beauté Fulfiller">
+    <Page
+      title="Hera Beauté Fulfiller"
+      primaryAction={{ content: 'Return', onAction: () => navigate('/return') }}
+    >
       <Layout>
         <Layout.Section>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1rem' }}>

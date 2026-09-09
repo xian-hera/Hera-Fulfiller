@@ -13,6 +13,12 @@ import ErrorBoundary from './components/ErrorBoundary';
 import TransferPlanner from './pages/TransferPlanner';
 import ConnecteamTask from './pages/ConnecteamTask';
 import ShopifyTransfer from './pages/ShopifyTransfer';
+import ReturnsList from './pages/return/ReturnsList';
+import ReturnDetail from './pages/return/ReturnDetail';
+import ReturnSettings from './pages/return/ReturnSettings';
+import ReturnRules from './pages/return/ReturnRules';
+import ReturnRuleDetail from './pages/return/ReturnRuleDetail';
+import ReturnPortal from './pages/return/ReturnPortal';
 
 function App() {
   return (
@@ -28,7 +34,13 @@ function App() {
             <Route path="/settings" element={<Settings />} />
             <Route path="/transfer-planner" element={<TransferPlanner />} />
             <Route path="/connecteam-task" element={<ConnecteamTask />} />
-            <Route path="/shopify-transfer" element={<ShopifyTransfer />} />            
+            <Route path="/shopify-transfer" element={<ShopifyTransfer />} />
+            <Route path="/return" element={<ReturnsList />} />
+            <Route path="/return/settings" element={<ReturnSettings />} />
+            <Route path="/return/rules" element={<ReturnRules />} />
+            <Route path="/return/rules/:id" element={<ReturnRuleDetail />} />
+            <Route path="/return/portal" element={<ReturnPortal />} />
+            <Route path="/return/:id" element={<ReturnDetail />} />
           </Routes>
         </Router>
       </ErrorBoundary>

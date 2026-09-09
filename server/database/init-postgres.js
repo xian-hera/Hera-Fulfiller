@@ -3,9 +3,10 @@ const { Client } = require('pg');
 const DATABASE_URL = process.env.DATABASE_URL;
 
 async function initPostgres() {
+  // 跟 adapter.js 保持一致：不再按 NODE_ENV 判断，Render Postgres 固定要求 SSL（见 adapter.js 注释）
   const client = new Client({
     connectionString: DATABASE_URL,
-    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+    ssl: { rejectUnauthorized: false }
   });
 
   await client.connect();
@@ -248,6 +249,7 @@ async function initPostgres() {
       customer_first_name TEXT,
       customer_last_name TEXT,
       status TEXT DEFAULT 'awaiting_approval',
+      pre_archive_status TEXT,
       auto_approved BOOLEAN DEFAULT FALSE,
       return_method TEXT,
       return_location_id TEXT,
@@ -255,6 +257,10 @@ async function initPostgres() {
       tracking_number TEXT,
       label_url TEXT,
       label_fee NUMERIC,
+      label_qr_code TEXT,
+      label_public_url_expiry TIMESTAMP,
+      last_tracking_event TEXT,
+      last_tracking_date TIMESTAMP,
       internal_return_note TEXT,
       order_fulfilled_date TIMESTAMP,
       order_subtotal NUMERIC,
@@ -284,6 +290,7 @@ async function initPostgres() {
       approved_quantity INTEGER DEFAULT 0,
       received_quantity INTEGER DEFAULT 0,
       refunded_quantity INTEGER DEFAULT 0,
+      restocked_quantity INTEGER DEFAULT 0,
       replacement_provided_quantity INTEGER DEFAULT 0,
       approve_status TEXT DEFAULT 'pending',
       reason_id INTEGER,
@@ -460,6 +467,9 @@ async function initPostgres() {
     [`ALTER TABLE line_items ADD COLUMN IF NOT EXISTS lookups TEXT`, 'lookups to line_items'],
     // 🆕 Phone Numbers modal — capture mobile number from Connecteam
     [`ALTER TABLE connecteam_users ADD COLUMN IF NOT EXISTS phone_number TEXT`, 'phone_number to connecteam_users'],
+    // 🆕 Return restock 追踪：跟 received/refunded_quantity 一样的模式，追踪已经分配 restock 的数量，
+    // 用来判定 refunded 状态下要不要自动 archive（见 returns.js 的 PATCH /:id/restock）
+    [`ALTER TABLE return_items ADD COLUMN IF NOT EXISTS restocked_quantity INTEGER DEFAULT 0`, 'restocked_quantity to return_items'],
   ];
 
   for (const [sql, desc] of migrations) {

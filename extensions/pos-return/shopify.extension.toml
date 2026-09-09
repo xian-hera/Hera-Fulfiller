@@ -1,0 +1,21 @@
+api_version = "2026-04"
+
+[[extensions]]
+name = "Online return"
+handle = "pos-return"
+type = "ui_extension"
+uid = "60aa2ab8-c63e-48ed-a650-0f0a36d44e2b204585cdc400"
+
+[[extensions.targeting]]
+module = "./src/Tile.jsx"
+target = "pos.home.tile.render"
+
+[[extensions.targeting]]
+module = "./src/Modal.jsx"
+target = "pos.home.modal.render"
+
+# 需要 network_access 才能用 fetch() 打我们自己的后端（方案文档 7.6）；
+# api_access 用来拿 Session API（shopify.session.getSessionToken() / currentSession）
+[extensions.capabilities]
+network_access = true
+api_access = true

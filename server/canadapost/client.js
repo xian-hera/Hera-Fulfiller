@@ -684,11 +684,13 @@ class CanadaPostClient {
   // 走 QR code 路线（create-public-key + create-qr-code），不用 Get Artifact 取 PDF
   // 返回 { trackingPin, qrCodeBase64, publicUrl, publicUrlExpiryDate }
   // ============================================================
-  async createAuthorizedReturn({ returnerInfo, receiverInfo, serviceCode = 'DOM.EP', customerRef1 }) {
+  // labelType: 'label_free'（默认，create-public-key + create-qr-code，网点扫码打印）| 'printing_at_home'（只要 create-public-key，顾客自己下载 PDF 打印）
+  // boxFree: Settings > Canada Post Integration 里的 Box-free 开关（见方案文档 8.2.4/9.6.2），合并后包裹要在 47cm×61cm×5cm 唇边信封袋 + <22kg 才能勾
+  async createAuthorizedReturn({ returnerInfo, receiverInfo, serviceCode = 'DOM.EP', customerRef1, labelType = 'label_free', boxFree = false }) {
     console.log('\n========== CANADA POST CREATE AUTHORIZED RETURN ==========');
     console.log(`Returner: ${returnerInfo.name}, ${returnerInfo.city}`);
     console.log(`Receiver: ${receiverInfo.name || receiverInfo.company}, ${receiverInfo.city}`);
-    console.log(`Service code: ${serviceCode}`);
+    console.log(`Service code: ${serviceCode}, Label type: ${labelType}, Box-free: ${boxFree}`);
 
     const returnerXml = `
     <returner>
@@ -719,7 +721,8 @@ class CanadaPostClient {
     const requestXml = `<?xml version="1.0" encoding="utf-8"?>
 <authorized-return xmlns="http://www.canadapost.ca/ws/authreturn-v2">
   <create-public-key>true</create-public-key>
-  <create-qr-code>true</create-qr-code>
+  ${labelType === 'label_free' ? '<create-qr-code>true</create-qr-code>' : ''}
+  ${boxFree ? '<box-free>true</box-free>' : ''}
   <service-code>${serviceCode}</service-code>
   ${returnerXml}
   ${receiverXml}

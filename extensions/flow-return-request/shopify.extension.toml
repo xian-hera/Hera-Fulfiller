@@ -1,0 +1,43 @@
+# Flow Trigger Extension（方案文档 8.1.1）："New return request"
+# 每当顾客提交一个新的退货申请，后端就会调 flowTriggerReceive 触发这个 trigger（见
+# server/shopify/client.js 的 triggerFlow() + server/routes/returns.js 的 POST / 里的调用）。
+# 商家自己在 Shopify Flow 后台新建一条 Flow：Trigger 选这个 "New return request"，
+# Action 选内置的 "Send internal email notification" 或 "Send Slack message"，完全在 Flow 后台配置，
+# 不需要我们碰任何外部邮件/Slack 服务商。
+#
+# ⚠️ handle 这里写死为 "new-return-request"，必须跟 server/shopify/client.js 里 triggerFlow() 调用时
+# 传的 handle 完全一致——这个 handle 一旦跑过 `shopify app dev`/`deploy` 就不能再改，改名字只能改 name。
+#
+# 已跟 Shopify 官方文档（shopify.dev/docs/apps/build/flow/triggers）核实过这份 toml 的格式、
+# 字段类型清单、以及 payload key 的映射规则，不是猜测。
+
+[[extensions]]
+name = "New return request"
+type = "flow_trigger"
+handle = "new-return-request"
+description = "Fires whenever a customer submits a new return request through the return portal, so merchants can set up internal email or Slack notifications for it in Shopify Flow."
+
+[settings]
+
+  [[settings.fields]]
+  type = "order_reference"
+
+  [[settings.fields]]
+  type = "single_line_text_field"
+  key = "Order name"
+
+  [[settings.fields]]
+  type = "single_line_text_field"
+  key = "Customer name"
+
+  [[settings.fields]]
+  type = "email"
+  key = "Customer email"
+
+  [[settings.fields]]
+  type = "single_line_text_field"
+  key = "Return method"
+
+  [[settings.fields]]
+  type = "single_line_text_field"
+  key = "Item count"
