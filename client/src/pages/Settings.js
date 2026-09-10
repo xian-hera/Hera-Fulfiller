@@ -57,10 +57,12 @@ const Settings = () => {
 
   // ── Scanner — UI state & saved state ──────────────────────
   const [scannerUI, setScannerUI] = useState({
-    enabled: false, picker: false, packingOrders: false, packer: false, transfer: false
+    enabled: false, picker: false, packingOrders: false, packer: false, transfer: false,
+    repeatScanWindowSeconds: 5 // 🆕 Packing Orders 页面重复扫描（quantity>1）的等待窗口
   });
   const [scannerSaved, setScannerSaved] = useState({
-    enabled: false, picker: false, packingOrders: false, packer: false, transfer: false
+    enabled: false, picker: false, packingOrders: false, packer: false, transfer: false,
+    repeatScanWindowSeconds: 5
   });
   const [scannerSaving, setScannerSaving] = useState(false);
   const scannerDirty =
@@ -68,7 +70,8 @@ const Settings = () => {
     scannerUI.picker !== scannerSaved.picker ||
     scannerUI.packingOrders !== scannerSaved.packingOrders ||
     scannerUI.packer !== scannerSaved.packer ||
-    scannerUI.transfer !== scannerSaved.transfer;
+    scannerUI.transfer !== scannerSaved.transfer ||
+    scannerUI.repeatScanWindowSeconds !== scannerSaved.repeatScanWindowSeconds;
 
   // ── Pack & Label It — UI state & saved state ───────────────
   const [packLabelUI, setPackLabelUI] = useState({ enabled: false });
@@ -112,12 +115,20 @@ const Settings = () => {
       setLengthUnit(s.length_unit || 'inch');
       setWeightUnit(s.weight_unit || 'gram');
 
+      // 🆕 重复扫描等待窗口：只允许 5/10/15，读到别的值（没存过、或脏数据）一律回退成 5
+      const allowedRepeatWindows = [5, 10, 15];
+      const parsedRepeatWindow = parseInt(s.scanner_repeat_window_seconds, 10);
+      const repeatScanWindowSeconds = allowedRepeatWindows.includes(parsedRepeatWindow)
+        ? parsedRepeatWindow
+        : 5;
+
       const scannerVals = {
         enabled: s.scanner_enabled === 'true',
         picker: s.scanner_picker === 'true',
         packingOrders: s.scanner_packing_orders === 'true',
         packer: s.scanner_packer === 'true',
-        transfer: s.scanner_transfer === 'true'
+        transfer: s.scanner_transfer === 'true',
+        repeatScanWindowSeconds
       };
       setScannerUI(scannerVals);
       setScannerSaved(scannerVals);
@@ -167,6 +178,7 @@ const Settings = () => {
         scannerPackingOrders: scannerUI.packingOrders,
         scannerPacker: scannerUI.packer,
         scannerTransfer: scannerUI.transfer,
+        repeatScanWindowSeconds: scannerUI.repeatScanWindowSeconds,
       });
       setScannerSaved({ ...scannerUI });
       showMessage('Scanner settings saved');
@@ -539,6 +551,23 @@ const Settings = () => {
                   disabled={!scannerUI.enabled}
                   onChange={v => handleScannerToggle('packingOrders', v)}
                 />
+                {/* 🆕 quantity > 1 的 item 重复扫描时，两次扫描之间的等待窗口；
+                    超过这个时长没有再扫到同一个 item，扫描进度会被清零，需要重新开始 */}
+                <div style={{ paddingLeft: '26px', maxWidth: '260px' }}>
+                  <Select
+                    label="Repeat-scan window"
+                    labelHidden={false}
+                    disabled={!scannerUI.enabled || !scannerUI.packingOrders}
+                    options={[
+                      { label: '5 seconds', value: '5' },
+                      { label: '10 seconds', value: '10' },
+                      { label: '15 seconds', value: '15' },
+                    ]}
+                    value={String(scannerUI.repeatScanWindowSeconds)}
+                    onChange={v => setScannerUI(prev => ({ ...prev, repeatScanWindowSeconds: parseInt(v, 10) }))}
+                    helpText="For items with quantity > 1: how long to wait between scans before resetting progress"
+                  />
+                </div>
                 <CheckRow
                   id="scanner-packer"
                   label="Enable scanner in Packer"

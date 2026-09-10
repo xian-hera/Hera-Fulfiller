@@ -443,7 +443,16 @@ router.post('/update-multiple', async (req, res) => {
 // 🆕 Update scanner settings
 router.post('/scanner', async (req, res) => {
   try {
-    const { scannerEnabled, scannerPicker, scannerPackingOrders, scannerPacker, scannerTransfer } = req.body;
+    const {
+      scannerEnabled, scannerPicker, scannerPackingOrders, scannerPacker, scannerTransfer,
+      repeatScanWindowSeconds
+    } = req.body;
+
+    // 🆕 Packing Orders 页面重复扫描（quantity>1 的 item）等待窗口，只允许 5/10/15 秒，
+    // 其他值一律回退成 5，避免脏数据存进去
+    const allowedRepeatWindows = [5, 10, 15];
+    const parsedRepeatWindow = parseInt(repeatScanWindowSeconds, 10);
+    const safeRepeatWindow = allowedRepeatWindows.includes(parsedRepeatWindow) ? parsedRepeatWindow : 5;
 
     const upsert = db.prepare(`
       INSERT INTO settings (key, value, updated_at)
@@ -458,6 +467,7 @@ router.post('/scanner', async (req, res) => {
     upsert.run('scanner_packing_orders', scannerPackingOrders ? 'true' : 'false');
     upsert.run('scanner_packer', scannerPacker ? 'true' : 'false');
     upsert.run('scanner_transfer', scannerTransfer ? 'true' : 'false');
+    upsert.run('scanner_repeat_window_seconds', String(safeRepeatWindow));
 
     res.json({ success: true });
   } catch (error) {

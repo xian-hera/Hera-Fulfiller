@@ -97,6 +97,12 @@ const OrderDetail = () => {
 
   // 🆕 Scanner mode 状态
   const [scannerPackingOrdersEnabled, setScannerPackingOrdersEnabled] = useState(false);
+  // 🆕 quantity > 1 的 item 重复扫描时，两次扫描之间的等待窗口（秒），可在 Settings 里改（5/10/15）
+  const [repeatScanWindowSeconds, setRepeatScanWindowSeconds] = useState(5);
+  const repeatScanWindowRef = useRef(5);
+  useEffect(() => {
+    repeatScanWindowRef.current = repeatScanWindowSeconds;
+  }, [repeatScanWindowSeconds]);
   // 🆕 扫码高亮状态: { [itemId]: 'scanned' | 'already_checked' | 'confirm_needed' }
   const [scanHighlight, setScanHighlight] = useState({});
   // 🆕 no match 弹窗
@@ -170,6 +176,11 @@ const OrderDetail = () => {
       const response = await axios.get('/api/settings');
       const s = response.data.settings || {};
       setScannerPackingOrdersEnabled(s.scanner_enabled === 'true' && s.scanner_packing_orders === 'true');
+
+      // 🆕 重复扫描等待窗口，只允许 5/10/15，读到别的值一律回退成 5
+      const allowedRepeatWindows = [5, 10, 15];
+      const parsedRepeatWindow = parseInt(s.scanner_repeat_window_seconds, 10);
+      setRepeatScanWindowSeconds(allowedRepeatWindows.includes(parsedRepeatWindow) ? parsedRepeatWindow : 5);
     } catch (error) {
       console.error('Error fetching scanner settings:', error);
     }
@@ -594,10 +605,10 @@ const OrderDetail = () => {
           }, 5000);
           scrollToItem(itemId);
         } else {
-          // 还没到 total，更新进度，重新计时 5 秒
+          // 还没到 total，更新进度，重新计时（时长由 Settings 里的 repeat-scan window 决定）
           repeatScanRef.current = { itemId, count: newCount };
           setScanProgress(prev => ({ ...prev, [itemId]: newCount }));
-          repeatScanTimerRef.current = setTimeout(() => clearRepeatScan(itemId), 5000);
+          repeatScanTimerRef.current = setTimeout(() => clearRepeatScan(itemId), repeatScanWindowRef.current * 1000);
           scrollToItem(itemId);
         }
         return;
@@ -658,7 +669,7 @@ const OrderDetail = () => {
       repeatScanRef.current = { itemId: firstUnchecked.id, count: 1 };
       setScanProgress(prev => ({ ...prev, [firstUnchecked.id]: 1 }));
       setScanHighlight(prev => ({ ...prev, [firstUnchecked.id]: 'confirm_needed' }));
-      repeatScanTimerRef.current = setTimeout(() => clearRepeatScan(firstUnchecked.id), 5000);
+      repeatScanTimerRef.current = setTimeout(() => clearRepeatScan(firstUnchecked.id), repeatScanWindowRef.current * 1000);
       scrollToItem(firstUnchecked.id);
       return;
     }
