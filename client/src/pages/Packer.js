@@ -15,6 +15,7 @@ import {
 } from '@shopify/polaris';
 import { SortIcon } from '@shopify/polaris-icons';
 import RefundLabelModal from '../components/RefundLabelModal';
+import { cleanBarcode, matchesBarcode, resolveBarcodeSku } from '../utils/barcodeMatch';
 
 // 🆕 Scanner helper functions
 function resolveKey(e) {
@@ -32,10 +33,6 @@ function resolveKey(e) {
     if (sym[e.code]) return sym[e.code];
   }
   return null;
-}
-
-function cleanBarcode(raw) {
-  return raw.replace(/^[^0-9]+/, '');
 }
 
 const Packer = () => {
@@ -168,14 +165,24 @@ const Packer = () => {
   };
 
   // 🆕 处理 Packer 扫码逻辑
-  const handleScan = useCallback((barcode) => {
+  const handleScan = useCallback(async (barcode) => {
     const allOrders = ordersRef.current;
     const currentFilter = statusFilterRef.current;
 
-    // 匹配所有 order 中所有 item 的 SKU（不限 status）
-    const matchedOrders = allOrders.filter(order =>
-      order.lineItems && order.lineItems.some(item => item.sku === barcode)
+    const findMatchedOrders = (value) => allOrders.filter(order =>
+      order.lineItems && order.lineItems.some(item => matchesBarcode(item, value))
     );
+
+    // 匹配所有 order 中所有 item 的 SKU / 历史 lookups（不限 status）
+    let matchedOrders = findMatchedOrders(barcode);
+
+    // 🆕 本地按 SKU/lookups 都匹配不到时，实时向 Shopify 查一次这个 barcode 对应的 SKU
+    if (matchedOrders.length === 0) {
+      const resolvedSku = await resolveBarcodeSku(barcode);
+      if (resolvedSku) {
+        matchedOrders = findMatchedOrders(resolvedSku);
+      }
+    }
 
     if (matchedOrders.length === 0) {
       setShowNoMatch(true);

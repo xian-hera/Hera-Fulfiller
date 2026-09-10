@@ -5,7 +5,7 @@ const db = require('../database/init');
 class ShopifyClient {
   constructor() {
     this.shopUrl = process.env.SHOPIFY_SHOP_NAME || process.env.SHOPIFY_STORE_URL;
-    this.apiVersion = '2025-01';
+    this.apiVersion = '2026-07';
     this._client = null;
     this._token = null;
 
@@ -112,6 +112,38 @@ class ShopifyClient {
     } catch (error) {
       console.error('Error fetching SKUs for lookup product GIDs:', error.response?.data || error.message);
       return [];
+    }
+  }
+
+  // 🆕 扫码兜底：本地按 SKU 匹配失败时，用扫到的 barcode 实时向 Shopify 查这个 barcode
+  // 属于哪个 variant 的 SKU。用的是 barcode: 搜索过滤器——Shopify 已确认这个过滤器命中
+  // variant 身上任一个 barcode（不限主 barcode），所以不需要读取完整的多 barcode 列表
+  // （那个字段目前还只在 unstable schema 里，稳定版拿不到）。
+  async getSkuByBarcode(barcode) {
+    try {
+      const client = await this.getClient();
+      const query = `
+        query getVariantByBarcode($query: String!) {
+          productVariants(first: 1, query: $query) {
+            edges { node { id sku } }
+          }
+        }
+      `;
+      const response = await client.post('/graphql.json', {
+        query,
+        variables: { query: `barcode:${barcode}` }
+      });
+
+      if (response.data.errors) {
+        console.error('GraphQL errors in getSkuByBarcode:', JSON.stringify(response.data.errors));
+        return null;
+      }
+
+      const edges = response.data?.data?.productVariants?.edges || [];
+      return edges[0]?.node?.sku || null;
+    } catch (error) {
+      console.error('Error resolving SKU by barcode:', error.response?.data || error.message);
+      return null;
     }
   }
 

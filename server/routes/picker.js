@@ -45,7 +45,7 @@ async function getBatchMTL10Inventory(skus) {
                 }
                 inventoryItem {
                   id
-                  inventoryLevels(first: 50) {
+                  inventoryLevels(first: 50, includeInactive: true) {
                     edges {
                       node {
                         location {

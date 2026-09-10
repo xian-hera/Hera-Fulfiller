@@ -22,6 +22,7 @@ import {
 } from '@shopify/polaris';
 import { SortIcon, ImageIcon } from '@shopify/polaris-icons';
 import NumericKeypad from '../components/NumericKeypad';
+import { cleanBarcode, matchesBarcode, resolveBarcodeSku } from '../utils/barcodeMatch';
 
 // 🆕 Scanner helper functions
 function resolveKey(e) {
@@ -39,10 +40,6 @@ function resolveKey(e) {
     if (sym[e.code]) return sym[e.code];
   }
   return null;
-}
-
-function cleanBarcode(raw) {
-  return raw.replace(/^[^0-9]+/, '');
 }
 
 const Picker = () => {
@@ -524,15 +521,6 @@ const Picker = () => {
     return sku.match(/.{1,4}/g)?.join(' ') || sku;
   };
 
-  // 🆕 判断扫到的 barcode 是否匹配该 item：main SKU 或 lookups 里的任一 barcode
-  const matchesBarcode = (item, barcode) => {
-    if (item.sku === barcode) return true;
-    if (item.lookups) {
-      return item.lookups.split(',').map(s => s.trim()).includes(barcode);
-    }
-    return false;
-  };
-
   // 🆕 滚动到指定 item
   const scrollToItem = (itemId) => {
     const el = document.getElementById(`picker-item-${itemId}`);
@@ -547,9 +535,19 @@ const Picker = () => {
     const currentFilter = statusFilterRef.current;
 
     // 只匹配当前可见状态的 item（不可见的不去管）
-    const visibleMatches = allItems.filter(
+    let visibleMatches = allItems.filter(
       item => matchesBarcode(item, barcode) && currentFilter.includes(item.picker_status)
     );
+
+    // 🆕 本地按 SKU/lookups 都匹配不到时，实时向 Shopify 查一次这个 barcode 对应的 SKU
+    if (visibleMatches.length === 0) {
+      const resolvedSku = await resolveBarcodeSku(barcode);
+      if (resolvedSku) {
+        visibleMatches = allItems.filter(
+          item => item.sku === resolvedSku && currentFilter.includes(item.picker_status)
+        );
+      }
+    }
 
     const flashHighlight = (itemId, color) => {
       setScanHighlight(prev => ({ ...prev, [itemId]: color }));

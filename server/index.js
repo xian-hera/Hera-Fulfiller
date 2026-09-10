@@ -14,6 +14,7 @@ const settingsRoutes = require('./routes/settings');
 const webhookRoutes = require('./routes/webhooks');
 const connecteamRoutes = require('./routes/connecteam');
 const shopifyTransferRoutes = require('./routes/shopify-transfer');
+const barcodeRoutes = require('./routes/barcode');
 const verifyWebhook = require('./middleware/webhookVerification');
 
 const app = express();
@@ -98,6 +99,7 @@ app.use('/api/webhooks', verifyWebhook, webhookRoutes);
 app.use('/api/connecteam', connecteamRoutes);
 app.use('/api/shopify-transfer', shopifyTransferRoutes);
 app.use('/api/gift', giftRoutes);
+app.use('/api/barcode', barcodeRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

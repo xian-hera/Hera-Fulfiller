@@ -226,7 +226,7 @@ async function getInventoryBySku(sku) {
               sku
               inventoryItem {
                 id
-                inventoryLevels(first: 50) {
+                inventoryLevels(first: 50, includeInactive: true) {
                   edges {
                     node {
                       location {
@@ -694,7 +694,7 @@ router.post('/check-planner-stock', async (req, res) => {
                   sku
                   inventoryItem {
                     id
-                    inventoryLevels(first: 50) {
+                    inventoryLevels(first: 50, includeInactive: true) {
                       edges {
                         node {
                           location {

@@ -17,6 +17,7 @@ import {
 import { ImageIcon, ChevronLeftIcon, ChevronRightIcon } from '@shopify/polaris-icons';
 import WeightInputModal from '../components/WeightInputModal';
 import CompleteOrderModal from '../components/CompleteOrderModal';
+import { cleanBarcode, matchesBarcode, resolveBarcodeSku } from '../utils/barcodeMatch';
 
 // 🆕 Scanner helper functions (从 ManagerRestockPlan.js 移植)
 function resolveKey(e) {
@@ -34,19 +35,6 @@ function resolveKey(e) {
     if (sym[e.code]) return sym[e.code];
   }
   return null;
-}
-
-function cleanBarcode(raw) {
-  return raw.replace(/^[^0-9]+/, '');
-}
-
-// 🆕 判断扫到的 barcode 是否匹配该 item：main SKU 或 lookups 里的任一 barcode
-function matchesBarcode(item, barcode) {
-  if (item.sku === barcode) return true;
-  if (item.lookups) {
-    return item.lookups.split(',').map(s => s.trim()).includes(barcode);
-  }
-  return false;
 }
 
 const OrderDetail = () => {
@@ -626,7 +614,15 @@ const OrderDetail = () => {
 
     // ── 没有进行中的重复扫描 session：正常匹配流程 ──────────────────────
     // 与当前 order 内所有 item 的 SKU / lookups 比对
-    const matchedItems = items.filter(item => matchesBarcode(item, barcode));
+    let matchedItems = items.filter(item => matchesBarcode(item, barcode));
+
+    // 🆕 本地按 SKU/lookups 都匹配不到时，实时向 Shopify 查一次这个 barcode 对应的 SKU
+    if (matchedItems.length === 0) {
+      const resolvedSku = await resolveBarcodeSku(barcode);
+      if (resolvedSku) {
+        matchedItems = items.filter(item => item.sku === resolvedSku);
+      }
+    }
 
     if (matchedItems.length === 0) {
       setShowNoMatch(true);

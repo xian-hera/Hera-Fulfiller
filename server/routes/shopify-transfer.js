@@ -8,7 +8,7 @@ const db = require('../database/init');
 // ============================================================================
 
 const SHOP = process.env.SHOPIFY_SHOP_NAME || 'beaute-hera.myshopify.com';
-const API_VERSION = '2025-07';
+const API_VERSION = '2026-07';
 const GQL_URL = `https://${SHOP}/admin/api/${API_VERSION}/graphql.json`;
 
 // 从数据库 sessions 表读取当前 access token（token 不再放在环境变量里）

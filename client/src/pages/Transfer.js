@@ -17,6 +17,7 @@ import {
   Frame,
 } from '@shopify/polaris';
 import { ImageIcon } from '@shopify/polaris-icons';
+import { cleanBarcode, matchesBarcode, resolveBarcodeSku } from '../utils/barcodeMatch';
 
 // 🆕 Scanner helper functions（跟 Picker.js / OrderDetail.js 保持一致）
 function resolveKey(e) {
@@ -34,10 +35,6 @@ function resolveKey(e) {
     if (sym[e.code]) return sym[e.code];
   }
   return null;
-}
-
-function cleanBarcode(raw) {
-  return raw.replace(/^[^0-9]+/, '');
 }
 
 const Transfer = () => {
@@ -79,15 +76,6 @@ const Transfer = () => {
   const showToast = (message) => {
     setToastMessage(message);
     setToastActive(true);
-  };
-
-  // 🆕 判断扫到的 barcode 是否匹配该 item：main SKU 或 lookups 里的任一 barcode
-  const matchesBarcode = (item, barcode) => {
-    if (item.sku === barcode) return true;
-    if (item.lookups) {
-      return item.lookups.split(',').map(s => s.trim()).includes(barcode);
-    }
-    return false;
   };
 
   const fetchItems = useCallback(async () => {
@@ -393,7 +381,15 @@ const Transfer = () => {
     setShopifyTransferFilter(null);
 
     const allItems = itemsRef.current;
-    const matched = allItems.filter(item => matchesBarcode(item, barcode));
+    let matched = allItems.filter(item => matchesBarcode(item, barcode));
+
+    // 🆕 本地按 SKU/lookups 都匹配不到时，实时向 Shopify 查一次这个 barcode 对应的 SKU
+    if (matched.length === 0) {
+      const resolvedSku = await resolveBarcodeSku(barcode);
+      if (resolvedSku) {
+        matched = allItems.filter(item => item.sku === resolvedSku);
+      }
+    }
 
     const flashGreen = (itemId) => {
       setScanHighlight(prev => ({ ...prev, [itemId]: 'scanned' }));

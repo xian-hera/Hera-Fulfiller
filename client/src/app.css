@@ -41,3 +41,12 @@ body {
     max-height: calc(100vh - var(--shopify-safe-area-inset-bottom, 0px));
   }
 }
+
+/* 🆕 --shopify-safe-area-inset-bottom 在 Android 上似乎拿不到宿主 App 底部导航栏的
+   真实高度（iOS 上没问题），单靠它算 padding/max-height 不够。这里额外保证 Modal 内容
+   一定可以滚动，配合具体页面（比如 Picker 的数字键盘）自己加的底部占位空间，
+   让用户可以把被挡住的内容滚到导航栏上方，而不是依赖算出一个精确的安全区高度。 */
+.Polaris-Modal__Body {
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch;
+}
