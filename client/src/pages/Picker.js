@@ -949,6 +949,22 @@ const Picker = () => {
           margin-top: 30px;
         }
 
+        /* 🆕 Android 端 Shopify App 底部原生导航栏会盖住键盘最后一行（0 和退格键），
+           iOS 上没有这个问题。之前用 --shopify-safe-area-inset-bottom 加 padding 试过，
+           但这个变量在 Android 上似乎拿不到正确的值，所以这里换一个不依赖它的办法：
+           在键盘下面加一段占位空间，让内容总高度超出可视区域，用户可以往下滚动，把最后
+           一行滚到导航栏上方，而不是指望一次性算出导航栏的精确高度。 */
+        .keypad-bottom-safe-spacer {
+          height: 0;
+          flex-shrink: 0;
+        }
+
+        @media (max-width: 768px) {
+          .keypad-bottom-safe-spacer {
+            height: 130px;
+          }
+        }
+
         /* 手机响应式 (600px 以下) */
         @media (max-width: 600px) {
           .picker-item-container {
@@ -1173,6 +1189,8 @@ const Picker = () => {
                     onNumberClick={handleNumberClick}
                     onBackspace={handleBackspace}
                   />
+                  {/* 🆕 Android 上被原生导航栏挡住的安全间距，见上面 .keypad-bottom-safe-spacer 的注释 */}
+                  <div className="keypad-bottom-safe-spacer" />
                 </div>
               </div>
             )}
