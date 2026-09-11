@@ -21,7 +21,6 @@ import {
   Frame
 } from '@shopify/polaris';
 import { SortIcon, ImageIcon } from '@shopify/polaris-icons';
-import NumericKeypad from '../components/NumericKeypad';
 import { cleanBarcode, matchesBarcode, resolveBarcodeSku } from '../utils/barcodeMatch';
 
 // 🆕 Scanner helper functions
@@ -53,6 +52,8 @@ const Picker = () => {
   const [selectedImage, setSelectedImage] = useState(null);
   const [quantityModal, setQuantityModal] = useState(null);
   const [pickedQuantity, setPickedQuantity] = useState('');
+  // 🆕 系统数字键盘：Quantity Modal 打开时聚焦这个 input，弹出系统原生数字键盘
+  const quantityInputRef = useRef(null);
   const [mtl10Inventory, setMtl10Inventory] = useState({});
   const [isLoadingInventory, setIsLoadingInventory] = useState(false);
   const [cleanModal, setCleanModal] = useState(null);
@@ -453,13 +454,15 @@ const Picker = () => {
     updateItemStatus(item.id, 'picking');
   };
 
-  const handleNumberClick = (number) => {
-    setPickedQuantity(prev => prev + number);
-  };
-
-  const handleBackspace = () => {
-    setPickedQuantity(prev => prev.slice(0, -1));
-  };
+  // 🆕 Quantity Modal 打开时，延迟一下再 focus，让系统数字键盘弹出
+  useEffect(() => {
+    if (quantityModal) {
+      const timer = setTimeout(() => {
+        quantityInputRef.current?.focus();
+      }, 150);
+      return () => clearTimeout(timer);
+    }
+  }, [quantityModal]);
 
   const handleQuantitySubmit = async () => {
     const qty = parseInt(pickedQuantity);
@@ -945,26 +948,6 @@ const Picker = () => {
           margin-bottom: 30px;
         }
 
-        .picker-modal-keypad {
-          margin-top: 30px;
-        }
-
-        /* 🆕 Android 端 Shopify App 底部原生导航栏会盖住键盘最后一行（0 和退格键），
-           iOS 上没有这个问题。之前用 --shopify-safe-area-inset-bottom 加 padding 试过，
-           但这个变量在 Android 上似乎拿不到正确的值，所以这里换一个不依赖它的办法：
-           在键盘下面加一段占位空间，让内容总高度超出可视区域，用户可以往下滚动，把最后
-           一行滚到导航栏上方，而不是指望一次性算出导航栏的精确高度。 */
-        .keypad-bottom-safe-spacer {
-          height: 0;
-          flex-shrink: 0;
-        }
-
-        @media (max-width: 768px) {
-          .keypad-bottom-safe-spacer {
-            height: 130px;
-          }
-        }
-
         /* 手机响应式 (600px 以下) */
         @media (max-width: 600px) {
           .picker-item-container {
@@ -1160,37 +1143,41 @@ const Picker = () => {
               <div className="picker-modal-content">
                 <div className="picker-modal-input-section">
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <div style={{
-                      flex: 1,
-                      border: '2px solid #c4cdd5',
-                      borderRadius: '8px',
-                      padding: '12px 16px',
-                      backgroundColor: '#ffffff',
-                      minHeight: '50px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: pickedQuantity ? '#000000' : '#8c9196',
-                      fontSize: pickedQuantity ? '24px' : '11px',
-                      fontWeight: pickedQuantity ? 'bold' : 'normal',
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                    }}>
-                      {pickedQuantity || 'Enter the quantity you have, 0 means you have none'}
-                    </div>
+                    <input
+                      ref={quantityInputRef}
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      value={pickedQuantity}
+                      placeholder="Enter the quantity you have, 0 means you have none"
+                      onChange={(e) => {
+                        // 只保留数字，防止系统键盘/输入法塞进别的字符
+                        setPickedQuantity(e.target.value.replace(/[^0-9]/g, ''));
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleQuantitySubmit();
+                        }
+                      }}
+                      style={{
+                        flex: 1,
+                        border: '2px solid #c4cdd5',
+                        borderRadius: '8px',
+                        padding: '12px 16px',
+                        backgroundColor: '#ffffff',
+                        minHeight: '50px',
+                        color: '#000000',
+                        fontSize: pickedQuantity ? '24px' : '14px',
+                        fontWeight: pickedQuantity ? 'bold' : 'normal',
+                        textAlign: 'center',
+                        outline: 'none',
+                      }}
+                    />
                     <Button variant="primary" onClick={handleQuantitySubmit}>
                       Submit
                     </Button>
                   </div>
-                </div>
-
-                <div className="picker-modal-keypad" style={{ marginTop: '4px' }}>
-                  <NumericKeypad
-                    onNumberClick={handleNumberClick}
-                    onBackspace={handleBackspace}
-                  />
-                  {/* 🆕 Android 上被原生导航栏挡住的安全间距，见上面 .keypad-bottom-safe-spacer 的注释 */}
-                  <div className="keypad-bottom-safe-spacer" />
                 </div>
               </div>
             )}
