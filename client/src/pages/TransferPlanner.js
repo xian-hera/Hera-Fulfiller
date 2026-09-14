@@ -27,6 +27,8 @@ const TransferPlanner = () => {
   const [isLoadingInventory, setIsLoadingInventory] = useState(false);
   const [toastActive, setToastActive] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
+  // 🆕 Shopify Transfer 创建失败时用红色 critical banner 提示，比 toast 更醒目，且不会自动消失
+  const [shopifyErrorBanner, setShopifyErrorBanner] = useState(null);
 
   const LOCATIONS = ['01', '02', '03', '04', '05', '06', '07', '08', '09', '11'];
   const LOCATION_MAP = {
@@ -179,15 +181,19 @@ const TransferPlanner = () => {
 
       const shopifyResult = response.data?.shopifyTransfer;
       if (shopifyResult?.errors?.length > 0) {
-        showToast(`Updated ${itemsToUpdate.length} items, but Shopify Transfer had issues: ${shopifyResult.errors.join('; ')}`);
+        // 🆕 Shopify Transfer 没有正常创建成功：用红色 critical banner 提示，且不自动跳转，
+        // 让用户能看清楚出了什么问题、哪些 location 失败了，再自己决定下一步。
+        setShopifyErrorBanner(
+          `Items were updated locally, but Shopify Transfer creation had issues: ${shopifyResult.errors.join('; ')}`
+        );
+        showToast(`Updated ${itemsToUpdate.length} items, but Shopify Transfer had issues`);
       } else {
         showToast(`Updated ${itemsToUpdate.length} items`);
+        // 🆕 只有 Shopify Transfer 也顺利创建成功时才自动跳转，避免把红色错误提示一闪而过
+        setTimeout(() => {
+          navigate('/connecteam-task');
+        }, 1000);
       }
-
-      // 🆕 提交后直接跳转到 Connecteam Task 页面，提醒用户去发布 task（不需要携带任何预选）
-      setTimeout(() => {
-        navigate('/connecteam-task');
-      }, 1000);
     } catch (error) {
       console.error('Error submitting:', error);
       showToast('Failed to update items');
@@ -366,6 +372,18 @@ const TransferPlanner = () => {
         backAction={{ content: 'Back', onAction: () => navigate('/transfer') }}
       >
         <Layout>
+          {/* 🆕 Shopify Transfer 创建失败时的红色 critical banner，放在页面最上面，不会自动消失 */}
+          {shopifyErrorBanner && (
+            <Layout.Section>
+              <Banner
+                tone="critical"
+                title="Shopify Transfer creation failed"
+                onDismiss={() => setShopifyErrorBanner(null)}
+              >
+                <p>{shopifyErrorBanner}</p>
+              </Banner>
+            </Layout.Section>
+          )}
           {/* 筛选区 */}
           <Layout.Section>
             <Card>

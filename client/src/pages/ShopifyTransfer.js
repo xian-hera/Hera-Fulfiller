@@ -245,7 +245,8 @@ const ShopifyTransfer = () => {
       const { results, errors } = res.data;
       let msg = results.map(r => `MTL${r.location}: #${r.transferNumber} (${r.itemCount} items)`).join(', ');
       if (errors.length > 0) msg += ` | Errors: ${errors.join('; ')}`;
-      setResultBanner({ tone: errors.length > 0 ? 'warning' : 'success', message: msg });
+      // 🆕 有 errors 就用红色 critical banner（不管是部分失败还是全部失败），比原来的黄色 warning 更醒目
+      setResultBanner({ tone: errors.length > 0 ? 'critical' : 'success', message: msg });
       await fetchItems();
       setSelectedItemIds([]);
     } catch (err) {
@@ -264,7 +265,7 @@ const ShopifyTransfer = () => {
       const { results, errors } = res.data;
       let msg = results.map(r => `MTL${r.location}: added ${r.itemsAdded} items to #${r.transferNumber}`).join(', ');
       if (errors.length > 0) msg += ` | Errors: ${errors.join('; ')}`;
-      setResultBanner({ tone: errors.length > 0 ? 'warning' : 'success', message: msg });
+      setResultBanner({ tone: errors.length > 0 ? 'critical' : 'success', message: msg });
       await fetchItems();
       setSelectedItemIds([]);
     } catch (err) {

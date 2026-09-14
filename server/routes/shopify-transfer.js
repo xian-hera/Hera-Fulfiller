@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
+const crypto = require('crypto');
 const db = require('../database/init');
 
 // ============================================================================
@@ -83,9 +84,13 @@ async function createShopifyTransfer(fromLocation, lineItems, settings) {
 
   if (!originId) throw new Error(`Unknown location: MTL${fromLocation}`);
 
+  // 🆕 Shopify 从 2026-04 版本起，inventoryTransferCreate 等一批库存相关 mutation 强制要求
+  // 带 @idempotent(key: ...) 指令，不带会在运行时报错（不是 schema 校验错误，是调用时报错）。
+  // 详见 claude/HERA_FULFILLER_BARCODE_API_MIGRATION.md 里记录的这次升级排查。
+  const idempotencyKey = crypto.randomUUID();
   const data = await gql(`
     mutation CreateTransfer($input: InventoryTransferCreateInput!) {
-      inventoryTransferCreate(input: $input) {
+      inventoryTransferCreate(input: $input) @idempotent(key: "${idempotencyKey}") {
         inventoryTransfer {
           id
           name
@@ -196,9 +201,11 @@ async function markTransferAsTransferred(transferId, lineItems) {
     quantity: li.totalQuantity,
   }));
 
+  // 🆕 同样需要 @idempotent，见上面 createShopifyTransfer 里的注释
+  const shipmentIdempotencyKey = crypto.randomUUID();
   const shipData = await gql(`
     mutation CreateShipment($input: InventoryShipmentCreateInput!) {
-      inventoryShipmentCreate(input: $input) {
+      inventoryShipmentCreate(input: $input) @idempotent(key: "${shipmentIdempotencyKey}") {
         inventoryShipment { id status }
         userErrors { field message }
       }
@@ -225,12 +232,14 @@ async function markTransferAsTransferred(transferId, lineItems) {
   `);
 
   // 4. Receive (bulk accept)
+  // 🆕 同样需要 @idempotent，见上面 createShopifyTransfer 里的注释
+  const receiveIdempotencyKey = crypto.randomUUID();
   const receiveData = await gql(`
     mutation {
       inventoryShipmentReceive(
         id: "${shipmentId}",
         bulkReceiveAction: ACCEPTED
-      ) {
+      ) @idempotent(key: "${receiveIdempotencyKey}") {
         inventoryShipment { id status }
         userErrors { field message }
       }
