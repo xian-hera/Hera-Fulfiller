@@ -15,6 +15,7 @@ const webhookRoutes = require('./routes/webhooks');
 const connecteamRoutes = require('./routes/connecteam');
 const shopifyTransferRoutes = require('./routes/shopify-transfer');
 const barcodeRoutes = require('./routes/barcode');
+const ordersRoutes = require('./routes/orders');
 const verifyWebhook = require('./middleware/webhookVerification');
 
 const app = express();
@@ -100,6 +101,7 @@ app.use('/api/connecteam', connecteamRoutes);
 app.use('/api/shopify-transfer', shopifyTransferRoutes);
 app.use('/api/gift', giftRoutes);
 app.use('/api/barcode', barcodeRoutes);
+app.use('/api/orders', ordersRoutes); // 🆕 Home 页 Add Order（手动从 Shopify 导入订单）
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -132,7 +134,11 @@ const server = http.createServer(app);
 const { initWebSocket } = require('./websocket');
 initWebSocket(server);
 
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+// 等数据库连上、建表迁移跑完（db.ready，见 database/init.js）再开始监听端口。
+// 原来是立刻 listen，迁移还在后台跑时进来的请求会报 500。
+db.ready.then(() => {
+  server.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  });
 });

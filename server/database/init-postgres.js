@@ -1,12 +1,9 @@
 const { Client } = require('pg');
-
-const DATABASE_URL = process.env.DATABASE_URL;
+const { getPgConfig } = require('./pgConfig');
 
 async function initPostgres() {
-  const client = new Client({
-    connectionString: DATABASE_URL,
-    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
-  });
+  // 连接配置（含 SSL 规则）跟 adapter.js 共用，见 pgConfig.js
+  const client = new Client(getPgConfig());
 
   await client.connect();
 

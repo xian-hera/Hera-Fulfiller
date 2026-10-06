@@ -240,6 +240,42 @@ class ShopifyClient {
     }
   }
 
+  // 🆕 Add Order 功能：按订单名（如 "#1234"）在 Shopify 查订单，返回 REST 订单 ID。
+  // 用户可能输入 "1234" 或 "#1234"，两种都试；只接受名字完全一致的结果（不区分大小写），
+  // 避免搜索模糊匹配到别的订单。
+  // 注意：没有 read_all_orders 权限时，Shopify 只返回最近 60 天的订单。
+  async findOrderIdByName(rawName) {
+    const input = String(rawName || '').trim();
+    if (!input) return null;
+
+    const candidates = input.startsWith('#') ? [input] : [input, `#${input}`];
+    const normalize = (n) => String(n || '').trim().toLowerCase();
+
+    const client = await this.getClient();
+    const query = `
+      query findOrderByName($query: String!) {
+        orders(first: 5, query: $query) {
+          edges { node { legacyResourceId name } }
+        }
+      }
+    `;
+
+    for (const candidate of candidates) {
+      const escaped = candidate.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+      const response = await client.post('/graphql.json', {
+        query,
+        variables: { query: `name:"${escaped}"` }
+      });
+      if (response.data.errors) {
+        throw new Error('Shopify GraphQL error: ' + JSON.stringify(response.data.errors));
+      }
+      const edges = response.data?.data?.orders?.edges || [];
+      const match = edges.find(e => normalize(e.node.name) === normalize(candidate));
+      if (match) return match.node.legacyResourceId;
+    }
+    return null;
+  }
+
   async fulfillOrder(orderId, lineItems) {
     try {
       const client = await this.getClient();

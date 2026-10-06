@@ -1,13 +1,23 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Page, Layout, Card, Button } from '@shopify/polaris';
-import { PackageIcon, TransferIcon, OrderIcon, SettingsIcon } from '@shopify/polaris-icons';
+import { PackageIcon, TransferIcon, OrderIcon, SettingsIcon, PlusIcon } from '@shopify/polaris-icons';
+import AddOrderModal from '../components/AddOrderModal';
 
 const Dashboard = () => {
   const navigate = useNavigate();
+  const [addOrderOpen, setAddOrderOpen] = useState(false);
 
   return (
-    <Page title="Hera Beauté Fulfiller">
+    <Page
+      title="Hera Beauté Fulfiller"
+      primaryAction={{ content: 'Add Order', icon: PlusIcon, onAction: () => setAddOrderOpen(true) }}
+    >
+      <AddOrderModal
+        open={addOrderOpen}
+        onClose={() => setAddOrderOpen(false)}
+        onGoToPicker={() => { setAddOrderOpen(false); navigate('/picker'); }}
+      />
       <Layout>
         <Layout.Section>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1rem' }}>

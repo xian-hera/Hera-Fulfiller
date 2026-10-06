@@ -1,4 +1,7 @@
 const db = require('../database/init');
+// 2026-10：移除了 SQLite 版本，只保留 PostgreSQL。
+// 注意：scheduleCleanup() 目前没有任何地方调用，所以这个清理不会自动运行，
+// 只能从 Settings 页面手动触发（routes/settings.js 调用 cleanupOldData）。
 
 // 清理 60 天前的所有订单和相关数据
 async function cleanupOldData() {
@@ -8,99 +11,50 @@ async function cleanupOldData() {
   console.log(`Starting cleanup for data older than ${sixtyDaysAgo.toISOString()}`);
 
   try {
-    if (db.type === 'postgres') {
-      // PostgreSQL 版本
-      // 1. 获取要删除的订单
-      const oldOrders = await db.prepare(`
-        SELECT shopify_order_id, name FROM orders 
-        WHERE created_at < $1
-      `).all(sixtyDaysAgo.toISOString());
+    // 1. 获取要删除的订单
+    const oldOrders = await db.prepare(`
+      SELECT shopify_order_id, name FROM orders 
+      WHERE created_at < $1
+    `).all(sixtyDaysAgo.toISOString());
 
-      if (oldOrders.length === 0) {
-        console.log('No old data to clean up');
-        return { deleted: 0 };
-      }
-
-      console.log(`Found ${oldOrders.length} orders to delete`);
-
-      // 2. 删除 transfer_items（先删除，因为引用 line_items）
-      const transferDeleted = await db.prepare(`
-        DELETE FROM transfer_items 
-        WHERE shopify_order_id IN (
-          SELECT shopify_order_id FROM orders WHERE created_at < $1
-        )
-      `).run(sixtyDaysAgo.toISOString());
-
-      console.log(`Deleted ${transferDeleted.changes} transfer items`);
-
-      // 3. 删除 line_items
-      const lineItemsDeleted = await db.prepare(`
-        DELETE FROM line_items 
-        WHERE shopify_order_id IN (
-          SELECT shopify_order_id FROM orders WHERE created_at < $1
-        )
-      `).run(sixtyDaysAgo.toISOString());
-
-      console.log(`Deleted ${lineItemsDeleted.changes} line items`);
-
-      // 4. 删除 orders
-      const ordersDeleted = await db.prepare(`
-        DELETE FROM orders WHERE created_at < $1
-      `).run(sixtyDaysAgo.toISOString());
-
-      console.log(`Deleted ${ordersDeleted.changes} orders`);
-
-      return {
-        deleted: oldOrders.length,
-        orders: oldOrders.map(o => o.name)
-      };
-
-    } else {
-      // SQLite 版本
-      // 1. 获取要删除的订单
-      const oldOrders = db.db.prepare(`
-        SELECT shopify_order_id, name FROM orders 
-        WHERE created_at < ?
-      `).all(sixtyDaysAgo.toISOString());
-
-      if (oldOrders.length === 0) {
-        console.log('No old data to clean up');
-        return { deleted: 0 };
-      }
-
-      console.log(`Found ${oldOrders.length} orders to delete`);
-
-      const orderIds = oldOrders.map(o => o.shopify_order_id);
-      const placeholders = orderIds.map(() => '?').join(',');
-
-      // 2. 删除 transfer_items
-      const transferDeleted = db.db.prepare(`
-        DELETE FROM transfer_items 
-        WHERE shopify_order_id IN (${placeholders})
-      `).run(...orderIds);
-
-      console.log(`Deleted ${transferDeleted.changes} transfer items`);
-
-      // 3. 删除 line_items
-      const lineItemsDeleted = db.db.prepare(`
-        DELETE FROM line_items 
-        WHERE shopify_order_id IN (${placeholders})
-      `).run(...orderIds);
-
-      console.log(`Deleted ${lineItemsDeleted.changes} line items`);
-
-      // 4. 删除 orders
-      const ordersDeleted = db.db.prepare(`
-        DELETE FROM orders WHERE created_at < ?
-      `).run(sixtyDaysAgo.toISOString());
-
-      console.log(`Deleted ${ordersDeleted.changes} orders`);
-
-      return {
-        deleted: oldOrders.length,
-        orders: oldOrders.map(o => o.name)
-      };
+    if (oldOrders.length === 0) {
+      console.log('No old data to clean up');
+      return { deleted: 0 };
     }
+
+    console.log(`Found ${oldOrders.length} orders to delete`);
+
+    // 2. 删除 transfer_items（先删除，因为引用 line_items）
+    const transferDeleted = await db.prepare(`
+      DELETE FROM transfer_items 
+      WHERE shopify_order_id IN (
+        SELECT shopify_order_id FROM orders WHERE created_at < $1
+      )
+    `).run(sixtyDaysAgo.toISOString());
+
+    console.log(`Deleted ${transferDeleted.changes} transfer items`);
+
+    // 3. 删除 line_items
+    const lineItemsDeleted = await db.prepare(`
+      DELETE FROM line_items 
+      WHERE shopify_order_id IN (
+        SELECT shopify_order_id FROM orders WHERE created_at < $1
+      )
+    `).run(sixtyDaysAgo.toISOString());
+
+    console.log(`Deleted ${lineItemsDeleted.changes} line items`);
+
+    // 4. 删除 orders
+    const ordersDeleted = await db.prepare(`
+      DELETE FROM orders WHERE created_at < $1
+    `).run(sixtyDaysAgo.toISOString());
+
+    console.log(`Deleted ${ordersDeleted.changes} orders`);
+
+    return {
+      deleted: oldOrders.length,
+      orders: oldOrders.map(o => o.name)
+    };
   } catch (error) {
     console.error('Cleanup error:', error);
     throw error;
