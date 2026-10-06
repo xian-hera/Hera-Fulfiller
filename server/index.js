@@ -30,13 +30,60 @@ app.use(express.json({
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // ---- Shopify OAuth ----
+// 🔒 2026-10 加固：
+//   - shop 参数必须是 xxx.myshopify.com 格式，并且（配置了 SHOPIFY_SHOP_NAME 时）必须就是我们自己的店
+//     —— 之前不校验，别人构造 /auth/callback?shop=恶意域名，服务器就会把 SHOPIFY_API_SECRET 发过去
+//   - 校验 Shopify 回调带的 hmac 签名（证明请求确实来自 Shopify）
+//   - 校验 state（发起授权时存在 cookie 里，回调时必须一致，防 CSRF）
+//   - 页面输出的 shop / scope 做 HTML 转义
+const crypto = require('crypto');
+
+const SHOP_DOMAIN_RE = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/i;
+const OAUTH_STATE_COOKIE = 'shopify_oauth_state';
+
+function isAllowedShop(shop) {
+  if (!shop || !SHOP_DOMAIN_RE.test(shop)) return false;
+  const configured = (process.env.SHOPIFY_SHOP_NAME || process.env.SHOPIFY_STORE_URL || '').toLowerCase();
+  return !configured || shop.toLowerCase() === configured;
+}
+
+// Shopify OAuth 回调 hmac：去掉 hmac 参数，其余按 key 排序拼成 a=1&b=2，用 App secret 做 HMAC-SHA256（hex）
+function isValidOAuthHmac(query) {
+  const { hmac, signature, ...rest } = query;
+  if (!hmac || !process.env.SHOPIFY_API_SECRET) return false;
+  const message = Object.keys(rest).sort()
+    .map(k => `${k}=${Array.isArray(rest[k]) ? rest[k].join(',') : rest[k]}`)
+    .join('&');
+  const expected = crypto.createHmac('sha256', process.env.SHOPIFY_API_SECRET).update(message).digest('hex');
+  const a = Buffer.from(expected, 'utf8');
+  const b = Buffer.from(String(hmac), 'utf8');
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+function readCookie(req, name) {
+  const header = req.headers.cookie || '';
+  const match = header.split(';').map(c => c.trim()).find(c => c.startsWith(name + '='));
+  return match ? decodeURIComponent(match.slice(name.length + 1)) : null;
+}
+
+const escapeHtml = (v) => String(v ?? '').replace(/[&<>"']/g, c => (
+  { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+));
+
 // 第一步：在浏览器里打开 /auth 来发起授权
 app.get('/auth', (req, res) => {
   const shop = req.query.shop || process.env.SHOPIFY_SHOP_NAME;
-  if (!shop) return res.status(400).send('Missing shop');
+  if (!isAllowedShop(shop)) return res.status(400).send('Invalid shop');
 
   const redirectUri = `${process.env.HOST}/auth/callback`;
-  const state = Math.random().toString(36).slice(2);
+  const state = crypto.randomBytes(16).toString('hex');
+  res.cookie(OAUTH_STATE_COOKIE, state, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 10 * 60 * 1000
+  });
+
   const installUrl =
     `https://${shop}/admin/oauth/authorize` +
     `?client_id=${process.env.SHOPIFY_API_KEY}` +
@@ -50,8 +97,22 @@ app.get('/auth', (req, res) => {
 // 第二步：Shopify 带着 ?code=... 跳回这里，换 token 并存进数据库
 app.get('/auth/callback', async (req, res) => {
   try {
-    const { code, shop } = req.query;
+    const { code, shop, state } = req.query;
     if (!code || !shop) return res.status(400).send('Missing code or shop parameter');
+    if (!isAllowedShop(shop)) {
+      console.warn(`[OAuth] Rejected callback for unexpected shop: ${shop}`);
+      return res.status(400).send('Invalid shop');
+    }
+    if (!isValidOAuthHmac(req.query)) {
+      console.warn('[OAuth] Rejected callback: invalid hmac');
+      return res.status(400).send('Invalid request signature');
+    }
+    const expectedState = readCookie(req, OAUTH_STATE_COOKIE);
+    if (!state || !expectedState || state !== expectedState) {
+      console.warn('[OAuth] Rejected callback: state mismatch');
+      return res.status(400).send('Invalid or expired authorization request. Please open /auth again.');
+    }
+    res.clearCookie(OAUTH_STATE_COOKIE);
 
     // 用 code 换 access token
     const response = await axios.post(`https://${shop}/admin/oauth/access_token`, {
@@ -80,14 +141,14 @@ app.get('/auth/callback', async (req, res) => {
 
     res.send(`
       <h2>✓ Authentication complete</h2>
-      <p><strong>Shop:</strong> ${shop}</p>
+      <p><strong>Shop:</strong> ${escapeHtml(shop)}</p>
       <p><strong>Granted Scopes:</strong></p>
-      <pre style="background:#f0f0f0;padding:16px">${scope}</pre>
+      <pre style="background:#f0f0f0;padding:16px">${escapeHtml(scope)}</pre>
       <p>Token 已存入数据库，app 可以正常工作了。无需手动填写任何环境变量。</p>
     `);
   } catch (error) {
     console.error('OAuth callback error:', error.response?.data || error.message);
-    res.status(500).send(`OAuth error: ${JSON.stringify(error.response?.data || error.message)}`);
+    res.status(500).send('OAuth error. Check the server logs for details.');
   }
 });
 

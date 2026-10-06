@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Modal, Text, Button, InlineStack, Badge } from '@shopify/polaris';
 import NumericKeypad from './NumericKeypad';
 import BoxTypeKeypad from './BoxTypeKeypad';
@@ -16,9 +16,21 @@ const CompleteOrderModal = ({
   const [orderWeight, setOrderWeight] = useState('');
   const [activeInput, setActiveInput] = useState('boxType');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // 用 ref 再挡一次：连点时 state 还没来得及更新，按钮可能被点到两次
+  const submittingRef = useRef(false);
+
+  // 🔒 每次弹窗打开（或切到另一张订单）都清空上一次的选择。
+  // 之前只在点 Cancel / X 时才清空；完成订单后父组件直接关弹窗并跳到下一单，
+  // 箱型和重量会被带到下一单，可能用错箱型/重量买运单。
   useEffect(() => {
-    setIsSubmitting(false);
-  }, [orderName]);
+    if (open) {
+      setBoxType('');
+      setOrderWeight('');
+      setActiveInput('boxType');
+      setIsSubmitting(false);
+      submittingRef.current = false;
+    }
+  }, [open, orderName]);
 
   const handleBoxTypeClick = (code) => {
     setBoxType(code);
@@ -36,7 +48,8 @@ const CompleteOrderModal = ({
     setOrderWeight(prev => prev.slice(0, -1));
   };
 
-  const handleComplete = () => {
+  const handleComplete = async () => {
+    if (submittingRef.current) return;
     if (!boxType) {
       alert('Please select a box type');
       return;
@@ -49,13 +62,19 @@ const CompleteOrderModal = ({
 
     const payload = { boxType, weight: orderWeight || null };
 
-    onComplete(payload);
+    submittingRef.current = true;
     setIsSubmitting(true);
-
-    // 不在这里 reset — 父组件处理完后会调 onClose → handleClose 统一 reset
+    try {
+      await onComplete(payload);
+    } finally {
+      // 请求结束（成功或失败）都解除"处理中"，失败时按钮不会一直卡在 Processing...
+      submittingRef.current = false;
+      setIsSubmitting(false);
+    }
   };
 
   const handleClose = () => {
+    if (submittingRef.current) return; // 正在买运单时不允许关闭
     setBoxType('');
     setOrderWeight('');
     setActiveInput('boxType');

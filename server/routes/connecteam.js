@@ -8,9 +8,28 @@ const db = require('../database/init');
 // ============================================================================
 
 const CONNECTEAM_BASE_URL = 'https://api.connecteam.com';
-const CLIENT_ID = process.env.CONNECTEAM_CLIENT_ID || 'ct_rmvsxhnixttsidlw_a2d4e84022cd6776c835c18bc0a6073a';
-const CLIENT_SECRET = process.env.CONNECTEAM_CLIENT_SECRET || 'OepjUJDMH490UoXGFCvwSGo8lCPp8NJj8Np4M8YiZh4';
-const API_KEY = process.env.CONNECTEAM_API_KEY || '81e988c4-e5b0-4cf0-ab66-52223ceff2ca';
+// 🔒 凭证只从环境变量读（Render → Environment），代码里不再写任何默认值。
+// 2026-10 之前这里有写死的 fallback 密钥，已进入 git 历史，所以那一套必须在 Connecteam 后台作废、换新。
+const CLIENT_ID = process.env.CONNECTEAM_CLIENT_ID;
+const CLIENT_SECRET = process.env.CONNECTEAM_CLIENT_SECRET;
+const API_KEY = process.env.CONNECTEAM_API_KEY;
+
+const missingConnecteamEnv = [
+  ['CONNECTEAM_CLIENT_ID', CLIENT_ID],
+  ['CONNECTEAM_CLIENT_SECRET', CLIENT_SECRET],
+  ['CONNECTEAM_API_KEY', API_KEY],
+].filter(([, v]) => !v).map(([k]) => k);
+if (missingConnecteamEnv.length) {
+  // 不让整个 app 启动失败（拣货/打包不依赖 Connecteam），只在日志里明确提示
+  console.error(`[Connecteam] Missing environment variables: ${missingConnecteamEnv.join(', ')} — Connecteam features will not work until they are set.`);
+}
+
+function requireConnecteamEnv(...names) {
+  const missing = names.filter(n => !process.env[n]);
+  if (missing.length) {
+    throw new Error(`Connecteam is not configured: missing ${missing.join(', ')} in the server environment.`);
+  }
+}
 const TASK_BOARD_ID = 6434396;
 const CUSTOM_PUBLISHER_ID = 2095242; // "Online Transfer" publisher
 
@@ -92,6 +111,7 @@ async function getAccessToken() {
   if (accessToken && tokenExpiry && Date.now() < tokenExpiry - 60000) {
     return accessToken;
   }
+  requireConnecteamEnv('CONNECTEAM_CLIENT_ID', 'CONNECTEAM_CLIENT_SECRET');
 
   const authString = Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString('base64');
   const params = new URLSearchParams();
@@ -199,6 +219,10 @@ async function getClockedInUserIds(locations) {
   });
 
   // 🆕 并发查询所有时钟的打卡状态（Connecteam 确认 Enterprise 计划无并发限制）
+  if (!API_KEY) {
+    console.error('[Connecteam] CONNECTEAM_API_KEY is not set — cannot check who is clocked in.');
+    return clockedInIds;
+  }
   await Promise.all([...clockIdsToCheck].map(async (clockId) => {
     try {
       const response = await axios.get(

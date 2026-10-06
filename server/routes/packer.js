@@ -276,7 +276,27 @@ router.patch('/items/:id/packer-status', async (req, res) => {
 });
 
 // 🆕 Complete order - with optional Pack & Label It flow
+// 🔒 防重复提交：同一张订单的 Complete 请求正在处理时（买运单期间），再来的请求直接拒绝。
+// 之前连点两次 / 网络重发会并发跑两遍，各自向 Canada Post 买一张付费运单。
+// 只锁"正在处理中"，处理结束（成功或失败）立即释放，所以运单失败后照常可以重新 Complete。
+// Render 上只有一个实例，进程内的 Set 就够用。
+const completingOrders = new Set();
+
 router.post('/orders/:shopifyOrderId/complete', async (req, res) => {
+  const lockKey = String(req.params.shopifyOrderId);
+  if (completingOrders.has(lockKey)) {
+    console.warn(`⚠️ Duplicate complete request ignored for order ${lockKey} (already in progress)`);
+    return res.status(409).json({ error: 'This order is already being completed. Please wait.' });
+  }
+  completingOrders.add(lockKey);
+  try {
+    return await completeOrder(req, res);
+  } finally {
+    completingOrders.delete(lockKey);
+  }
+});
+
+async function completeOrder(req, res) {
   try {
     const { shopifyOrderId } = req.params;
     const { boxType, weight, customDimensions } = req.body;
@@ -624,7 +644,7 @@ router.post('/orders/:shopifyOrderId/complete', async (req, res) => {
     console.error('Error completing order:', error);
     res.status(500).json({ error: 'Failed to complete order: ' + error.message });
   }
-});
+}
 
 // 🆕 Get label options for an order
 router.get('/orders/:shopifyOrderId/label-options', async (req, res) => {
