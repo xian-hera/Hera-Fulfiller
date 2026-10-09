@@ -157,10 +157,11 @@ class OrderWebhookHandler {
             shopify_order_id, order_number, shopify_line_item_id, quantity,
             image_url, title, name, brand, size, weight, weight_unit, sku,
             url_handle, product_type, wig_number, custom_name, has_weight_warning, variant_title,
-            lookups, picker_status, packer_status
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            lookups, variant_id, picker_status, packer_status
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT (shopify_line_item_id) DO UPDATE SET
             quantity = EXCLUDED.quantity,
+            variant_id = COALESCE(NULLIF(line_items.variant_id, ''), EXCLUDED.variant_id),
             updated_at = CURRENT_TIMESTAMP
         `);
 
@@ -184,6 +185,7 @@ class OrderWebhookHandler {
           hasWeightWarning,
           item.variant_title || '',
           lookups,
+          item.variant_id ? item.variant_id.toString() : '',
           'picking',
           'packing'
         );
@@ -424,10 +426,11 @@ class OrderWebhookHandler {
               shopify_order_id, order_number, shopify_line_item_id, quantity,
               image_url, title, name, brand, size, weight, weight_unit, sku,
               url_handle, product_type, wig_number, custom_name, has_weight_warning, variant_title,
-              lookups, picker_status, packer_status, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+              lookups, variant_id, picker_status, packer_status, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT (shopify_line_item_id) DO UPDATE SET
               quantity = EXCLUDED.quantity,
+              variant_id = COALESCE(NULLIF(line_items.variant_id, ''), EXCLUDED.variant_id),
               updated_at = CURRENT_TIMESTAMP
           `);
 
@@ -451,6 +454,7 @@ class OrderWebhookHandler {
             hasWeightWarning,
             item.variant_title || '',
             lookups,
+            item.variant_id ? item.variant_id.toString() : '',
             'picking',
             'packing'
           );
@@ -478,8 +482,8 @@ class OrderWebhookHandler {
                 shopify_order_id, order_number, shopify_line_item_id, quantity,
                 image_url, title, name, brand, size, weight, weight_unit, sku,
                 url_handle, product_type, wig_number, custom_name, has_weight_warning, variant_title,
-                lookups, picker_status, packer_status, created_at
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                lookups, variant_id, picker_status, packer_status, created_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             `);
 
             await insertLineItem.run(
@@ -502,6 +506,7 @@ class OrderWebhookHandler {
               hasWeightWarning,
               item.variant_title || '',
               lookups,
+              item.variant_id ? item.variant_id.toString() : '',
               'picking',
               'packing'
             );

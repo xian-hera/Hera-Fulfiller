@@ -152,6 +152,21 @@ app.get('/auth/callback', async (req, res) => {
   }
 });
 
+// 🆕 custom.picked 同步：任何会改动数据的 /api 请求（拣货状态、拆分、订单 webhook、删除/清理订单……）
+// 结束后，触发一次重新计算（会合并成一次，只写有变化的 variant）。见 services/pickedSync.js
+const pickedSync = require('./services/pickedSync');
+app.use('/api', (req, res, next) => {
+  if (req.method !== 'GET' && !req.path.startsWith('/picker/heartbeat')) {
+    res.on('finish', () => pickedSync.requestReconcile());
+  }
+  next();
+});
+app.get('/api/picked-sync/status', (req, res) => res.json(pickedSync.getStatus()));
+app.post('/api/picked-sync/run', async (req, res) => {
+  await pickedSync.reconcile();
+  res.json(pickedSync.getStatus());
+});
+
 // API Routes
 app.use('/api/picker', pickerRoutes);
 app.use('/api/transfer', transferRoutes);
@@ -201,5 +216,7 @@ db.ready.then(() => {
   server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+    // 启动后在后台补齐旧数据的 variant_id 并全量同步一次 custom.picked（不阻塞启动）
+    pickedSync.start().catch(err => console.error('[PickedSync] start failed:', err.message));
   });
 });

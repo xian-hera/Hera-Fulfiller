@@ -266,6 +266,8 @@ async function initPostgres() {
     [`ALTER TABLE line_items ADD COLUMN IF NOT EXISTS lookups TEXT`, 'lookups to line_items'],
     // 🆕 Phone Numbers modal — capture mobile number from Connecteam
     [`ALTER TABLE connecteam_users ADD COLUMN IF NOT EXISTS phone_number TEXT`, 'phone_number to connecteam_users'],
+    // 🆕 custom.picked 同步需要知道每行对应哪个 Shopify variant（之前只存了 SKU）
+    [`ALTER TABLE line_items ADD COLUMN IF NOT EXISTS variant_id TEXT`, 'variant_id to line_items'],
   ];
 
   for (const [sql, desc] of migrations) {
@@ -367,6 +369,16 @@ async function initPostgres() {
   await client.query('CREATE INDEX IF NOT EXISTS idx_transfer_items_connecteam_tasked ON transfer_items(connecteam_tasked)');
   await client.query('CREATE INDEX IF NOT EXISTS idx_transfer_items_shopify_transferred ON transfer_items(shopify_transferred)');
   await client.query('CREATE INDEX IF NOT EXISTS idx_transfer_items_from ON transfer_items(transfer_from)');
+
+  // 🆕 custom.picked 同步：记录每个 variant 上一次写到 Shopify 的值（见 services/pickedSync.js）
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS picked_sync_state (
+      variant_id TEXT PRIMARY KEY,
+      last_value INTEGER NOT NULL DEFAULT 0,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  await client.query('CREATE INDEX IF NOT EXISTS idx_line_items_variant_id ON line_items(variant_id)');
 
   console.log('PostgreSQL database initialized successfully');
 

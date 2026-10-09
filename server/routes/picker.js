@@ -381,8 +381,8 @@ router.post('/items/:id/split', async (req, res) => {
         shopify_order_id, order_number, shopify_line_item_id, quantity,
         image_url, title, name, brand, size, weight, weight_unit, sku,
         url_handle, product_type, wig_number, custom_name, has_weight_warning, 
-        variant_title, lookups, picker_status, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'missing', CURRENT_TIMESTAMP)
+        variant_title, lookups, variant_id, picker_status, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'missing', CURRENT_TIMESTAMP)
       RETURNING id
     `).get(
       item.shopify_order_id,
@@ -403,7 +403,8 @@ router.post('/items/:id/split', async (req, res) => {
       item.custom_name,
       item.has_weight_warning,
       item.variant_title,
-      item.lookups
+      item.lookups,
+      item.variant_id || ''
     );
 
     // Create transfer item for missing quantity
